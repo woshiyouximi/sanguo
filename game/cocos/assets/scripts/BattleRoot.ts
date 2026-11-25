@@ -34,6 +34,7 @@ import { BattleBg } from './BattleBg';
 import { BattleHud } from './BattleHud';
 import { BattleWeather, ScreenTint } from './BattleWeather';
 import { camera, createWorld, settle, step, QI_MAX, TICK_HZ } from './core/battle';
+import { sangoRng } from './core/sango_rng';
 import { installArmyOrders } from './core/army_cmd';
 import { applyWise, applyWiseOnBattleStart } from './core/wises';
 import type { World } from './core/battle';
@@ -341,9 +342,14 @@ export class BattleRoot extends Component {
         streak: save.streak,
         bestStreak: save.bestStreak,
       };
+      // R115：原作乱数流（`0x450132`，见 core/sango_rng.ts）。web main.js:639 是
+      // `roll: sangoRng(cfg.seed ?? 1)` 与 `seed` 同源；Cocos 这里用同一个 seed，
+      // 战场的方向抽样 / 先扫哪一侧 / 命中 / AI 选令才与 web 逐位同流（`?seed=` 可复现）。
+      const seed = launch?.seed ?? 20261124;
       const world = createWorld({
         data,
-        seed: launch?.seed ?? 20261124,
+        seed,
+        roll: sangoRng(seed),
         terrain,
         month,
         // 天气：`?weather=N` 直给（web main.js 同款）；不给则仍由 month+terrain 推（battle.ts:524）
@@ -1287,10 +1293,10 @@ export class BattleRoot extends Component {
       const p = project(u.x, u.y, this.camX);
       if (p.y < FIELD_TOP - 40 || p.y > FIELD_BOTTOM + 40) continue;
       const r = isGeneral(u) ? 16 : 12;
-      // 主将贴边显示时（GeneralArt 的场内钳制）阴影也跟着贴，别让人物和影子分家
-      const pinned = isGeneral(u) && this.generalArt?.hasArt() ? this.generalArt.footAt(u.side) : null;
-      const sx = pinned ? pinned.x : p.x;
-      const sy = pinned ? pinned.y : p.y + 8;
+      // 主将的贴边钳制已移除（GeneralArt 改为「脚底出带即不画」），阴影直接落在真实脚底上；
+      // 这里与 GeneralArt 的 ±40 判据同口径，人物与影子必然同进同出。
+      const sx = p.x;
+      const sy = p.y + 8;
       g.ellipse(sx - HALF_W, HALF_H - sy, r, r * 0.42);
     }
     shadowA?.fill();

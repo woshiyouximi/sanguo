@@ -11,6 +11,9 @@ import { camera, cast, createWorld, defaultAim, fxTtlOf, QI_MAX, allRush, isRush
 // R115：原作乱数流（`0x450132`）。战斗的方向抽样（`0x43C2A5` 权重 `rand()%n`）、
 // 「先扫哪一侧」（`rand() & 1`）、AI 选令（`0x4687A0`）都改走这条流，同一 `?seed=` 可复现。
 import { sangoRng } from '../dist/core/sango_rng.js';
+// 開場叫陣（原作 SYSTEM.SO#StartBattle @0x2108）：編號規則 + 台詞原文都在 core/open_taunt.ts，
+// web 層只負責計時、運鏡與暫停/恢復 step。
+import { buildTauntSeq, regionFromCamera, tauntEnabled } from '../dist/core/open_taunt.js';
 import { knownMagicOf } from '../dist/core/capture.js';
 import { applyWise, applyWiseOnBattleStart } from '../dist/core/wises.js';
 import { ARMY_BTN, applyArmyCmd, applyArmyCmdKind, armyCmdDefOf, armyCmdsOf, armyOrderOf, installArmyOrders } from '../dist/core/army_cmd.js';
@@ -29,6 +32,9 @@ import {
 } from '../dist/view/battleView.js';
 import { DESIGN_H, DESIGN_W, FIELD, screenToCell } from '../dist/view/layout.js';
 import { COLORS } from '../dist/view/theme.js';
+// 出征兵數閉環（F23/F24）：戰損按 A 方存活比折算、倖存兵還回出發城。公式在 web/march_flow.js
+// 裡只有一份 —— deploy.html 出征扣兵用的也是同一個模組，兩頁不會各算一套。
+import { casualtySplitOf, returnToCity } from './march_flow.js';
 
 // [115_release] 调试口统一开关（见 web/devflags.js）：下面所有调试参数只有 ?dev=1 时才认。
 // devflags.js 没加载成功时退化成"全关"——缺省安全，宁可少一个调试功能也不让调试口裸奔。
@@ -52,6 +58,22 @@ const $ = (id) => document.getElementById(id);
 const QUERY = new URLSearchParams(location.search);
 /** ?defend=1：守城战。A 方永远是我方（玩家、背视），只是这一局"我方是守方"。 */
 const DEFEND = QUERY.get('defend') === '1';
+/**
+ * 出征回寫契約（F23/F24，deploy.html 出陣時帶進來）：
+ *   ?home=<城名>      出發城。**不是** from= —— from= 是入口標記 'campaign'（見下面 ENTRY_BATTLE）。
+ *   ?marchpool=<兵數> 這一仗隨軍出征、已離開出發城的兵
+ *                     （city 模式 = 這次真的從城裡扣走的；兵團模式 = 兵團總兵）。
+ * 缺 home 就整段兵損回寫跳過：老連結（只有 city=）維持原樣，不憑空扣任何城的兵。
+ */
+const MARCH_HOME = (QUERY.get('home') || '').trim();
+const MARCH_POOL_QUERY = Math.max(0, Math.trunc(Number(QUERY.get('marchpool')) || 0));
+/**
+ * 從大地圖「出征」/ 遭遇戰 / 守城直接進戰鬥頁：原作沒有預覽卡，建 world 後直接叫陣開打。
+ * 裸開 index.html（?seed= 調試）仍保留 ready 態與「開戰」按鈕。
+ */
+const ENTRY_BATTLE = QUERY.get('from') === 'campaign' || QUERY.get('encounter') === '1' || DEFEND;
+/** 開場叫陣開關：?taunt=0 關掉（回歸對拍用），其餘默認開。 */
+const TAUNT_ON = tauntEnabled(QUERY.get('taunt'));
 const canvas = $('stage');
 // [115_release] 画布可能不在（#stage 被裁剪、或浏览器不支持 Canvas2D）：这里不抛栈，
 // 由文件末尾的入口判断统一走 index.html 的兜底面板。
@@ -82,6 +104,10 @@ const state = {
   settlement: null,
   seed: 7,
   camX: 35,
+  // 開場叫陣：{ seq: TauntLine[], i, ticks } —— 非空時 frame() 不推進 step
+  taunt: null,
+  // 叫陣結束後的短暫定鏡（秒）：見 tickTaunt() 的註釋
+  camHold: null,
   time: 0,
   selectedSkill: null,
   aim: null,
@@ -751,6 +777,106 @@ function buildPreview() {
   state.message = null;
 }
 
+/**
+ * 主將在戰場上的 depth（`u.x`，鏡頭軸）。找不到就退回 `camera(world)`，運鏡不會跑飛。
+ * `isGeneral` 由 core 在 `battle.ts:1037-1046` 建立主將單位時置位。
+ */
+function generalUnitX(side) {
+  const world = state.world;
+  if (!world) return state.camX;
+  const unit = world.units.find((u) => u.isGeneral && u.side === side && u.alive !== false);
+  return unit ? unit.x : camera(world);
+}
+
+/**
+ * 建開場叫陣序列並把鏡頭硬切到第一位說話者（敵將 B）。
+ *
+ * 分區來源：原作 `0x206 ScreenRegionTest` 量的「兩個主將在螢幕哪一區」；重製版沒有 71×14
+ * 的螢幕格座標，先用鏡頭距離代理（`open_taunt.ts:regionFromCamera`，[推測] 見 REPORT）。
+ * @returns {boolean} 有沒有真的排出演出來
+ */
+function beginTaunt() {
+  if (!TAUNT_ON || !state.world) {
+    state.taunt = null;
+    return false;
+  }
+  const near = regionFromCamera(generalUnitX('A'), state.camX);
+  const far = regionFromCamera(generalUnitX('B'), state.camX);
+  const seq = buildTauntSeq({
+    near,
+    far,
+    // 與戰鬥隨機數分開：叫陣不能影響 step() 的 rand 序列，否則 ?taunt=0 的對拍會歪。
+    seed: (state.seed * 2654435761) >>> 0,
+    aName: state.world.sides.A.general?.name || '',
+    bName: state.world.sides.B.general?.name || '',
+  });
+  if (seq.length === 0) return false;
+  state.taunt = { seq, i: 0, ticks: 0 };
+  state.camX = generalUnitX(seq[0].side);
+  state.fxFocus = null;
+  state.fxFocusT = 0;
+  return true;
+}
+
+/** 推進一句台詞；到點就切下一句（鏡頭硬切說話方），兩段播完鏡頭回我方主將並恢復 step。 */
+function tickTaunt(dt) {
+  const taunt = state.taunt;
+  if (!taunt) return;
+  const line = taunt.seq[taunt.i];
+  if (!line) {
+    state.taunt = null;
+    return;
+  }
+  taunt.ticks += dt;
+  if (taunt.ticks < Math.max(0.2, line.holdTicks / TICK_HZ)) return;
+  taunt.ticks = 0;
+  taunt.i += 1;
+  if (taunt.i < taunt.seq.length) {
+    state.camX = generalUnitX(taunt.seq[taunt.i].side);
+    return;
+  }
+  // 兩段播完：鏡頭回「我方主將 − 2 行」（與 battle.ts 前線錨點同向：主將落在畫面下半，
+  // 前線仍在前方），計時器歸零後才恢復戰鬥（避免 dt 補步把剛亮的畫面跳掉）。
+  // camHold：battle.ts 的 camera() 目前錨在「我方前鋒 −2.6 行」（實測 48.4，主將 58 在畫面外），
+  // 叫陣剛結束就會被平滑拉走。這裡先定鏡 2s，等鏡頭錨點那條線修好後可整段刪掉。
+  state.taunt = null;
+  state.camX = generalUnitX('A') - 2;
+  state.camHold = { x: state.camX, t: 2 };
+  state.fxFocus = null;
+  state.fxFocusT = 0;
+  accumulator = 0;
+  lastTs = performance.now();
+  state.message = '開戰！';
+}
+
+/** 跳過整段叫陣（?dev=1 的同步步進 / DevTools / CDP 用）。 */
+function skipTaunt() {
+  if (!state.taunt) return;
+  state.taunt = null;
+  state.camX = generalUnitX('A') - 2;
+  state.camHold = { x: state.camX, t: 2 };
+  accumulator = 0;
+  lastTs = performance.now();
+}
+
+/** 給 view 層的台詞框資料（view 不做任何時序判斷）。 */
+function tauntViewData() {
+  const taunt = state.taunt;
+  if (!taunt) return null;
+  const line = taunt.seq[taunt.i];
+  if (!line) return null;
+  const name = line.side === 'A'
+    ? (state.world?.sides.A.general?.name || '')
+    : (state.world?.sides.B.general?.name || '');
+  return {
+    side: line.side,
+    name,
+    text: line.text,
+    t: taunt.ticks,
+    hold: line.holdTicks / TICK_HZ,
+  };
+}
+
 async function startBattle() {
   // 首战前把 MAGIC.SO 拉进来：技能不再是"猜的三类"，而是真跑原作字节码
   try { await initMagicProgram('../data/'); } catch (e) { console.warn('[battle] MAGIC.SO 预加载失败，技能将退化为占位特效', e); }
@@ -761,6 +887,8 @@ async function startBattle() {
   state.seed = built.seed;
   state.camX = camera(built.world);
   state.mode = 'fighting';
+  state.taunt = null;
+  state.camHold = null;
   state.settlement = null;
   state.selectedSkill = null;
   state.aim = null;
@@ -774,6 +902,9 @@ async function startBattle() {
     : built.bWiseName
       ? `敵軍技 ${built.bWiseName}；點技能格即施放。`
       : '點技能格即施放，不用選目標。';
+  // 開場叫陣：先亮台詞、鏡頭切到說話方，frame() 在 state.taunt 非空時不 step（凍結單位）。
+  // 兩段播完由 tickTaunt() 把鏡頭收回我方主將並恢復戰鬥；?taunt=0 時這裡直接 false。
+  beginTaunt();
   accumulator = 0;
   lastTs = performance.now();
   el.start.disabled = false;
@@ -949,6 +1080,21 @@ function writeBackCampaign() {
       save.streak = rec.streak;
       save.bestStreak = Math.max(save.bestStreak || 0, rec.bestStreak || 0);
     }
+    // 上一場戰鬥結果：給 campaign.html 的戰報/開場演出用。只增欄位、不動既有鍵，
+    // 且必須在下面 DEFEND/攻城兩條 setItem 之前賦值（寫入點在 :1002/:1009/:1019 附近）。
+    if (settleRes) {
+      const normName = (c) => String((c && c.name) || '').trim();
+      save.lastBattle = {
+        won: win === true,
+        defend: !!DEFEND,
+        city,
+        captured: (post ? post.captures.map(normName) : []).filter(Boolean),
+        joined: (post ? post.captures.filter((c) => c && c.recruited).map(normName) : []).filter(Boolean),
+        executed: (post ? post.executed.map(normName) : []).filter(Boolean),
+        dead: [],
+        ts: Date.now(),
+      };
+    }
     const aGeneral = state.world.sides.A.general;
     const bGeneral = state.world.sides.B.general;
     // 敵方沒有武將（空城）時 B 方 general.name 是空字串：别拿它当键写存档，
@@ -1009,7 +1155,40 @@ function writeBackCampaign() {
       localStorage.setItem(key, JSON.stringify(save));
       return `守城失敗：${city} 已失守（剩 ${save.owned.length} 城）。 ${tireNote} ${moraleNote}`;
     }
-    // 攻城战（原流程）
+    // 攻城战（原流程）：战果照旧写 owned/wins/losses（下面 if/else 不动）；F24 起还要把「出征兵损」
+    // 写回出发城，否则打完一场仗，出发城的兵数一个都不动（F24 的病灶，见 work/flow_audit §5）。
+    //
+    // 兵从哪来：city 模式在 deploy 确认出征时就扣了出发城的 `marchpool`；军团模式在 campaign 的
+    // dispatchArmy() 扣过（那笔兵在 save.armies[].troops 里）。两种都**不再扣城兵**，这里只做
+    // 「按 A 方存活比折算 → 幸存兵归建」，口径与守城分支（上面 :1126-1134）一致。
+    let marchNote = '';
+    if (MARCH_HOME) {
+      const armies = Array.isArray(save.armies) ? save.armies : [];
+      const army = armies.find((a) => a && a.side === 'A' && a.from === MARCH_HOME && a.to === city);
+      const pool = Math.min(600, MARCH_POOL_QUERY > 0
+        ? MARCH_POOL_QUERY
+        : Math.max(0, Math.trunc(Number(army && army.troops) || 0)));
+      const split = casualtySplitOf(pool, state.world.sides.A.start, state.world.sides.A.aliveCount);
+      const home = save.cities[MARCH_HOME]
+        || (save.cities[MARCH_HOME] = { troops: 0, pop: 0, money: 0 });
+      // 城池兵额上限 600（与 campaign.html 的 refundArmy() 同一口径）
+      const back = returnToCity(home, split.returned, { troopsCap: 600 });
+      home.troops = back.troops;
+      if (pool > 0) {
+        marchNote = `${MARCH_HOME} 兵 ${pool}→${home.troops}`
+          + `（損 ${split.loss}${split.returned > 0 ? `，歸建 ${split.returned}` : ''}）`;
+        if (split.loss > 0) {
+          logTo(save, `攻 ${city}：${MARCH_HOME} 損 ${split.loss} 兵`
+            + `（上陣 ${split.startFielded} 活 ${split.aliveCount}）`, win ? 'info' : 'lost');
+        }
+        if (back.overflow > 0) {
+          logTo(save, `${MARCH_HOME} 兵額已滿（600），${back.overflow} 兵歸建不進去`, 'info');
+        }
+      }
+      // 兵团解散：抵达城下时 campaign 已经 removeArmy()，但「行军直接进战斗」或旧档残留的同名
+      // 兵团还在 save.armies 里；不删掉下次回城会按兵团队列再处理一次。
+      if (army) save.armies = armies.filter((a) => a !== army);
+    }
     if (win) {
       save.wins += 1;
       if (!save.owned.includes(city)) save.owned.push(city);
@@ -1017,7 +1196,7 @@ function writeBackCampaign() {
       save.losses += 1;
     }
     localStorage.setItem(key, JSON.stringify(save));
-    return `戰果已寫回大地圖（${save.owned.length} 城）。 ${tireNote} ${moraleNote}`;
+    return `戰果已寫回大地圖（${save.owned.length} 城）。 ${marchNote}${marchNote ? ' ' : ''}${tireNote} ${moraleNote}`;
   } catch (err) {
     /* 隐私模式下 localStorage 可能不可用，静默 */
     return '';
@@ -1170,6 +1349,7 @@ function viewOptions() {
     seed: state.seed,
     aLabel: state.labels.a,
     bLabel: state.labels.b,
+    taunt: tauntViewData(),
   };
 }
 
@@ -1313,6 +1493,7 @@ function doCast(index, tx, ty) {
 }
 
 function onPointerDown(ev) {
+  if (state.taunt) return;   // 叫陣演出中不接受任何操作（原作喊話時也點不動）
   if (ev.button !== undefined && ev.button !== 0) {
     state.selectedSkill = null;
     state.aim = null;
@@ -1376,6 +1557,7 @@ function onPointerMove(ev) {
 
 function onKeyDown(ev) {
   if (ev.repeat) return;
+  if (state.taunt) return;   // 叫陣期間鍵盤也鎖住（Space/R 不要跳過演出）
   const key = ev.key;
   if (key === ' ' || key === 'Spacebar') {
     if (state.mode !== 'fighting') {
@@ -1509,6 +1691,14 @@ function frame(now) {
     return;
   }
 
+  // 開場叫陣：原作喊話時雙方都站定，這裡連計時一起凍結，只推台詞停留與鏡頭硬切。
+  if (state.taunt) {
+    tickTaunt(dt);
+    draw();
+    raf = requestAnimationFrame(frame);
+    return;
+  }
+
   if (state.mode === 'fighting' && state.world) {
     accumulator += dt;
     const stepDt = 1 / TICK_HZ;
@@ -1542,7 +1732,15 @@ function frame(now) {
     if (state.fxFocusT > 0) state.fxFocusT = Math.max(0, state.fxFocusT - dt);
 
     const following = state.fxFocusT > 0 && state.fxFocus !== null;
-    const target = following ? state.fxFocus : camera(state.world);
+    if (state.camHold) {
+      state.camHold.t -= dt;
+      if (state.camHold.t <= 0) state.camHold = null;
+    }
+    const target = following
+      ? state.fxFocus
+      : state.camHold
+        ? state.camHold.x
+        : camera(state.world);
     const k = Math.min(1, dt * (following ? 7 : 5));
     state.camX += (target - state.camX) * k;
     if (Math.abs(target - state.camX) < 0.01) state.camX = target;
@@ -1773,12 +1971,19 @@ async function boot() {
 
   buildPreview();
   resize();
-  draw();
-  window.SG?.audio?.bgm('menu');   // [audio] 战前（菜单/布阵）放 03 主菜单曲；startBattle 会换成地形曲
+  // 從大地圖/遭遇戰/守城進來：原作沒有預覽卡，連首幀 ready 態都不畫（避免閃一下「開戰」按鈕），
+  // 直接建 world → 兩段叫陣 → 鏡頭回我方主將 → step。
+  if (!ENTRY_BATTLE) {
+    draw();
+    window.SG?.audio?.bgm('menu');   // [audio] 战前（菜单/布阵）放 03 主菜单曲；startBattle 会换成地形曲
+  } else {
+    // 真戰鬥不該看到開發頁眉（兵種/陣形/種子）；solo 是 index.html 的既有版式類。
+    document.body.classList.add('solo');
+  }
   loadFxIndex();
   // 注意：startBattle 是 async（先 await MAGIC.SO），必须 await 再往下走，
   // 否则下面的 ?sim= 同步步进跑在「预览世界」上、随后被新世界覆盖，截图就永远停在 00:00。
-  if (SGDEV.on('auto')) await startBattle();
+  if (ENTRY_BATTLE || SGDEV.on('auto')) await startBattle();
 
   // ?dev=1&sim=N：先同步跑 N 个逻辑 tick 再画（无头截图/验收用；headless 模式 rAF 可能不触发，
   // 只靠 auto=1 会一直停在 00:00）
@@ -1787,6 +1992,7 @@ async function boot() {
   frozen = SGDEV.on('freeze');
   if (Number.isFinite(simParam) && simParam > 0) {
     if (state.mode !== 'fighting') await startBattle();
+    skipTaunt();   // 除錯用的同步步進不演叫陣（要對拍戰鬥數值）
     let guard = 0;
     while (state.world && !state.world.over && guard++ < simParam) {
       sfxTickUsed = 0;
@@ -1880,6 +2086,7 @@ if (!window.__RELEASE__) {
     buildPreview,
     rushCommand, // R137 全軍突擊：和点「突 擊」按钮走同一条路径
     armyCommand, // R147 部队指令：armyCommand(n) 等价于 Shift+(n+1)
+    skipTaunt,   // 開場叫陣：跳過演出（CDP 截圖 / 除錯用）
   };
 }
 

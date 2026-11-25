@@ -516,6 +516,23 @@ function pickCity(name) {
 }
 cityDef = pickCity(qs.get('city'));
 
+/* ---------------- [F1] 內政窗口：只有每年 1 月能下命令 ----------------
+ * 原作：一年 12 個月，**1 月是內政月**，其餘 11 個月只在大地圖流動時間
+ * （`project/210_原作战斗流程规格.md` §1；内政指南 L21-23/L39-41）。
+ * 非正月（或內政已終了）進來 = 只讀「查看」：能看數字/武將/情報，不能下命令。
+ * `?view=1` 是大地圖非正月「查看」按鈕帶過來的頁間協議；`?dev=1` 的除錯口子可繞過。 */
+const VIEW = qs.get('view') === '1';
+const inAffairsMonth = () => Saves.monthOfYear(save.month) === 1;
+function readOnly() {
+  if (VIEW) return true;
+  if (!inAffairsMonth()) return true;
+  return !UNLIMITED && M.monthLocked(save, UNLIMITED);
+}
+function readOnlyHint() {
+  if (!inAffairsMonth()) return '非正月：原作內政只在每年 1 月開（大地圖「推進一月」到 1 月再來）。';
+  return `${M.LOCK_HINT}：內政已終了，回大地圖「推進一月」再開新窗口。`;
+}
+
 /* ---------------- 殿內背景（hall_0N）＋ 原作宮殿圖（palais_0N） ---------------- */
 /* 挑選規則在 city_model.hallIndexOf()（RATE 1..5，人口≥300000 升到 6），這樣才測得到；
  * 這裡只把它翻成 CSS 變數。除錯口子 ?hall=1..6 直接指定（截圖對比用）。 */
@@ -533,10 +550,11 @@ function applyHall() {
 }
 applyHall();
 
-/* ---------------- R10 自治 + R12 預備兵：每月 lazy tick ---------------- */
-/* 這兩件事原作都掛在「換月」上，但換月跑在 campaign.html（不歸本頁改）。
- * 這裡在進頁時補結算一次：只補到當前月、不會漏月也不會重複跑（save.autoMonth 記帳）。 */
-const autoTick = M.autonomyTick(save, scenario?.cities || [], ctx);
+/* ---------------- R10 自治 + F13 錢變兵：每月 lazy tick ---------------- */
+/* 這兩件事原作都掛在「換月」上（campaign.html 的 advanceMonth 已接 autonomyTick）；
+ * 這裡在進頁時再補結算一次：只補到當前月、不會漏月也不會重複跑（save.autoMonth 記帳）。
+ * `?loose=1` 走舊的「每月白補 10%」對照（refillPrep），預設是原作線：100 金 → 1 預備兵。 */
+const autoTick = M.autonomyTick(save, scenario?.cities || [], ctx, { loose: dbg('loose') === '1' });
 if (autoTick.refilled.length || autoTick.auto) persist();
 
 /* 除錯口子：?gold=3000 直接改金（只為驗收/自測，UI 上沒有這個入口） */
@@ -629,13 +647,16 @@ function renderHud() {
   const majorMorale = major ? moraleOfName(major) : null;
   $('vMorale').textContent = majorMorale === null ? '—' : `${majorMorale}/100`;
   $('vMorale').classList.toggle('cold', majorMorale !== null && majorMorale < 30);
-  // R8 月令：本月下过令就显示"已用"（推进一月才复位）
+  // [F1/F2] 內政窗口：正月且未終了才能下命令；逐將年令由選將抽屜管，不再是一月一條。
   const locked = M.monthLocked(save, UNLIMITED);
-  $('vLock').textContent = UNLIMITED ? '不限' : (locked ? '已用' : '可下');
-  $('vLock').classList.toggle('hot', !UNLIMITED && locked);
+  const ro = readOnly();
+  $('vLock').textContent = UNLIMITED ? '不限' : (ro ? (inAffairsMonth() ? '已終了' : '非正月') : '可下');
+  $('vLock').classList.toggle('hot', !UNLIMITED && ro);
   $('cmdHint').textContent = UNLIMITED
     ? M.UNLIMITED_HINT
-    : (locked ? `${M.LOCK_HINT} · 回大地圖推進一月` : '每月一條 · 推進一月再下達');
+    : (ro
+      ? readOnlyHint()
+      : `正月內政 · 每將今年一次（已行動 ${M.actedNames(save).length} 人）`);
   renderCivic();
 }
 
@@ -676,18 +697,18 @@ const CMD_SUB = {
 };
 function renderGrid() {
   const grid = $('grid');
-  // R8 一月一令：本月已下过令 → 九条全置灰（原作 0x4A64BC，推进一月才复位）
-  const locked = M.monthLocked(save, UNLIMITED);
+  // [F1] 非正月／內政已終了 → 九条全置灰，只讀查看（原作只有 1 月能下內政命令）
+  const ro = readOnly();
   const st = cityDef ? M.cityStateOf(save, cityDef.NAME) : null;
   grid.innerHTML = '';
   for (const cmd of [...M.CMD_ORDER, ...(M.CMD_EXTRA || [])]) {
     const b = document.createElement('button');
     b.className = 'cmd' + (cmd === '開發' || cmd === '徵兵' ? ' hot' : '');
     b.dataset.cmd = cmd;
-    b.disabled = locked;
+    b.disabled = ro;
     const cost = M.CMD_META?.[cmd]?.cost;
     b.innerHTML = `<b>${cmd}</b><small>${CMD_SUB[cmd]?.(st) || ''}</small>`
-      + (locked ? `<span class="note">${M.LOCK_HINT}</span>` : '');
+      + (ro ? `<span class="note">${inAffairsMonth() ? '已終了' : '非正月'}</span>` : '');
     void cost;
     grid.appendChild(b);
   }
@@ -719,19 +740,83 @@ function say(cmd, kind, text) {
 
 /* ---------------- 八條命令的執行 ---------------- */
 /**
- * 每条命令收尾。acted=false 用在"没真的执行成功"的分支上（例如没有相邻城可调兵）：
- * 失败不该吃掉这个月。成功一条即置「本月已行動」，八条按钮随即置灰。
+ * 每条命令收尾。
+ *   afterCommand(true, '張飛') → 記「張飛今年已行動」（F2 逐將年令，搜索/開發用）
+ *   afterCommand(true)         → 記「內政窗口已結束」（內政終了/出征/自治這種全局動作）
+ *   afterCommand(false)        → 什麼令都不記（失敗，或徵兵/情報/移動/任命這種不耗令的命令）
  */
-function afterCommand(acted = true) {
-  if (acted) M.markMonthActed(save, UNLIMITED);
+function afterCommand(acted = true, execName = '') {
+  if (acted) {
+    if (execName) M.markActed(save, execName);
+    else M.markMonthActed(save, UNLIMITED);
+  }
   persist();
   renderHud();
   renderGrid();
   renderLog();
 }
 
-function doDevelop() {
-  const r = M.develop(save, cityDef, ctx);
+/**
+ * [F8/F9] 先選執行武將，再下命令（原作「每將一年只能搜索或開發一次」）。
+ * 名冊走 rosterOf（已濾掉在路上的，F3），再濾掉今年已行動的（F2）。
+ * 沒按確定／沒點人 → 直接取消，不寫任何令。
+ */
+function pickExec(title, cb) {
+  const all = M.rosterOf(save, cityDef.NAME, ctx);
+  const free = all.filter((g) => !M.actedLocked(save, g.NAME));
+  const used = all.filter((g) => M.actedLocked(save, g.NAME)).map((g) => g.NAME);
+  if (!free.length) {
+    say(title, 'warn', used.length
+      ? `沒有可用的武將：${used.join('、')} 今年已經行動過（每將每年只能搜索或開發一次）。`
+      : '這座城沒有可用的武將（在路上的不算，F3）。');
+    afterCommand(false);
+    return;
+  }
+  let picked = '';
+  openSheet(`${title} · 選執行武將`, (body) => {
+    body.innerHTML = `<div style="font-size:15px;color:var(--ink-3);line-height:1.5;padding:0 4px 8px">
+        每將一年只能搜索或開發一次；隨軍在路上的武將不算。</div>`
+      + free.map((g) => `<button class="pick" data-name="${escapeHtml(g.NAME)}">
+          ${escapeHtml(g.NAME)}<small style="color:var(--ink-3);font-size:14px"> 武 ${g.STR ?? '—'} · 智 ${g.INT ?? '—'}</small></button>`).join('')
+      + (used.length ? `<div style="font-size:14px;color:var(--ink-3);margin-top:10px">今年已行動：${escapeHtml(used.join('、'))}</div>` : '');
+    body.querySelectorAll('.pick[data-name]').forEach((el) => {
+      el.onclick = () => {
+        picked = el.dataset.name;
+        body.querySelectorAll('.pick[data-name]').forEach((x) => x.classList.toggle('on', x === el));
+      };
+    });
+    body.__ok = () => {
+      if (!picked) {
+        closeSheet();
+        say(title, 'warn', '沒選執行武將：命令取消（原作要指定人，不能空手代行）。');
+        afterCommand(false);   // 只刷畫面＋存檔（不記任何令）
+        return;
+      }
+      closeSheet();
+      cb(picked);
+    };
+  });
+}
+
+function doDevelop(execName) {
+  // [F9] 無太守 → 直接拒絕。舊口徑是讓 majorFactor(0)=×0.53 糊過去（等於默認「無太守也能開發」），
+  // 原作沒有這種折扣；沒有太守就該先任命（城內「任命」）。
+  if (!M.majorOf(save, cityDef)) {
+    say('開發', 'warn', '需先任命太守：沒有太守不能開發（原作不允許無太守代行）。');
+    afterCommand(false);
+    return;
+  }
+  // [F8] 先選將再說：沒帶 execName 就開選將抽屜（?do= 除錯口子會直接傳太守）。
+  if (!execName) {
+    pickExec('開發', (name) => doDevelop(name));
+    return;
+  }
+  if (M.actedLocked(save, execName)) {
+    say('開發', 'warn', `${execName} 今年已行動（每將每年只能搜索或開發一次），換一位。`);
+    afterCommand(false);
+    return;
+  }
+  const r = M.develop(save, cityDef, { ...ctx, exec: execName });
   if (!r.ok) {
     // R9：原作 0x427A84 起有「關城前置」（0x405499 判 FLAGS==2 的 12 座关城），
     // 关城不能開發，要给专门的文案，不能笼统说「人口飽和」。
@@ -739,9 +824,9 @@ function doDevelop() {
       : r.reason === 'gold' ? `金不足（需 ${r.cost}）。` : '人口飽和、防禦力最高了。';
     say('開發', 'warn', why);
   } else {
-    say('開發', 'info', `人口增加 ${r.pop} 人，防禦力增加 ${r.def}。（${r.cost > 0 ? `金 -${r.cost}` : '不耗金'}）`);
+    say('開發', 'info', `${execName} 執行：人口增加 ${r.pop} 人，防禦力增加 ${r.def}。（${r.cost > 0 ? `金 -${r.cost}` : '不耗金'}）`);
   }
-  afterCommand(r.ok);
+  afterCommand(r.ok, r.ok ? execName : '');
 }
 
 /* 部隊徵兵（R12）：原作面板四行「步兵數 %d/%d」「騎兵數 %d/%d」「預備兵 %d」「總兵數 %d」
@@ -819,7 +904,8 @@ function doRecruit() {
       sfx(okAny ? 'success' : 'failure2');
       say('徵兵', okAny ? 'info' : 'warn', `${bits.join('、')}。步 ${fmt(now.inf)}／騎 ${fmt(now.cav)}，共 ${fmt(now.troops)}/${fmt(M.RECRUIT.CAP)}。`);
       closeSheet();
-      afterCommand(okAny);
+      // 徵兵不是「將的一令」：只把預備兵換成兵（有預備兵才徵得到），不佔內政窗口。
+      afterCommand(false);
     };
   });
 }
@@ -871,9 +957,19 @@ function openAuto() {
   });
 }
 
-function doSearch() {
+function doSearch(execName) {
+  // [F8] 搜索必須選將（原作：每將一年只能搜索或開發一次）；選完才真的扣錢/抽人。
+  if (!execName) {
+    pickExec('搜索', (name) => doSearch(name));
+    return;
+  }
+  if (M.actedLocked(save, execName)) {
+    say('搜索', 'warn', `${execName} 今年已行動（每將每年只能搜索或開發一次），換一位。`);
+    afterCommand(false);
+    return;
+  }
   const before = M.searchCount(save, cityDef.NAME);
-  const r = M.search(save, cityDef, ctx);
+  const r = M.search(save, cityDef, { ...ctx, exec: execName });
   if (!r.ok) {
     say('搜索', 'warn', r.reason === 'gold' ? `金不足（需 ${r.cost}）。` : '這裡不能搜索。');
     sfx('failure2');   // [audio] 搜索失败 = 原作 FAILURE2（37c §4）
@@ -887,7 +983,7 @@ function doSearch() {
   // [audio] 搜索成功 = 原作 SUCCESS；「一無所獲」按失败处理（原作没有"空手"专用音）
   sfx(r.kind === 'none' ? 'failure2' : 'success');
   void before;
-  afterCommand(true);
+  afterCommand(true, execName);
 }
 
 /* 移動抽屜 */
@@ -941,7 +1037,8 @@ function openMove() {
         say('移動', 'info', `→ ${to}：${bits.join('、') || '無'}。`);
       }
       closeSheet();
-      afterCommand(r.ok);
+      // 移動不是「將的一令」：調兵/調將本身不產出，不佔內政窗口（F2 逐將年令只鎖搜索/開發）。
+      afterCommand(false);
     };
   });
 }
@@ -980,7 +1077,8 @@ function openAppoint() {
       const rw = M.appoint(save, cityDef, 'wise', wise, ctx);
       say('任命', 'info', `太守 ${rm.ok ? major : (major || '—')}、軍師 ${rw.ok ? wise : (wise || '—')}。`);
       closeSheet();
-      afterCommand(true);
+      // 任命不佔內政窗口（原作任命太守/軍師不是「將的一令」）
+      afterCommand(false);
     };
   });
 }
@@ -1001,8 +1099,8 @@ function openIntel() {
       <div style="font-size:14px;color:var(--ink-3);margin-top:6px">只讀面板：相鄰城含關卡（RATE=0）。預備兵 = 原作 +0x86/+0x82。</div>`;
     body.__noOk = true;
   });
-  // 情報在原作也是一条内政命令：看一眼就算这个月的令用掉了（?unlimited=1 除外）
-  afterCommand(true);
+  // [F2] 情報是只讀：原作看資料不算「搜索/開發」，不該吃掉任何將的一令。
+  afterCommand(false);
 }
 
 /* 出征抽屜 */
@@ -1061,23 +1159,23 @@ $('sheetCancel').onclick = closeSheet;
 $('btnBack').onclick = () => { location.href = './campaign.html'; };
 $('btnRefresh').onclick = () => location.reload();
 
-function onCmd(cmd, bypassLock = false) {
+function onCmd(cmd, bypassLock = false, execName = '') {
   if (!cityDef) { say(cmd, 'warn', '沒有我方城池。'); renderLog(); return; }
-  // R8 一月一令：本月已经下过令 → 直接拒绝（按钮本来就是 disabled，这里兜住键盘/调试路径）
-  if (!bypassLock && M.monthLocked(save, UNLIMITED)) {
-    say(cmd, 'warn', `${M.LOCK_HINT}：一個月只能下一條命令，回大地圖「推進一月」再下達。`);
+  // [F1] 內政窗口：非正月／內政已終了 → 只讀查看（按鈕本來就 disabled，這裡兜住鍵盤與除錯路徑）
+  if (!bypassLock && readOnly()) {
+    say(cmd, 'warn', readOnlyHint());
     renderHud();
     renderGrid();
     renderLog();
     return;
   }
-  if (cmd === '開發') doDevelop();
+  if (cmd === '開發') doDevelop(execName);
   else if (cmd === '徵兵') doRecruit();
-  else if (cmd === '搜索') doSearch();
+  else if (cmd === '搜索') doSearch(execName);
   else if (cmd === '移動') openMove();
   else if (cmd === '任命') openAppoint();
   else if (cmd === '物品') {
-    if (M.markMonthActed(save, UNLIMITED)) persist();
+    // 去 items.html 換裝備不產出任何資源，不佔內政窗口
     location.href = M.itemsUrl(cityDef.NAME) + (UNLIMITED ? '&unlimited=1' : '');
   } else if (cmd === '情報') openIntel();
   else if (cmd === '出征') openDeploy();
@@ -1104,7 +1202,14 @@ const snapshot = plan.length ? JSON.stringify({ gold: save.gold, cities: save.ci
 for (const step of plan) {
   const cmd = MAP[step] || step;
   if (cmd === '出征' || cmd === '移動' || cmd === '任命' || cmd === '情報' || cmd === '物品' || cmd === '自治') continue;
-  onCmd(cmd, true);
+  // [F8] 開發/搜索要指定執行武將；除錯口子直接拿太守（沒有太守就拿名冊第一個），
+  // 這樣 `?do=develop` 仍是一條命令一次執行，不會卡在選將抽屜上。
+  const needExec = cmd === '開發' || cmd === '搜索';
+  const exec = needExec
+    ? (M.majorOf(save, cityDef) || M.rosterOf(save, cityDef.NAME, ctx)[0]?.NAME || '')
+    : '';
+  if (needExec && !exec) continue;
+  onCmd(cmd, true, exec);
 }
 if (DEV && qs.has('dump') && qs.get('dump') !== '0') {
   // 不顯示：只把 JSON 塞進 <pre id="dump">，用 Edge --dump-dom 取。要肉眼看時加 ?dump=show。
@@ -1124,6 +1229,21 @@ if (dbgSheet) {
   try { sheetMap[dbgSheet]?.(); } catch (err) { console.error(err); }
 }
 
+/* [F15] 頁間真協議：大地圖「徵兵」按鈕 → `?city=X&cmd=recruit` 直接開城內同一個抽屜。
+ * 非正月／窗口已終了 → 不開抽屜，只留一條 warn（F1：非正月只讀）。 */
+if (qs.get('cmd') === 'recruit' && cityDef) {
+  if (readOnly()) say('徵兵', 'warn', readOnlyHint());
+  else doRecruit();
+}
+
+/* [F12] 頁間真協議：大地圖「開發」按鈕 → `?city=X&cmd=develop` 直接開城內同一個選將抽屜。
+ * 舊口徑是大地圖直接 `gold -= 400; pop += 3000`（第三套算法、繞過太守與逐將年令）。
+ * 非正月／窗口已終了 → 不開抽屜，只留一條 warn（F1：非正月只讀）。 */
+if (qs.get('cmd') === 'develop' && cityDef) {
+  if (readOnly()) say('開發', 'warn', readOnlyHint());
+  else doDevelop();
+}
+
 window.__city = {
   save, cityDef, ctx, M, Saves, era, unlimited: UNLIMITED, locked: M.monthLocked(save, UNLIMITED),
   // 驗收用：R12 的四個數字、R10 的自治清單、殿內背景挑了哪張
@@ -1134,6 +1254,16 @@ window.__city = {
   civic: M.civicFields(save, scenario?.cities || [], ctx),
   hall: $('stage').dataset.hall,
   tick: autoTick,
+  // [F1/F2/F3] 驗收用：窗口狀態、逐將年令、在路上名單、可執行武將
+  view: VIEW,
+  inAffairs: inAffairsMonth(),
+  readOnly: readOnly(),
+  acted: () => M.actedNames(save),
+  away: () => Object.keys(M.awayNameSet(save)),
+  freeExecs: () => M.rosterOf(save, cityDef.NAME, ctx).filter((g) => !M.actedLocked(save, g.NAME)).map((g) => g.NAME),
+  onCmd,
+  doDevelop,
+  doSearch,
 };
 </script>
 </body>

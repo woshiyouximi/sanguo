@@ -46,7 +46,17 @@ import {
   type ArmyCmdKind,
 } from '../core/army_cmd.ts';
 import type { GameData } from '../types.ts';
-import { actionAtlas, isDying, pickActionFrame, pushActionSprite, usesActionFrames } from './animSelect.ts';
+import {
+  DEATH_TICKS,
+  HIT_FLASH_TICKS,
+  actionAtlas,
+  attackAgeOf,
+  deathAgeOf,
+  hitAgeOf,
+  pickActionFrame,
+  pushActionSprite,
+  usesActionFrames,
+} from './animSelect.ts';
 import { battleBgTick, bgReady, drawBattleBg } from './battleBg.ts';
 import { generalAtlasTick, generalDying, generalLayers } from './generalAtlas.ts';
 import { pickUnitFrames, type UnitsAtlas } from './unitFrames.ts';
@@ -218,6 +228,23 @@ export type DrawCmd = RectCmd | LineCmd | PolyCmd | EllipseCmd | TextCmd | Sprit
 
 export type ViewMode = 'ready' | 'fighting' | 'settled';
 
+/**
+ * 開場叫陣的台詞框（原作 `SYSTEM.SO#StartBattle` @0x2108 的兩段喊話）。
+ * 時序全部由 web 層算好後傳進來，視圖層只負責畫——這裡不判斷「該誰說」。
+ */
+export interface TauntView {
+  /** 說話方：A = 我軍（藍）、B = 敵軍（紅），與原作臺詞層 3/2 對應 */
+  side: Side;
+  /** 說話武將名；空時按 side 退回「我將 / 敵將」 */
+  name?: string;
+  /** 已填好 `%S1%/%S2%`、已剝尾碼的台詞 */
+  text: string;
+  /** 本句已停留秒數（只畫進度條，不參與任何判定） */
+  t?: number;
+  /** 本句總時長（秒）；省略按 1.5s 畫 */
+  hold?: number;
+}
+
 export interface SkillSlot {
   seq: number;
   name: string;
@@ -265,6 +292,11 @@ export interface ViewOptions {
    * 也就是「点部隊指令按钮自己开合」；给了值就以调用方为准（测试 / 将来的 main.js 接线）。
    */
   armyMenu?: boolean;
+  /**
+   * 開場叫陣台詞框：非空時畫在整幀最後（蓋住 HUD / 提示框）。
+   * `null`/`undefined` = 沒在叫陣。
+   */
+  taunt?: TauntView | null;
 }
 
 /** 一帧特效：图集矩形 + 帧内热点（原作 SHP 头 +0x1C 的 offsetX/offsetY） */
@@ -1008,6 +1040,8 @@ export function buildFrame(world: World, opts: ViewOptions = {}): DrawCmd[] {
   drawConsole(out, world, opts);
   if (mode === 'ready') drawReady(out, world, opts);
   else if (mode === 'settled') drawSettle(out, world, opts);
+  // 開場叫陣：最後畫，蓋在 HUD/提示框之上（原作叫陣時台詞優先，其餘讓位）
+  drawTaunt(out, opts.taunt);
   return out;
 }
 
@@ -1133,16 +1167,16 @@ function drawActors(
   atlas: SpriteAtlas | null,
   units: UnitsAtlas | null,
 ): void {
-  const actors: { u: Unit; p: UnitProjection }[] = [];
+  const actors: Actor[] = [];
   for (const u of world.units) {
-    // 只有「有动作帧的那一侧」才画死亡窗口，否则尸体只剩一个影子；
-    // 主将同理，但它的死亡帧来自 anim/general 图集，没图集时仍旧走"阵亡即剔除"。
-    const dying = isDying(u, world) && usesActionFrames(u);
-    if (!u.alive && !dying && !generalDying(world, u)) continue;
+    // R194：阵亡窗口两侧都放行 —— 我方朴刀兵有 death_back 帧，其余兵种 / 敵方走
+    // 「冻结当时那一帧 + 程序化倒地」，否则敵兵是「原地消失」（用户反馈之一）。
+    const dyingAge = deathAgeOf(u, world);
+    if (!u.alive && dyingAge === null && !generalDying(world, u)) continue;
     // R193：一次投影拿齐 (sx, sy, scale)，后面绘制/缩放都不再自己换算
     const p = projectUnit(u.x, u.y, camX);
     if (p.sy < FIELD_TOP - 80 || p.sy > FIELD_BOTTOM + 80) continue;
-    actors.push({ u, p });
+    actors.push({ u, p, dyingAge, sx0: p.sx });
   }
   // 远者（worldX 小，屏幕上方）先画；同深度时士兵先、主将后
   actors.sort((a, b) => {
@@ -1150,10 +1184,106 @@ function drawActors(
     if (a.u.y !== b.u.y) return a.u.y - b.u.y;
     return uGeneral(a.u) === uGeneral(b.u) ? 0 : uGeneral(a.u) ? 1 : -1;
   });
+  spreadSlidingActors(actors);
   for (const a of actors) {
+    const mark = out.length;
     if (uGeneral(a.u)) drawGeneral(out, world, a.u, a.p);
-    else drawSoldier(out, world, a.u, a.p, atlas, units);
+    else drawSoldier(out, world, a.u, a.p, atlas, units, a.dyingAge);
+    // R194：受击反馈（后仰 + 白闪 + 冲击星）压在该单位刚画出来的指令之后，
+    // 所以三条降级路径（兵种图集 / 老图集 / 色块）都能吃到。
+    pushHitFlash(out, world, a.u, a.p, mark);
   }
+}
+
+/**
+ * R194：滑行对穿「错位」—— 40 tick 的线性滑行只在**落点格**做占位校验（`commitStep`），
+ * 两个单位沿同一车道对穿时中途会重合到同一个像素上（实测最小中心距 0.14px），
+ * 这是「兵与兵叠在一起」最刺眼的一档（>75% 完全重合 1.03 对/帧）。
+ *
+ * 不做逻辑阻挡（原作本来就允许换位，禁止会让包抄卡住），只在绘制前做一次横向松弛：
+ * 脚底 y 相差 24px 以内、横向不足 `MIN_BODY_GAP` 的一对，**谁在滑谁让开**
+ * （单方滑最多让 12px，双方都滑各让一半最多 6px）。静止阵型一个像素都不动，
+ * 所以站位、点选命中都不受影响；主将只被让路、自己不位移（点将不能飘）。
+ *
+ * 要迭代 6 轮：两人已经**交叉过去**时第一轮只把它们分开 12px，仍可能贴在一起
+ * （实测 tick 763 两个 B 骑兵正好卡在「分开 1px」），3 轮能到 10px、6 轮 20px。
+ * 每轮结束把每个演员的横向位移夹在 ±`MAX_SPREAD` 内：密集挤在一起时松弛可能把
+ * 某个人推到离真实位置很远的地方，夹住上限保证「最多偏半条车道」。
+ */
+const MIN_BODY_GAP = 22; // 躯干宽 28px 的一半，够把「叠死」压成「肩并肩」
+const MAX_SPREAD = 20; // 单个演员最多被推开 20px（≈半条车道）；正常只有 6~9px，
+// 这个上限是防「一堆人挤成一坨」时松弛把人推到离格子太远的地方
+
+type Actor = { u: Unit; p: UnitProjection; dyingAge: number | null; sx0: number };
+
+function spreadSlidingActors(actors: Actor[]): void {
+  for (let iter = 0; iter < 6; iter += 1) {
+    for (let i = 0; i < actors.length; i += 1) {
+      const a = actors[i]!;
+      for (let j = i + 1; j < actors.length; j += 1) {
+        const b = actors[j]!;
+        if (Math.abs(a.p.sy - b.p.sy) > 24) continue; // 不同排，各画各的
+        const dx = b.p.sx - a.p.sx;
+        const need = MIN_BODY_GAP - Math.abs(dx);
+        if (need <= 0) continue;
+        const slideA = a.u.slide != null && !uGeneral(a.u);
+        const slideB = b.u.slide != null && !uGeneral(b.u);
+        if (!slideA && !slideB) continue;
+        const dir = dx >= 0 ? 1 : -1;
+        const push = slideA && slideB ? Math.min(need / 2, 6) : Math.min(need, 12);
+        if (slideA) a.p.sx -= dir * push;
+        if (slideB) b.p.sx += dir * push;
+      }
+    }
+    for (const a of actors) {
+      a.p.sx = Math.max(a.sx0 - MAX_SPREAD, Math.min(a.sx0 + MAX_SPREAD, a.p.sx));
+    }
+  }
+}
+
+/**
+ * R194：受击反馈 —— 命中后 `HIT_FLASH_TICKS`(6) tick 内，把该单位刚画出的 sprite
+ * 整体后仰 3px、头 2 tick 叠一层 `lighter` 白闪，并在胸口高度画一个「冲击星」。
+ *
+ * 为什么不用 `hit_back` 帧：士兵一击必死，「活着且刚挨打」这个状态不存在；
+ * `actions.json` 也只有背视素材，敵方用不上。程序化反馈两侧、全兵种统一生效，0 素材依赖。
+ *
+ * 为什么在 `drawActors` 里做而不是 `drawSoldier` 里：`drawSoldier` 有 4 条提前 return
+ * 的降级路径，放在外面只写一次；`from` 之后的指令全部属于这个单位，不会误伤。
+ */
+function pushHitFlash(
+  out: DrawCmd[],
+  world: World,
+  u: Unit,
+  p: UnitProjection,
+  from: number,
+): void {
+  const age = hitAgeOf(u, world);
+  if (age === null) return;
+  const s = p.scale;
+  const k = 1 - age / HIT_FLASH_TICKS; // 1 → 0
+  // 1) 后仰：朝自己背后（远离敌人）推 3px，影子不跟着动（脚还踩在地上）
+  const back = (u.side === 'A' ? 1 : -1) * 3 * k;
+  let lastSprite = -1;
+  for (let i = from; i < out.length; i += 1) {
+    const c = out[i]!;
+    if (c.kind !== 'sprite') continue;
+    c.y += back;
+    lastSprite = i;
+  }
+  // 2) 白闪：头 2 tick 用 lighter 再叠一层（不新增素材，纯合成）
+  if (age <= 1 && lastSprite >= 0) {
+    const c = out[lastSprite]!;
+    if (c.kind === 'sprite') out.push({ ...c, comp: 'lighter', alpha: 0.55 });
+  }
+  // 3) 冲击星：胸口高度画三条短线（"米"字），随年龄缩小、变淡
+  const cx = Math.round(p.sx);
+  const cy = Math.round(p.sy) - 40 * s;
+  const r = (6 + 4 * k) * s;
+  const col = withAlpha(COLORS.goldLight, 0.9 * k);
+  LN(out, cx - r, cy - r * 0.55, cx + r, cy + r * 0.55, col, 1.6 * s);
+  LN(out, cx - r, cy + r * 0.55, cx + r, cy - r * 0.55, col, 1.6 * s);
+  LN(out, cx, cy - r * 0.85, cx, cy + r * 0.85, withAlpha(COLORS.white, 0.7 * k), 1.2 * s);
 }
 
 function uGeneral(u: Unit): boolean {
@@ -1194,11 +1324,14 @@ function drawSoldier(
   p: UnitProjection,
   atlas: SpriteAtlas | null,
   units: UnitsAtlas | null,
+  dyingAge: number | null = null,
 ): void {
   const dir = u.side === 'A' ? -1 : 1; // 我方朝上（屏幕 y 减小），敌方朝下
   const s = p.scale; // 该行的透视缩放（远排 0.74、近排 1.18）
   const fx = Math.round(p.sx);
   const fy = Math.round(p.sy);
+  // R194：尸体冻结在阵亡那一 tick 的帧（否则倒地过程里还在原地踏步），再叠程序化倒地。
+  const animTick = dyingAge === null ? world.tick : world.tick - dyingAge;
 
   // 影子贴地：半径和「下沉 13px」都跟着行缩放走，否则远排影子飘、近排影子陷
   E(out, fx, fy + 13 * s, 12 * s, 4 * s, COLORS.shadow);
@@ -1218,7 +1351,7 @@ function drawSoldier(
     scaleSpriteCmds(out, mark, s, fx, fy);
     return;
   }
-  if (!u.alive) return; // 死亡窗口内但图集没加载好：别画站着的尸体
+  if (!u.alive && dyingAge === null) return; // 死亡窗口外 / 没有尸体系：别画站着的尸体
 
   // 画真序列帧，三级降级：兵种图集 → 老图集（walk_back / walk_front）→ 色块。
   // 我方=背视、敌方=正视；同一 tick 内按单位格位错开相位，否则 100 个兵会完全同步
@@ -1233,7 +1366,7 @@ function drawSoldier(
       set.frames,
       set.attack,
       u,
-      world.tick,
+      animTick,
       set.hold,
       fx,
       fy,
@@ -1242,6 +1375,7 @@ function drawSoldier(
     )
   ) {
     scaleSpriteCmds(out, mark, s, fx, fy);
+    if (dyingAge !== null) toppleCorpse(out, mark, u.side, dyingAge);
     return;
   }
   if (atlas) {
@@ -1250,8 +1384,11 @@ function drawSoldier(
     // 老图集的攻击帧只有正视一套、两侧共用；A 侧出手那段已被 animSelect 的动作帧接管
     const hold = atlas.hold ?? 5;
     mark = out.length;
-    if (pushSpriteFrames(out, img, atlas.frames, walk, atlas.attack ?? [], u, world.tick, hold, fx, fy, !usesActionFrames(u))) {
+    if (
+      pushSpriteFrames(out, img, atlas.frames, walk, atlas.attack ?? [], u, animTick, hold, fx, fy, !usesActionFrames(u))
+    ) {
       scaleSpriteCmds(out, mark, s, fx, fy);
+      if (dyingAge !== null) toppleCorpse(out, mark, u.side, dyingAge);
       return;
     }
   }
@@ -1280,13 +1417,37 @@ function drawSoldier(
 }
 
 /**
+ * R194：程序化倒地 —— 把刚画出来的尸体镜头按阵亡年龄「放倒 + 淡出」。
+ *
+ * 为什么不用帧：`actions.json` 只有一套朴刀兵的背视阵亡帧，13 个兵种共用它会出现
+ * 「骑兵用朴刀的倒地姿势」；敵方更是连背视都没有（正视素材缺失）。
+ * 这里绕开素材：**冻结阵亡那一 tick 的帧**（`drawSoldier` 的 `animTick`），
+ * 然后绕脚底点旋转到 立→倒，最后 45% 的窗口淡出——三个数字就能读出「被打倒了」。
+ *
+ * 旋转由渲染层的 `SpriteCmd.rot` 支持（绕 (x,y) 锚点转），不需要新原语。
+ */
+function toppleCorpse(out: DrawCmd[], from: number, side: 'A' | 'B', age: number): void {
+  const k = Math.min(1, age / Math.max(1, DEATH_TICKS - 1)); // 0 → 1
+  const rot = (side === 'A' ? 1 : -1) * (0.10 + 1.25 * k);
+  // 前 55% 窗口保持不透明，后 45% 淡出（0 时直接消失，不留「半透明站尸」）
+  const fade = Math.max(0, 1 - Math.max(0, k - 0.55) / 0.45);
+  for (let i = from; i < out.length; i += 1) {
+    const c = out[i]!;
+    if (c.kind !== 'sprite') continue;
+    c.rot = rot;
+    if (fade < 1) c.alpha = Math.min(c.alpha ?? 1, fade);
+  }
+}
+
+/**
  * 从一组帧名里挑这一 tick 的那一帧并压入一条 sprite 指令。
  *
- * 出手后的一小段窗口播攻击帧：`cd` 从该单位的行动间隔递减（主将 40、士兵 120，见
- * `actionIntervalOf`），用「剩余 cd」把攻击帧均匀铺满前 24 tick，播完自动回到走路帧。
+ * 出手后的一小段窗口播攻击帧：由 `attackAgeOf()` 读 core 写在**真出手那一 tick** 的
+ * `u.lastAttackTick`（`battle.ts:2515`），把攻击帧均匀铺满 24 tick（≈0.4s @60Hz），
+ * 播完自动回到走路帧。
  * 其余时间按「初始格位 + tick」算走路相位（`Unit` 没有 id，同一格永远同一相位）。
- * （R84 前这里写死 120/96：主将间隔改成原作的 40 帧后，窗口必须跟着改，否则
- *  `cd > 96` 永不成立、攻击帧整个消失。）
+ * （R84 起这里曾用 `u.cd > interval-24` 近似「刚出手」，但 `cd` 在移动/待機分支也会
+ *  被重置，等于全员一直在空挥；R194 改成事件驱动。）
  *
  * 帧名在 `rects` 里查不到（图集是半成品）就返回 false，让调用方继续往下降级 ——
  * 绝不把 NaN 塞进 drawImage。
@@ -1310,15 +1471,17 @@ function pushSpriteFrames(
   designW = 66,
 ): boolean {
   if (walk.length === 0) return false;
-  // 攻击帧窗口：出手后的前 24 tick，按该单位的行动间隔派生（旧版写死 120/96）。
-  const interval = actionIntervalOf(u);
-  const swingTicks = Math.min(24, interval - 1);
-  const swinging = allowSwing && atk.length > 0 && u.cd > interval - swingTicks;
+  // R194：攻击帧窗口改由**真实出手事件**驱动（`lastAttackTick`），不再看 `u.cd`。
+  // 旧的 `u.cd > interval - 24` 看上去等价，实际上 `cd` 在**移动/待機分支也会被重置**
+  // （`battle.ts:2534`），于是每个兵每个行动周期都有 24/40 tick 在空挥：行军、站桩、
+  // 待機都在砍空气，真正那一刀反而没有任何额外表现（用户反馈「攻击没有动作」）。
+  const swingTicks = 24; // 24 tick @60Hz ≈ 0.4s，10 帧播完 ≈ 25fps
+  const age = allowSwing && atk.length > 0 ? attackAgeOf(u, tick, swingTicks) : null;
+  const swinging = age !== null;
   const seq = swinging ? atk : walk;
   let idx: number;
   if (swinging) {
-    const spent = interval - u.cd;
-    idx = Math.min(atk.length - 1, Math.max(0, Math.floor(spent / (swingTicks / atk.length))));
+    idx = Math.min(atk.length - 1, Math.max(0, Math.floor(age / (swingTicks / atk.length))));
   } else {
     const phase = Math.floor(u.x * 7 + u.y * 13) + Math.floor(tick / Math.max(1, hold));
     idx = ((phase % seq.length) + seq.length) % seq.length;
@@ -2323,6 +2486,57 @@ function drawConsole(out: DrawCmd[], world: World, opts: ViewOptions): void {
   T(out, MESSAGE_BOX.x + MESSAGE_BOX.w - 10, MESSAGE_BOX.y + MESSAGE_BOX.h - 16, '1-8 · A-H · R', 9, COLORS.textFaint, {
     align: 'right',
   });
+}
+
+/**
+ * 開場叫陣台詞框：底部橫幅（戰場帶下緣，不遮主將）。
+ *
+ * 版式對齊 `view/theme.ts`：面板色 `COLORS.panelAlpha`、陣營色 `sideColor()`、
+ * 台詞用 `wrapCJK` 折 3 行（原作一句最長 23 字，24 字/行足夠）。
+ * 說話方名牌壓在邊框上緣，左側色條 + 小三角指明「現在是誰在喊」。
+ */
+const TAUNT_BANNER = { x: 40, y: 790, w: 670, h: 138 } as const;
+
+function drawTaunt(out: DrawCmd[], taunt?: TauntView | null): void {
+  if (!taunt || !taunt.text) return;
+  const accent = sideColor(taunt.side);
+  const light = sideLight(taunt.side);
+  const { x, y, w, h } = TAUNT_BANNER;
+  // 陰影 + 底板：RGB 半透明，背後的戰場仍可見，但字要夠清楚
+  R(out, x + 3, y + 5, w, h, COLORS.black, { radius: RADIUS.md, alpha: 0.32 });
+  R(out, x, y, w, h, COLORS.panelAlpha, { radius: RADIUS.md });
+  R(out, x, y, w, h, undefined, { radius: RADIUS.md, stroke: withAlpha(accent, 0.9), width: 2 });
+  // 左側陣營色條
+  R(out, x, y + 12, 5, h - 24, accent, { radius: 2.5 });
+  // 名牌：壓在邊框上緣（不佔台詞版面）
+  const name = (taunt.name ?? '').trim() || (taunt.side === 'A' ? '我將' : '敵將');
+  const tag = taunt.side === 'A' ? '接 戰' : '叫 陣';
+  R(out, x + 18, y - 16, 176, 32, accent, { radius: RADIUS.pill });
+  T(out, x + 34, y, name, FONT.small, COLORS.white, { baseline: 'middle', bold: true, maxWidth: 110 });
+  T(out, x + 162, y, tag, 11, withAlpha(COLORS.white, 0.72), { align: 'right', baseline: 'middle' });
+  // 台詞：最多 3 行；第一行加粗提亮
+  const lines = wrapCJK(taunt.text, 24, 3);
+  lines.forEach((line, i) => {
+    T(out, x + 24, y + 34 + i * 30, line, FONT.body + 4, i === 0 ? COLORS.text : withAlpha(COLORS.text, 0.92), {
+      bold: i === 0,
+    });
+  });
+  // 進度條：本句停留到哪（原作是固定停留，這裡給玩家一個「還要多久」的讀數）
+  const hold = Math.max(0.2, taunt.hold ?? 1.5);
+  const ratio = clamp((taunt.t ?? 0) / hold, 0, 1);
+  R(out, x + 24, y + h - 12, w - 48, 3, withAlpha(COLORS.white, 0.12), { radius: 1.5 });
+  R(out, x + 24, y + h - 12, (w - 48) * ratio, 3, withAlpha(light, 0.85), { radius: 1.5 });
+  // 說話方小三角：指向台詞第一行
+  P(
+    out,
+    [
+      { x: x + 30, y: y + 22 },
+      { x: x + 42, y: y + 22 },
+      { x: x + 36, y: y + 31 },
+    ],
+    accent,
+    { alpha: 0.9 },
+  );
 }
 
 function drawCommandButton(

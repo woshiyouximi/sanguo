@@ -595,6 +595,26 @@ export function ensureExtras(save) {
   // R8 一月一令：记"哪个月已经下过令"。0/缺省 = 本月还没动（换月后月份变大，条件自然失效）。
   save.lastActionMonth = intOr(save.lastActionMonth, 0, 0);
 
+  // F2 逐將年令：{ [武將名]: 年序 }（年序 = floor((月-1)/12)+1，同 saves.js yearOf）。
+  // 原作是「每將每年只能搜索或開發一次」，不是一月一令；舊檔沒有這個鍵 → 空物件。
+  const rawActed = save.acted && typeof save.acted === 'object' && !Array.isArray(save.acted) ? save.acted : {};
+  const acted = {};
+  for (const [name, v] of Object.entries(rawActed)) {
+    if (typeof name !== 'string' || !name) continue;
+    const y = Math.trunc(num(v));
+    if (y > 0) acted[name] = y;
+  }
+  save.acted = acted;
+
+  // F3 在路上的武將：{ [武將名]: armyId }。權威來源是 save.armies（side==='A' 的
+  // general+officers），這份映射由 syncAway() 重算；這裡只保證型別正確。
+  const rawAway = save.away && typeof save.away === 'object' && !Array.isArray(save.away) ? save.away : {};
+  const away = {};
+  for (const [name, id] of Object.entries(rawAway)) {
+    if (typeof name === 'string' && name) away[name] = typeof id === 'string' ? id : '';
+  }
+  save.away = away;
+
   // R18 唯一物品（ONLYONE）：本局已经搜出来过的物品序号。袋子（sanguo_items_v1）是另一个键，
   // 可能被清掉；这个数组跟着战役存档走，保证「全局只掉一次」不会因为背包被重置又掉一遍。
   save.foundItems = [...new Set(
@@ -612,6 +632,89 @@ export function ensureExtras(save) {
   save.auto = auto;
   save.autoMonth = intOr(save.autoMonth, 0, 0);
   return save;
+}
+
+/* ======================================================================
+ * [F2] 逐將年令：每將每年只能「搜索」或「開發」一次
+ * 原作依據：`project/210_原作战斗流程规格.md` §1「每将一年只能搜索或开发一次」；
+ * 反匯編 [g+0x2C] 是逐將標志（`project/108_黄灯九行收口.md:143`），不是全局月令。
+ * `save.acted = { 名: 年序 }`；年序同 saves.js `yearOf`：floor((month-1)/12)+1。
+ * 舊的 monthLocked/markMonthActed/clearMonthLock 保留不動（既有測試釘死），
+ * 但語義收窄為「內政窗口是否已結束」（內政終了／出征／自治會用掉窗口）。
+ * ==================================================================== */
+
+/** 當前年序（1 起算，12 個月一年） */
+export function yearIndexOf(save) {
+  return Math.floor((intOr(save?.month, 1, 1) - 1) / 12) + 1;
+}
+
+/** 某將最近一次行動的年序（0 = 從沒行動過） */
+export function actedYearOf(save, name) {
+  if (!name || typeof name !== 'string') return 0;
+  const raw = save?.acted && typeof save.acted === 'object' && !Array.isArray(save.acted) ? save.acted[name] : 0;
+  return intOr(raw, 0, 0);
+}
+
+/** 該將今年是不是已經行動過（搜索/開發） */
+export function actedLocked(save, name) {
+  const y = actedYearOf(save, name);
+  return y > 0 && y === yearIndexOf(save);
+}
+
+/** 記「該將今年行動過」。已經記過回 false（不覆寫），成功回 true。 */
+export function markActed(save, name) {
+  if (!save || !name || typeof name !== 'string') return false;
+  if (actedLocked(save, name)) return false;
+  if (!save.acted || typeof save.acted !== 'object' || Array.isArray(save.acted)) save.acted = {};
+  save.acted[name] = yearIndexOf(save);
+  return true;
+}
+
+/** 清空逐年令（新局／除錯用；年份推進時舊年序自然失效，不必每年清） */
+export function clearActed(save) {
+  if (save && typeof save === 'object') save.acted = {};
+}
+
+/** 今年已經行動過的將名（給 UI 列出「今年已行動」） */
+export function actedNames(save) {
+  const y = yearIndexOf(save);
+  const raw = save?.acted && typeof save.acted === 'object' && !Array.isArray(save.acted) ? save.acted : {};
+  return Object.keys(raw).filter((n) => intOr(raw[n], 0, 0) === y);
+}
+
+/* ======================================================================
+ * [F3] 在路上的武將：隨軍出征／調動中的將，當年不能做內政
+ * 原作依據：`project/210_原作战斗流程规格.md` §1「在该年『在路上的部队』里的武将
+ * 当年不能做内政」。權威來源是 `save.armies`（side==='A'）；`save.away` 是它的鏡像，
+ * 由 campaign.html 在出發/回城/退兵時呼叫 `syncAway()` 重算。
+ * ==================================================================== */
+
+/** 在路上的將名集合（save.away ∪ 我方兵團的 general/officers） */
+export function awayNameSet(save) {
+  const out = new Set();
+  const away = save?.away && typeof save.away === 'object' && !Array.isArray(save.away) ? save.away : {};
+  for (const [name, id] of Object.entries(away)) if (name && id) out.add(name);
+  for (const a of Array.isArray(save?.armies) ? save.armies : []) {
+    if (!a || a.side !== 'A') continue;
+    for (const n of [a.general, ...(Array.isArray(a.officers) ? a.officers : [])]) {
+      if (typeof n === 'string' && n) out.add(n);
+    }
+  }
+  return out;
+}
+
+/** 由 save.armies 重算 save.away（回傳同一份映射） */
+export function syncAway(save) {
+  if (!save || typeof save !== 'object') return {};
+  const next = {};
+  for (const a of Array.isArray(save.armies) ? save.armies : []) {
+    if (!a || a.side !== 'A') continue;
+    for (const n of [a.general, ...(Array.isArray(a.officers) ? a.officers : [])]) {
+      if (typeof n === 'string' && n && !next[n]) next[n] = typeof a.id === 'string' ? a.id : '';
+    }
+  }
+  save.away = next;
+  return next;
 }
 
 /** 每城運行態：兵/民/金 沿用 saves.js 的形狀，另加 `def`（城防運行態，見下方註解）。 */
@@ -679,10 +782,15 @@ export function prepStateOf(save, cityDef) {
 }
 
 /**
- * 換月補預備兵（R12）。原作的補充公式未定位（04c §2.4），這裡用
- * 「每月補上限的 10%，補到滿為止」—— 逐月 lazy tick：以 `st.prepMonth` 記已結算到哪個月，
- * 所以中間幾個月沒開這一頁也不會漏（推進 N 月就補 N 次）。
- * **campaign.html 的 advanceMonth() 可以直接調這支**（它目前只結算金/人口/守軍）。
+ * 換月補預備兵 —— **舊設計（已停用，只作 `?loose=1` 對照）**。
+ *
+ * [口径] 原作不是白補：`project/210_原作战斗流程规格.md` §1 + 内政指南
+ * 「城里每 100 金钱 = 1 预备兵，随时间自动转换，直到钱花光或兵满」。
+ * 這支「每月白補 10%」是 R12 在公式未定位時的暫代，F13 起生產路徑改用
+ * `prepFromMoney()`；本函式保留是因為 `tests/city_rules.test.ts:176-192`
+ * 釘死了它的行為，且 `?loose=1` 要能跑回舊手感做對照。
+ * 逐月 lazy tick：以 `st.prepMonth` 記已結算到哪個月，中間幾個月沒開頁也不會漏。
+ * **不要在新代碼裡呼叫它**（只有 `autonomyTick(..., { loose: true })` 會走到）。
  */
 export function refillPrep(save, cityDef) {
   const st = ensureCityState(save, cityDef);
@@ -701,6 +809,35 @@ export function refillPrep(save, cityDef) {
   if (gained > 0) st.prep += gained;
   st.prepMonth = month;
   return { ok: true, gained: Math.max(0, gained), cap, prep: st.prep };
+}
+
+/** 錢變兵匯率：100 金 = 1 預備兵（原作城結構 +0x92 金 → +0x86 預備兵，換月結算）。 */
+export const PREP_PER_GOLD = 100;
+
+/**
+ * 錢變兵（F13，原作線）：每換月結算，每 100 金換 1 預備兵，直到**錢花光或預備兵滿**。
+ *
+ *   規格：`project/210_原作战斗流程规格.md` §1「城里每 100 金钱 = 1 预备兵，随时间自动
+ *   转换，直到钱花光或兵满」；内政指南同段（`work/flow_audit/内政大地图_差异.md` L122-124）。
+ *
+ * 用 **每城** `st.money`（城結構 +0x92 的運行態），不是 `save.gold`（那是全勢力總賬，
+ * 兩者分裂見差異表 F16，屬 P1 不在本輪）。
+ *   n = min(floor(money / 100), prepCap − prep)
+ *   money -= n * 100 ; prep += n
+ *
+ * 回傳 {ok, city, n, cost, prep, cap, money}；n === 0（沒錢／已滿）也算結算成功。
+ */
+export function prepFromMoney(save, cityDef) {
+  const st = ensureCityState(save, cityDef);
+  if (!st) return { ok: false, reason: 'no-city', n: 0, cost: 0, prep: 0, cap: 0, money: 0 };
+  const cap = prepCapOf(st.pop);
+  const room = Math.max(0, cap - st.prep);
+  const n = Math.min(Math.floor(Math.max(0, num(st.money)) / PREP_PER_GOLD), room);
+  if (n > 0) {
+    st.prep += n;
+    st.money -= n * PREP_PER_GOLD;
+  }
+  return { ok: true, city: cityDef.NAME, n, cost: n * PREP_PER_GOLD, prep: st.prep, cap, money: st.money };
 }
 
 /**
@@ -744,6 +881,8 @@ export function cityStateOf(save, cityName) {
  *
  * 「在野」的將不算守軍：即使他在這座城，也要先被搜索招到（roster[城] 有名字）才進名單。
  * 被調走的將記在 roster._moved[將名] = 落腳城，所以原城不再列他。
+ * [F3] 隨軍在路上的將（save.away / 我方兵團）也不算：原作「在路上的武將當年不能做內政」，
+ *      把他從名冊裡濾掉，選將抽屜與「武將 N」計數就同時對了。
  */
 export function rosterOf(save, cityName, ctx) {
   const scenIdx = intOr(ctx?.scenIdx, 0, 0);
@@ -751,10 +890,12 @@ export function rosterOf(save, cityName, ctx) {
   const moved = save?.roster?._moved || {};
   const extra = Array.isArray(save?.roster?.[cityName]) ? save.roster[cityName] : [];
   const extraSet = new Set(extra);
+  const away = awayNameSet(save);
   const out = [];
   const seen = new Set();
   for (const g of generals) {
     if (!g || !g.NAME || g.NAME === '盜賊') continue;
+    if (away.has(g.NAME)) continue;
     const home = cityOf(g, scenIdx);
     const movedTo = moved[g.NAME] || '';
     if (movedTo) {
@@ -770,7 +911,7 @@ export function rosterOf(save, cityName, ctx) {
     out.push(g);
   }
   for (const name of extra) {
-    if (seen.has(name)) continue;
+    if (seen.has(name) || away.has(name)) continue;
     if (moved[name] && moved[name] !== cityName) continue;
     const g = generalOf(generals, name);
     if (!g) continue;
@@ -1387,22 +1528,32 @@ export function runAutonomy(save, cityDefs, ctx, opts = {}) {
 }
 
 /**
- * 換月 lazy tick：把「預備兵補給」與「自治代行」補到當前月（一個月只結算一次）。
- * 由 city.html 在載入時呼叫；campaign.html 的 advanceMonth() 若之後要接，直接調這支即可。
+ * 換月 lazy tick：把「錢變兵」與「自治代行」補到當前月（一個月只結算一次）。
+ * 由 city.html 在載入時呼叫、campaign.html 的 advanceMonth() 也會呼叫。
+ *
+ * F13：預設走 `prepFromMoney()`（原作 100 金 → 1 預備兵）；
+ * `opts.loose === true`（`?loose=1`）才走舊的 `refillPrep()`（每月白補 10%）做對照。
+ * refilled 仍是**每城都 push**（gained 0 也 push），既有測試與城市列表都靠這個形狀。
  * @returns {{month:number, refilled:Array, auto:object|null, first:boolean}}
  */
-export function autonomyTick(save, cityDefs, ctx) {
+export function autonomyTick(save, cityDefs, ctx, opts = {}) {
   ensureExtras(save);
   const defs = Array.isArray(cityDefs) ? cityDefs.filter(Boolean) : [];
   const month = intOr(save?.month, 1, 1);
   const last = intOr(save.autoMonth, 0, 0);
   if (!(month > last)) return { month, refilled: [], auto: null, first: false };
 
+  const loose = !!(opts && opts.loose === true);
   const refilled = [];
   for (const def of defs) {
-    const r = refillPrep(save, def);
-    if (r.gained > 0) refilled.push({ city: def.NAME, gained: r.gained, prep: r.prep, cap: r.cap });
-    else if (r.ok) refilled.push({ city: def.NAME, gained: 0, prep: r.prep, cap: r.cap });
+    if (loose) {
+      const r = refillPrep(save, def);
+      if (r.gained > 0) refilled.push({ city: def.NAME, gained: r.gained, prep: r.prep, cap: r.cap });
+      else if (r.ok) refilled.push({ city: def.NAME, gained: 0, prep: r.prep, cap: r.cap });
+    } else {
+      const r = prepFromMoney(save, def);
+      if (r.ok) refilled.push({ city: def.NAME, gained: r.n, cost: r.cost, prep: r.prep, cap: r.cap, money: r.money, kind: 'money' });
+    }
   }
   save.autoMonth = month;
 

@@ -240,6 +240,9 @@ import { TROOP_COLUMNS_MAX, cavalryCapOf } from '../dist/core/levels.js';
 // 不在 HTML 裡另抄一份（槽數/去重/夾值只有一個口徑）。
 import * as DQ from '../dist/core/deploy_queue.js';
 import * as Saves from './saves.js';
+// 出征兵數閉環（F23/F24）：出征上限 = min(每將等級上限, 城兵)、確認時扣城兵、戰後按存活比回寫，
+// 這三條公式只在 web/march_flow.js 裡有一份 —— main.js 戰後回寫 import 的是同一個模組。
+import * as MF from './march_flow.js';
 // 關卡判定只有一份（`RATE===0 || POPULATION===0`）：本頁用它把「空城」與「關卡」的守將說明分開，
 // 也讓 12 座關的守軍口徑（garrison.json 的 garrison）與 campaign.html / Cocos 三處一致（project/163）。
 import * as CM from './city_model.js';
@@ -329,6 +332,38 @@ const enemyChief = enemy.enemyParams ? enemy.enemyGeneral : null;
 // 出發城來源：?from=<城名>（行军/出征会带）→ 存档 owned[0] → 目标城（兜底）。
 const HOME = qs.get('from') || (save.owned && save.owned[0]) || target;
 const homeCity = (scenario.cities || []).find((c) => c.NAME === HOME) || { NAME: HOME };
+
+// ---------------------------------------------------------------- 出征兵源（F23）
+// 兵只能從「出發城實有兵 + 預備兵」裡出。舊版下面的 `soldiers = SOLDIER_CAP` 是按等級上限
+// 自動填滿：project/93 §5 實測陳留 200 兵，Lv.2 的曹操被填 10 兵，出征列表後面 4 槽的「100 兵」
+// 只是 UI 數字、城裡一個都沒少。現在等級上限只當**每將上限**，真正能帶多少和城兵取小。
+const HOME_TROOPS_FALLBACK = Saves.cityTroops(homeCity);
+const HOME_PREP_CAP = CM.prepCapOf(homeCity.POPULATION ?? 0);   // 與 campaign 的預備兵池同式
+// 兩種入口的兵源不同，先分清再算上限：
+//   city = 從城裡直接出征（`?city=&from=<出發城>`）→ 兵還在城裡，確認時才扣；
+//   army = 兵團抵達城下（`?army=<id>` 或 `?troops=<兵團兵>`）→ 兵在 campaign 的 dispatchArmy()
+//          時就扣過了，這頁只分配上陣數，**不能再扣一次**（campaign.html:2871 已扣）。
+const ARMY_ID = (qs.get('army') || '').trim();
+const ARMY_QUERY = Math.max(0, Math.trunc(Number(qs.get('troops')) || 0));
+const ARMIES = Array.isArray(save.armies) ? save.armies : [];
+const MARCH_ARMY = (ARMY_ID ? ARMIES.find((a) => a && a.id === ARMY_ID) : null)
+  // 舊連結不帶 army id：用「從這城出發、已抵達目標城」的 A 方兵團認領（抵達城下就是這種）
+  || ARMIES.find((a) => a && a.side === 'A' && a.from === HOME && a.to === target
+    && Number(a.progress) >= 1 && !a.stationed) || null;
+const MARCH_MODE = (ARMY_QUERY > 0 || MARCH_ARMY) ? 'army' : 'city';
+const CITY_STATE = MF.cityPoolOf(save.cities && save.cities[HOME], {
+  fallbackTroops: HOME_TROOPS_FALLBACK,
+  prepCap: HOME_PREP_CAP,
+});
+const ARMY_TROOPS = Math.min(MF.TROOP_HARD_CAP,
+  ARMY_QUERY > 0 ? ARMY_QUERY : (MARCH_ARMY ? Math.trunc(Number(MARCH_ARMY.troops) || 0) : 0));
+/**
+ * 這一仗「隨軍出征」的兵 = 已經或即將離開出發城的兵。
+ * 城裡沒帶走的那部分不參與傷亡，也不該被當成這一仗的預算 —— city 模式在確認出征時
+ * 還會用真正的上陣數覆蓋它（見 `commitMarchTroops()`）。
+ */
+let MARCH_POOL = MARCH_MODE === 'army' ? ARMY_TROOPS : CITY_STATE.pool;
+
 function officersOf(name) {
   const major = homeCity.NAME === name ? (homeCity.MAJOR || '') : '';
   return generals
@@ -351,6 +386,17 @@ if (!pool.length) {
     .sort((a, b) => (b.STR + b.INT) - (a.STR + a.INT));
 }
 if (!pool.length) pool = generals.filter((g) => g.NAME !== '盜賊');
+// 出征令的名冊（`?officers=張飛,關羽`，F22）：兵團出發時就定好帶哪幾位將，這一頁不該再從
+// 「這座城的所有武將」裡挑（那會出現出征 5 人、編成頁換成太守的兩個名冊）。名冊優先，找不到的忽略。
+const OFFICER_PARAM = MF.parseOfficerList(qs.get('officers'));
+if (OFFICER_PARAM.length) {
+  const byName = new Map(pool.map((g) => [g.NAME, g]));
+  const listed = OFFICER_PARAM.map((n) => byName.get(n)).filter(Boolean);
+  if (listed.length) {
+    pool = listed;
+    borrowed = false;
+  }
+}
 // 主將只有一個數據源：出征令帶進來的名字（`?a=`；舊連結用 `?gen=`）。
 // campaign.html 的按鈕（commander()）與浮層（localGeneral()）各自算過一次名字，兩個都不等於
 // 這一頁的「武將池第一個」—— 三處各挑一個，就成了 project/89 §五 的三個名字。
@@ -404,6 +450,23 @@ let SOLDIER_CAP = troopCapOf(GEN_LEVEL);
 let CAV_CAP = cavalryCapOf(GEN_LEVEL);
 /** 兩欄相加後的上陣總上限（200 = 100 步 + 100 騎 = 原作士兵槽 `0xC8`） */
 let TROOP_CAP = Math.min(TROOP_COLUMNS_MAX, SOLDIER_CAP + CAV_CAP);
+// 上面三個只是「每將等級上限」；F23 之後真正生效的是它們與城兵取小（見 applyMarchCap）
+let LEVEL_SOLDIER_CAP = SOLDIER_CAP;
+let LEVEL_CAV_CAP = CAV_CAP;
+/**
+ * 把兩欄上限夾到「這一仗能帶出去的兵」裡（`MARCH_POOL`）：等級上限 ∪ 城兵，取小。
+ * 步/騎分配沿用 rerollCaps 的規矩「步兵欄先補滿」：先給步兵，剩下的才給騎兵。
+ * 城裡沒兵（`MARCH_POOL === 0`）時兩欄都是 0，滑桿 disabled、出征鍵變灰，不會出現
+ * 「城裡 0 兵、編成頁卻填 200」的假數字。
+ */
+function applyMarchCap() {
+  // 上限公式只在 march_flow.js 裡有一份：min(每將等級上限, 這一仗能帶的兵)
+  const total = MF.fieldCapOf(LEVEL_SOLDIER_CAP + LEVEL_CAV_CAP, MARCH_POOL);
+  SOLDIER_CAP = Math.min(LEVEL_SOLDIER_CAP, total);
+  CAV_CAP = Math.min(LEVEL_CAV_CAP, Math.max(0, total - SOLDIER_CAP));
+  TROOP_CAP = Math.min(TROOP_COLUMNS_MAX, SOLDIER_CAP + CAV_CAP);
+}
+applyMarchCap();
 let troop = defaultTroop(gen), form = defaultForm(gen);
 // `soldiers` = 步兵欄、`cavalry` = 騎兵欄；帶去戰鬥頁的是兩者之和（`main.js` 只認總數）
 let soldiers = SOLDIER_CAP, cavalry = CAV_CAP;
@@ -415,9 +478,10 @@ let soldiers = SOLDIER_CAP, cavalry = CAV_CAP;
  * **步兵欄先補滿，餘數歸騎兵欄**（`cav = clamp(total − 步上限, 0, 騎上限)`）。
  */
 function rerollCaps(level, total) {
-  SOLDIER_CAP = troopCapOf(level);
-  CAV_CAP = cavalryCapOf(level);
-  TROOP_CAP = Math.min(TROOP_COLUMNS_MAX, SOLDIER_CAP + CAV_CAP);
+  LEVEL_SOLDIER_CAP = troopCapOf(level);
+  LEVEL_CAV_CAP = cavalryCapOf(level);
+  applyMarchCap();                                   // 城兵不足時兩欄一起縮（F23）
+  if (TROOP_CAP <= 0) { soldiers = 0; cavalry = 0; return; }
   const keep = Math.max(1, Math.min(TROOP_CAP, Math.round(Number(total) || TROOP_CAP)));
   cavalry = Math.max(0, Math.min(CAV_CAP, keep - SOLDIER_CAP));
   soldiers = Math.max(1, Math.min(SOLDIER_CAP, keep - cavalry));
@@ -437,6 +501,15 @@ const QUEUE_FALLBACK = pool.slice(0, DQ.DEPLOY_SLOTS).map((g) => g.NAME);
 const QUEUE_STORED = DQ.hasQueue(save);
 let queue = DQ.queueOf(save, QUEUE_FALLBACK);
 if (!queue.length) queue = DQ.makeQueue([gen.NAME]);
+// 出征令帶了名冊（F22）→ 隊列按名冊重建：這是這一仗的出征令，不沿用上一場留下的順序。
+// 兵種/兵力能沿用就沿用（同一個將上次帶多少兵），沿用不到就讓 core 的預設值接手。
+if (OFFICER_PARAM.length && pool.length) {
+  const prev = new Map(queue.map((s) => [s.general, s]));
+  queue = DQ.makeQueue(pool.map((g) => g.NAME), {
+    troopOf: (n) => (prev.get(n) || {}).troop,
+    troopsOf: (n) => (prev.get(n) || {}).troops,
+  });
+}
 // 兩個方向要分清楚：
 //  · 出征令 / 大地圖指定了主將（?a=）→ 他就是主將，必須坐第 1 槽；已在別槽就互換，不在就頂掉。
 //  · 沒指定、但存檔有隊列 → **存檔的第 1 槽才是主將**，要把它回填到頂部。否則刷新一次
@@ -476,23 +549,62 @@ function syncFromQueue() {
 }
 
 /**
- * 寫回存檔（兩份，口径不同）：
+ * 存檔兩份一起寫（口徑不同）：
  *  1) legacy 鍵 `sanguo_campaign_v1` —— campaign.html / main.js 戰鬥寫回都認這份；
  *  2) 當前自動存檔槽的 snapshot —— campaign.html 讀槽時直接拿到，不必賭 legacy 的 ts 比較。
- * 任一步失敗都不影響本頁操作（私隱模式 / 槽壞掉最多是這次調序沒存上）。
+ * 調序、扣城兵都走這裡；任一步失敗都不影響本頁操作（私隱模式 / 槽壞掉最多是這次沒存上）。
  */
-function persistQueue() {
-  if (!queue.length) return;
-  DQ.saveQueue(save, queue);
+function writeSaveBoth() {
   try { localStorage.setItem(KEY, JSON.stringify(save)); } catch { /* 留給 autosave */ }
   try {
     const store = Saves.loadStore(localStorage);
     const entry = store.slots && store.slots[Saves.lastUsed(store)];
-    if (entry && entry.snapshot && typeof entry.snapshot === 'object') {
-      Saves.setDeployQueue(entry.snapshot, queue);
-      Saves.saveStore(store, localStorage);
+    if (!entry || !entry.snapshot || typeof entry.snapshot !== 'object') return;
+    if (queue.length) Saves.setDeployQueue(entry.snapshot, queue);
+    // 城兵也要進槽：campaign.html 的 ensureCityState() 只在「槽裡沒有這座城」時才初始化，
+    // 槽裡留著舊的 200 兵，玩家出征回來就還看到 200（F23 的另一半）。
+    const st = save.cities && save.cities[HOME];
+    if (MARCH_MODE === 'city' && st && st.troops != null) {
+      const snapCities = (entry.snapshot.cities && typeof entry.snapshot.cities === 'object')
+        ? entry.snapshot.cities
+        : (entry.snapshot.cities = {});
+      const dst = (snapCities[HOME] && typeof snapCities[HOME] === 'object')
+        ? snapCities[HOME]
+        : (snapCities[HOME] = {});
+      dst.troops = st.troops;
+      dst.prep = st.prep;
     }
-  } catch { /* 槽坏了不擋調序 */ }
+    Saves.saveStore(store, localStorage);
+  } catch { /* 槽坏了不擋操作 */ }
+}
+
+function persistQueue() {
+  if (queue.length) DQ.saveQueue(save, queue);
+  writeSaveBoth();
+}
+
+/**
+ * 出征確認：把出陣兵從出發城扣掉（F23）。
+ * 兵團線（`MARCH_MODE === 'army'`）**跳過** —— 那些兵在 campaign 的 dispatchArmy() 就離開城了，
+ * 這裡再扣一次就是同一批兵扣兩遍。
+ * 失敗（城裡不夠）回 `{ok:false}`，一個兵都不扣：編成頁不允許超分。
+ */
+function commitMarchTroops(fielded) {
+  const n = Math.max(0, Math.trunc(Number(fielded) || 0));
+  if (MARCH_MODE === 'army') return { ok: true, taken: 0, pool: ARMY_TROOPS };
+  if (n <= 0) return { ok: false, reason: 'empty', want: n, taken: 0, pool: CITY_STATE.pool };
+  const cities = (save.cities && typeof save.cities === 'object') ? save.cities : (save.cities = {});
+  const st = (cities[HOME] && typeof cities[HOME] === 'object') ? cities[HOME] : (cities[HOME] = {});
+  const res = MF.takeFromCity(st, n, { fallbackTroops: HOME_TROOPS_FALLBACK, prepCap: HOME_PREP_CAP });
+  if (!res.ok) return res;
+  st.troops = res.troops;
+  st.prep = res.prep;
+  if (!Number.isFinite(Number(st.pop))) st.pop = Number(homeCity.POPULATION) || 0;
+  if (!Number.isFinite(Number(st.money))) st.money = Number(homeCity.MONEY) || 0;
+  save.ts = Date.now();
+  MARCH_POOL = res.pool;      // 城裡剩下的兵：同頁再回看時不至於還顯示舊數
+  writeSaveBoth();
+  return { ok: true, taken: res.taken, pool: res.pool };
 }
 
 function bonus(matrix, a, b) {
@@ -572,13 +684,15 @@ function render() {
 
   // 兵力：兩欄各自 0..上限（原作 `+0x42` 帶兵 / `+0x46` 騎兵，互不包含，project/168 §4）。
   // 上陣兵 = 步 + 騎（`unit+0x5C`）；兩欄相加的天花板 200 = 100 步 + 100 騎 = 原作士兵槽 `0xC8`。
-  // `troopCapOf()` / `cavalryCapOf()` 都由 core/levels.ts 給（web 與 Cocos 同一份），這頁不另抄公式。
+  // F23：上限不是「等級上限」單獨決定，而是 `applyMarchCap()` 夾過城兵的結果 —— 城裡 0 兵時
+  // 兩欄必須是 0（`soldiers` 的下限也要從 1 降成 0），否則滑桿顯示「1 / 0」這種不存在的兵。
   const range = $('numrange');
   const cavRange = $('cavrange');
-  soldiers = Math.max(1, Math.min(SOLDIER_CAP, soldiers));
+  soldiers = Math.max(TROOP_CAP > 0 ? 1 : 0, Math.min(SOLDIER_CAP, soldiers));
   cavalry = Math.max(0, Math.min(CAV_CAP, cavalry));
   range.max = String(SOLDIER_CAP);
   range.value = String(soldiers);
+  range.disabled = TROOP_CAP <= 0;
   cavRange.max = String(Math.max(0, CAV_CAP));
   cavRange.value = String(cavalry);
   cavRange.disabled = CAV_CAP <= 0;
@@ -586,16 +700,27 @@ function render() {
   $('numcap').textContent = SOLDIER_CAP;
   $('cavnow').textContent = cavalry;
   $('cavcap').textContent = CAV_CAP;
-  $('numhint').textContent = CAV_CAP > 0
-    ? `步/騎 兩欄 · 相加才是上陣兵（${SOLDIER_CAP} + ${CAV_CAP}）`
-    : `步/騎 兩欄 · Lv.${GEN_LEVEL} 還沒到 20 級，騎兵欄為 0`;
+  // 兵從哪裡來：city = 城裡實有（扣兵在確認出征那一刻）；army = 兵團已從城裡扣走、正在城下。
+  // 兩種都要寫清楚，否則玩家會以為「兵團在城外、城裡還有一份」（F23 的另一半）。
+  const poolLine = MARCH_MODE === 'army'
+    ? `兵團攜行 ${ARMY_TROOPS} 兵（已從 ${HOME} 扣走，戰後按存活比回寫）`
+    : `城中有 ${MARCH_POOL} 兵（部隊 ${CITY_STATE.troops} + 預備 ${CITY_STATE.prep}）`;
+  $('numhint').textContent = TROOP_CAP <= 0
+    ? `${HOME} 沒有可帶的兵：先回大地圖徵兵／等預備兵補充`
+    : (CAV_CAP > 0
+      ? `步/騎 兩欄 · 相加才是上陣兵（${SOLDIER_CAP} + ${CAV_CAP}）· ${poolLine}`
+      : `步/騎 兩欄 · Lv.${GEN_LEVEL} 還沒到 20 級，騎兵欄為 0 · ${poolLine}`);
+  // F23 的驗收點：同一行要同時看得到「這一仗帶多少 / 出發城有多少」，不能只給等級上限。
   $('numtotal').innerHTML =
-    `上陣 <b>${soldiers + cavalry}</b> 兵 = 步 ${soldiers} + 騎 ${cavalry}`
-    + `<span class="tag">兩欄相加</span>`;
+    `上陣 兵 <b>${soldiers + cavalry}</b> / `
+    + `${MARCH_MODE === 'army' ? `兵團 <b>${ARMY_TROOPS}</b>` : `城中有 <b>${MARCH_POOL}</b>`} 兵`
+    + ` = 步 ${soldiers} + 騎 ${cavalry}<span class="tag">兩欄相加</span>`;
   // 快捷档按「当前步兵上限」切分（半编 / 八成 / 满编）；骑兵栏另有自己的滑杆，不受这里影响。
   const quick = [Math.round(SOLDIER_CAP / 2), Math.round(SOLDIER_CAP * 0.8), SOLDIER_CAP]
     .map((n) => Math.max(1, Math.min(SOLDIER_CAP, n)))
     .filter((n, i, a) => a.indexOf(n) === i);
+  // 城裡沒兵：不畫檔位（畫了也只會是「步 1」，點下去還是 0）
+  if (SOLDIER_CAP <= 0) quick.length = 0;
   $('numgrid').innerHTML = quick.map((n) => `<div class="it ${n === soldiers ? 'on' : ''}" data-num="${n}" style="width:112px">步 ${n}${n === SOLDIER_CAP ? '<span class="tag">滿編</span>' : ''}</div>`).join('');
 
   // 出陣順序：5 行。第 1 槽永遠跟隨主將區的兵種/兵力（同一頁不能有兩個主將口徑）；
@@ -635,6 +760,8 @@ function render() {
     + `兵種 <b style="color:${tb >= 0 ? '#7FD1A8' : '#E08A7A'}">${tb > 0 ? '+' : ''}${tb}</b> · `
     + `陣形 <b style="color:${fb >= 0 ? '#7FD1A8' : '#E08A7A'}">${fb > 0 ? '+' : ''}${fb}</b>`;
   $('gosub').textContent = `${gen.NAME} · ${TROOP_NAMES[troop] ?? '?'} · ${FORM_NAMES[form] ?? '?'} · ${soldiers}+${cavalry} 兵`;
+  // 城裡沒兵就讓出征鍵看起來按不下去（真按下去也會被 go 的守衛擋住，這裡只是不要騙玩家）
+  $('go').style.opacity = TROOP_CAP > 0 ? '' : '.45';
   const net = tb + fb;
   // 情報口徑（project/93 §1 + §5）：
   //   「上陣」= 這一仗敵方實際出場的兵（出征令 ?bsoldiers=，唯一口徑）
@@ -656,7 +783,7 @@ function render() {
     `敵軍上陣 ${bsTxt} · 城內守軍共 ${garrison} 兵<br>` +
     `${chiefTxt}<br>` +
     `我方 步 ${soldiers} + 騎 ${cavalry} = <b>${soldiers + cavalry}</b> 兵`
-    + `（上限 ${SOLDIER_CAP} 步 + ${CAV_CAP} 騎）· 主將 ${gen.NAME}（武 ${gen.STR} / 智 ${gen.INT}）<br>` +
+    + `（上限 ${SOLDIER_CAP} 步 + ${CAV_CAP} 騎 · 出處 ${MARCH_MODE === 'army' ? `兵團 ${ARMY_TROOPS}` : `城兵 ${MARCH_POOL}`}）· 主將 ${gen.NAME}（武 ${gen.STR} / 智 ${gen.INT}）<br>` +
     `相剋淨值合計 <b style="color:${net >= 0 ? '#7FD1A8' : '#E08A7A'}">${net > 0 ? '+' : ''}${net}</b>` +
     `（原作命中 = 150 + 相剋 + 士氣/疲勞修正，300 制隨機）`;
 }
@@ -730,10 +857,26 @@ $('back').addEventListener('click', () => { location.href = './campaign.html?sel
 $('go').addEventListener('click', () => {
   // 出征前落一次盤：滑桿/換兵種可能還沒 persist 過，這一仗的隊列必須是畫面上這個順序
   persistQueue();
+  // F23：出陣兵從出發城扣掉（兵團線跳過 —— 那批兵在 campaign 的 dispatchArmy() 就扣過了）。
+  // 城裡不夠就整筆失敗、一個兵都不扣：這一頁不允許超分。
+  const fielded = soldiers + cavalry;
+  const commit = commitMarchTroops(fielded);
+  if (!commit.ok) {
+    notice(commit.reason === 'empty'
+      ? `${HOME} 沒有可帶的兵：先回大地圖徵兵／等預備兵補充。`
+      : `${HOME} 只有 ${commit.pool} 兵，帶不走 ${fielded} 兵。`);
+    return;
+  }
   // 主將名用**同一個**：a=（新，規範）與 gen=（舊連結相容）都寫同一個名字，
   // main.js 的 generalFromQuery() 也是先讀 a= 再退回 gen=，所以 HUD / 結算 / 寫回全是這一個名字。
   const q = new URLSearchParams({
     city: target, from: 'campaign', a: gen.NAME, gen: gen.NAME,
+    // F23/F24 的回寫契約（main.js 的 writeBackCampaign() 就讀這兩個）：
+    //   home      = 出發城名。不能拿 from= 當城名 —— from= 是入口標記 'campaign'（main.js:62）。
+    //   marchpool = 這一仗隨軍出征、已離開出發城的兵：戰損按它折算，倖存兵回寫到 home 那座城。
+    //               army 模式 = 兵團總兵（含留在城下沒上陣的）；city 模式 = 這次真的扣走的數。
+    home: HOME,
+    marchpool: String(MARCH_MODE === 'army' ? ARMY_TROOPS : fielded),
     troop: String(troop), form: String(form),
     // 上陣兵 = 步 + 騎（`unit+0x5C`，原作兩欄相加）：main.js 只讀 `soldiers` 當總數，
     // 所以這裡送的是兩欄之和；`cav` 另外記一份騎兵欄，供以後戰鬥頁接上（main.js 本輪禁改）。

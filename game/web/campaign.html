@@ -91,6 +91,14 @@
   .btn.primary{background:linear-gradient(165deg,#4A3A1E,#2A2114);border-color:rgba(216,179,106,.6);color:var(--gold-2)}
   .btn[disabled]{opacity:.38}
   #hint{padding:8px 4px 0;font-size:17px;color:var(--ink-3);line-height:1.45}
+  /* [F18] 六項資訊卡：點自己的城才出現（原作面板：人口/防禦/金錢/預備兵/武將/太守·軍師） */
+  #cityCard{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 8px;margin-top:6px;
+    padding:8px 10px;border:1px solid rgba(216,179,106,.32);border-radius:6px;
+    background:linear-gradient(165deg,rgba(42,48,56,.92),rgba(25,29,35,.92))}
+  #cityCard[hidden]{display:none}
+  #cityCard .cc{display:flex;flex-direction:column;gap:1px}
+  #cityCard .cc b{font-size:13px;color:var(--ink-3);font-weight:400;letter-spacing:.06em}
+  #cityCard .cc span{font-size:20px;color:var(--gold-2)}
   /* 戰報：AI 出兵的最近 8 條（v6） */
   #logbox{flex:none;height:152px;overflow:hidden;padding:6px 20px 4px;
     border-top:1px solid rgba(216,179,106,.14);
@@ -288,6 +296,8 @@
   <div id="logbox"><div class="lt">戰 報 · 最近 8 條</div><div id="logrows"></div></div>
   <footer>
     <div id="actions"></div>
+    <!-- [F18] 點自己的城：六項資訊卡（人口/防御/金錢/預備兵/武將/太守·軍師），原作面板口徑 -->
+    <div id="cityCard" hidden></div>
     <div id="hint">點城選中；自己的城可內政，別人的城可出征。</div>
     <a href="./items.html" style="display:block;margin-top:4px;text-align:right;font-size:17px;letter-spacing:.1em;color:#D8B36A;text-decoration:none">物品 →</a>
   </footer>
@@ -530,9 +540,17 @@ import { listWisdomChoices, wiseHintOf } from '../dist/core/wises.js';
 // R56 戰後武將處置：斬首出池 / 招降入城（core/roster.ts 的 dist 產物；web 側唯一接線點）
 // R85 起改走"先逐將詢問、玩家決策後才落庫"：surrenderCandidates（卡片）+ applySurrender（決策）
 // + needSurrenderPanel（空列表不弹）；applyPostBattle 仍是 applySurrender 的下游，這裡不再直接調。
+// R208（P0）：勝者才有處置權 —— 我方戰敗時不開面板，被俘將交敵方 AI 處置
+// （applyAiDisposal / planAiDisposal，沿用戰鬥頁已判結果，不重擲）；decideBattleWon 讀
+// main.js 戰後寫回的 save.lastBattle（缺失時兜底），ourForceNames 給面板的 mine 名單。
 import {
+  applyAiDisposal,
   applySurrender,
+  decideBattleWon,
   needSurrenderPanel,
+  ourForceNames,
+  planAiDisposal,
+  readBattleOutcome,
   surrenderCandidates,
 } from '../dist/core/roster.js';
 
@@ -1444,6 +1462,8 @@ function nextArmyId() {
 
 function removeArmy(id) {
   save.armies = (save.armies || []).filter((a) => a.id !== id);
+  // [F3] 兵團沒了（進城/退兵/遭遇/全滅）→ 隨軍武將立刻回到「可內政」名單
+  if (typeof CM.syncAway === 'function') CM.syncAway(save);
 }
 
 function applyScenario(idx) {
@@ -2471,9 +2491,18 @@ function openGeneralSheetOf(name) {
   openGeneralSheet();
 }
 
-/** 內政終了（0x427FE0）：收束本月內政 → 月令鎖住、逐將行動權清零，回大地圖。 */
+/**
+ * 內政終了（0x427FE0）：收束本月內政 → 月令鎖住（窗口結束），回大地圖。
+ * [F1/F2] 「內政終了」只在 1 月有效：一年只有一個內政窗口。逐將行動權記在
+ * `save.acted`（每將每年一次），不隨窗口結束清零 —— 明年年序一變自然解鎖。
+ */
 function endMonth() {
   if (!gameStarted) return notice('尚未開局：先選劇本開始新遊戲。');
+  // [F1] 非正月沒有內政窗口可收束（原作 1 月內政月；其餘 11 個月只流動時間）
+  if (Saves.monthOfYear(save.month) !== 1) {
+    notice('非正月：內政窗口只在每年 1 月開（原作 1 月內政月）。');
+    return;
+  }
   if (CM.monthLocked(save, UNLIMITED)) {
     notice(`${CM.LOCK_HINT}：本月已收束，推進一月才會開新令。`);
     return;
@@ -2696,6 +2725,8 @@ function renderScenarioStrip() {
 }
 
 function render() {
+  // [F3] 每次重繪把「在路上」名單從 save.armies 重算一遍（舊檔/中途載入也能對上）
+  if (save && typeof CM.syncAway === 'function') CM.syncAway(save);
   // R86 S2-2：每次重繪前先吃一次 items.html 的裝備（readBagStore 只讀一個小 JSON，
   // 沒變也不會出錯）—— 這樣「去 items.html 換裝備 → 返回大地圖」立刻反映在武將數值上。
   syncEquipFromBag();
@@ -2707,10 +2738,12 @@ function render() {
   $('ct').textContent = save.owned.length;
   $('rec').textContent = Saves.recordText(save) + (save.defWins ? ` · 守 ${save.defWins}` : '');
   renderKingBar();
-  // R8 一月一令：本月已经下过令 → 徵兵/開發/出征 全部置灰（推進一月不受限）
+  // R8 一月一令：本月已经下过令 → 開發/出征 全部置灰（推進一月不受限）
   const locked = CM.monthLocked(save, UNLIMITED);
   const dis = locked ? ' disabled' : '';
   const sub = (normal) => locked ? CM.LOCK_HINT : normal;
+  // [F1] 內政窗口：一年只有 1 月能進（原作 1 月內政月，其余 11 个月只流動時間）
+  const inAffairs = Saves.monthOfYear(save.month) === 1;
 
   $('list').innerHTML = cities.map((c) => {
     const st = save.cities[c.NAME];
@@ -2719,7 +2752,7 @@ function render() {
     const color = Saves.forceColorOf(force);
     return `<div class="${cls}" data-name="${c.NAME}">
       <div class="n"><i class="fdot" style="background:${color}"></i>${c.NAME}<span>${mine(c.NAME) ? '我方' : (force || '無主')}</span></div>
-      <div class="s"><b>${st.troops}</b> 兵 · 防 ${c.DEFENSE ?? '—'}</div>
+      <div class="s"><b>${st.troops}</b> 兵 · 防 ${CM.ensureCityState(save, c).def}</div>
       <div></div><div class="s">${st.pop.toLocaleString()} 人 · $${st.money.toLocaleString()}</div>
     </div>`;
   }).join('');
@@ -2727,9 +2760,15 @@ function render() {
   const acts = [];
   const isMine = selected && mine(selected);
   if (selected && isMine) {
-    acts.push(`<div class="btn" data-act="recruit"${dis}><span>徵 兵</span><small>${sub('金 500 → 兵 +40')}</small></div>`);
+    // [F15] 大地圖不再有第三套徵兵口徑（舊碼 `save.gold -= 500; st.troops += 40`）：
+    // 改成進城跳「部隊徵兵」抽屜，走**同一條**經濟鏈「金 →(換月) 預備兵 →(徵兵) 兵」。
+    // 原作沒有「金直接買兵」，金買兵會讓錢變兵（F13）與正月歲入全部失去意義。
+    acts.push(`<div class="btn" data-act="recruit"${dis}><span>徵 兵</span><small>${sub('城內徵兵 · 預備兵 → 兵')}</small></div>`);
     acts.push(`<div class="btn" data-act="develop"${dis}><span>開 發</span><small>${sub('不耗金 → 民 +3000')}</small></div>`);
-    acts.push(`<div class="btn primary" data-act="city"><span>內 政</span><small>內政八命令</small></div>`);
+    // [F1] 正月才是內政月；其餘月份這顆鍵降級成只讀「查看」（能看不能下命令）。
+    acts.push(inAffairs
+      ? `<div class="btn primary" data-act="city"><span>內 政</span><small>正月 · 內政八命令</small></div>`
+      : `<div class="btn" data-act="city"><span>查 看</span><small>非正月 · 只讀</small></div>`);
     if (MARCH_ON) {
       const cap = dispatchCapOf(selected);   // R75：按主將帶兵上限（原固定 100）
       const ready = troopsOf(selected) >= cap && !locked;
@@ -2770,6 +2809,30 @@ function render() {
           + `（守軍 ${troopsOf(selected)} 兵 · 守將 ${names.length ? names.join('、') : '無人'}）`;
       })())
     : '點城選中；自己的城可內政，別人的城可出征。';
+
+  // [F18] 點自己的城 → 六項資訊卡（原作面板：人口/防禦/金錢/預備兵/武將/太守·軍師）。
+  // 讀運行態 st 的數值（防禦讀 ensureCityState().def，和列表同一口徑，不再顯示劇本死值）。
+  const card = $('cityCard');
+  if (card) {
+    const def = isMine ? ALL.find((c) => c.NAME === selected) : null;
+    const st = def ? save.cities[selected] : null;
+    if (def && st) {
+      const ps = CM.prepStateOf(save, def);
+      const gens = CM.rosterOf(save, selected, { scenIdx: currentScenarioIdx(), generals: GDATA.generals }) || [];
+      const cell = (k, v) => `<div class="cc"><b>${k}</b><span>${v}</span></div>`;
+      card.innerHTML =
+        cell('人口', `${Math.max(0, Math.trunc(Saves.num(st.pop))).toLocaleString()} / 1,000,000`)
+        + cell('防禦', `${Math.max(0, Math.trunc(Saves.num(CM.ensureCityState(save, def).def)))} / 999`)
+        + cell('金錢', `$${Math.max(0, Math.trunc(Saves.num(st.money))).toLocaleString()}`)
+        + cell('預備兵', `${ps.prep} / ${ps.cap}`)
+        + cell('武將', `${gens.length} / 10`)
+        + cell('太守·軍師', `${CM.majorOf(save, def) || '—'} · ${CM.wiseOf(save, def) || '—'}`);
+      card.hidden = false;
+    } else {
+      card.hidden = true;
+      card.innerHTML = '';
+    }
+  }
 
   if ($('mapwrap').style.display !== 'none') drawMap();
   renderLog();
@@ -2873,6 +2936,8 @@ function dispatchArmy(to) {
     stationed: false,
   });
   pushLog(`我 軍 出 征：${from} → ${to}（${cap} 兵，${marchMonths(pi)} 個月）`, 'info');
+  // [F3] 隨軍武將（含主將）本年不能做內政：由 save.armies 重算 save.away
+  if (typeof CM.syncAway === 'function') CM.syncAway(save);
   CM.markMonthActed(save, UNLIMITED);   // R8：派兵出征也算本月已下令
   persist();   // 進戰鬥前先鏡像到舊鍵，回來時 main.js 的寫回會被偵測到
   closeOverlays();
@@ -3704,25 +3769,38 @@ $('actions').addEventListener('click', (e) => {
     if ($('confirmSheet').hidden) notice(Saves.advanceNotice, 5000);
     return;
   }
-  // R8 一月一令：本月已下过令 → 徵兵/開發/出征 全部拒绝（按钮已置灰，这里兜住键盘与旧 URL）
-  if (['recruit', 'develop', 'dispatch', 'march', 'march_direct'].includes(act)
+  // R8 一月一令：本月已下过令 → 開發/出征 拒绝（按钮已置灰，这里兜住键盘与旧 URL）
+  // F15：徵兵已改為「進城徵兵」，本身不寫存檔，不該再吃這道鎖。
+  if (['develop', 'dispatch', 'march', 'march_direct'].includes(act)
     && CM.monthLocked(save, UNLIMITED)) return toast(CM.LOCK_HINT);
   if (act === 'dispatch') { openMarchTargets(); return; }
   if (!selected) return;
   const st = save.cities[selected];
   if (act === 'city') {
-    location.href = './city.html?city=' + encodeURIComponent(selected) + (UNLIMITED ? '&unlimited=1' : '');
+    // [F1] 非正月帶 `&view=1`：城內頁只讀（原作 1 月內政月，其餘 11 個月不能下命令）
+    location.href = './city.html?city=' + encodeURIComponent(selected)
+      + (Saves.monthOfYear(save.month) === 1 ? '' : '&view=1')
+      + (UNLIMITED ? '&unlimited=1' : '');
     return;
   }
   if (act === 'recruit') {
-    if (save.gold < 500) return toast('國庫不足：徵兵要 500 金。');
-    save.gold -= 500; st.troops = Math.min(600, st.troops + 40);
-    CM.markMonthActed(save, UNLIMITED); persist(); render(); return;
+    // [F15] 第三套口徑已刪（原本 `gold -= 500; troops += 40`）。
+    // 徵兵是內政命令（原作 1 月內政月），這裡只負責跳進城內的同一個抽屜。
+    if (!Saves.isYearStart(save.month)) {
+      return toast('非正月：徵兵屬於內政，只有 1 月能下（原作 1 月內政月）。');
+    }
+    location.href = './city.html?city=' + encodeURIComponent(selected) + '&cmd=recruit' + (UNLIMITED ? '&unlimited=1' : '');
+    return;
   }
   if (act === 'develop') {
-    if (save.gold < 400) return toast('國庫不足：開發要 400 金。');
-    save.gold -= 400; st.pop += 3000;
-    CM.markMonthActed(save, UNLIMITED); persist(); render(); return;
+    // [F12] 大地圖不再有第三套口徑（舊碼 `save.gold -= 400; st.pop += 3000`）。
+    // 原作開發不收金（`city_model.js:71 devGold = 0`，0x427B9E 外殼），而且「每將一年一次」
+    // 要選執行武將、要有太守 —— 這些判定全在城內頁 `doDevelop()` 裡，這裡只負責跳頁。
+    if (!Saves.isYearStart(save.month)) {
+      return toast('非正月：開發屬於內政，只有 1 月能下（原作 1 月內政月）。');
+    }
+    location.href = './city.html?city=' + encodeURIComponent(selected) + '&cmd=develop' + (UNLIMITED ? '&unlimited=1' : '');
+    return;
   }
   if (act === 'march') {
     if (distFromOwned(selected) !== 1) return toast('不接壤：只能打與我方相鄰的城。');
@@ -4699,63 +4777,136 @@ function annualForceCheck() {
 
 // ---------------------------------------------------------------- R56 戰後武將處置（web 接線）
 /**
- * R56 + R85：把 main.js 打完仗寫回舊鍵的結果，先**逐將詢問**（招降 / 斬首），玩家決策後才落到
- * **武將池**上（`core/roster.ts:applySurrender` → 既有的 `applyPostBattle`）：
- *   · 招降 → 進 `save.roster[回城]`，並從別城的同名副本裡摘掉（一人不可能在兩城）；
- *   · 斬首 → 從**所有城**名單刪掉，`roster._moved[name]='陣亡'`，之後 `city_model.rosterOf()/wildPool()`
- *     都查不到 → 永不再被搜索/招降（原作：斩将=从武将链摘掉）；
- *   · 釋放（R103）→ 從**我方**各城名單摘掉 + `roster._moved[name]='釋放'` 哨兵（不回原城的靜態歸屬、
- *     不進斬首池），並累加 `save.released`；原勢力守將表不變，他下次照樣會來守城、還能再被俘；
- *   · 君主（`0x40975E`）→ 只出一张"逃走"卡，不给按钮（`capture.ts:150 isKingOf` 早已在引擎里
- *     把他排除在 captured/executed 之外，这里只是把他的名字补进面板）；
- *   · 放走 → 什么都不做（原作 status=2）。
+ * R56 + R85 + R208：把 main.js 打完仗寫回的結果接到武將處置上。
  *
- * 三條硬門**不重算**，只沿用 main.js 那次 `resolvePostBattle()` 的結論：`project/89` 卡點③ 说的
- * "自动拒降 → 直接进斩首池" 不再发生 —— 现在面板把档位（可降/需再战/拒降）与理由摊开给玩家，
- * 由玩家决定斩不斩。闸门数值仍来自 `capture.ts:recruitChanceOf/canRecruit`（见 roster.ts 那段注释）。
+ * **胜者才有处置权**（原作 `0x491D8C "抓到敵將，如何處理?"` 是胜者的战后结算面板）：
+ *   · 我方胜 → 逐将询问**敌方**战俘（招降 / 斩首 / 释放），玩家决策后由
+ *     `core/roster.ts:applySurrender` 落到武将池（招降入城 / 斩首出池 / 释放回原势力）；
+ *   · 我方败 → **不开面板**：我方被俘将交给敌方 AI，按 main.js 战斗页**已经判好的**结果处置
+ *     （`captured` = 被劝降、`executed` = 被斩首、`dead` = 阵亡、其余 = 释放），不重新掷骰；
+ *     每人一条战报日志，然后直接回大地图（见 `aiDisposeCaptives()`）；
+ *   · 君主（`0x40975E`）→ 只出一张"逃走"卡，不给按钮；
+ *   · 释放（R103）→ 我方胜时玩家选"释放"：从**我方**各城名单摘掉 + `roster._moved[name]='釋放'`；
+ *   · 空列表不弹：没俘虏（或只打死了守将）就直接回大地图，不留空面板。
  *
- * **空列表不弹**：没俘虏（或只打死了守将）就直接回大地图，不留空面板。
+ * 胜负信号优先读 `save.lastBattle`（main.js `writeBackCampaign()` 战后写回，契约见
+ * `roster.ts:readBattleOutcome`）；旧档没有它时用 `decideBattleWon()` 兜底
+ * （城丢了 / 俘将里有我方明确在職的人 → 我方败）。
  */
 function settleBattleReturn() {
   if (!save) return null;
   surBattleReal = false;
+  const king = String(save.monarch || save.king || '');
+  const outcome = readBattleOutcome(save);
+  const own = new Set(ourForceNames(save));
+  if (king) own.add(king);
+
   const last = typeof save.last === 'string' && save.cities[save.last] ? save.last : '';
-  const home = last || (Array.isArray(save.owned) ? save.owned[0] : '') || '';
+  const bCity = outcome && outcome.city && save.cities[outcome.city] ? outcome.city : '';
+  const home = bCity || last || (Array.isArray(save.owned) ? save.owned[0] : '') || '';
   if (!home) return null;
 
-  const king = String(save.monarch || save.king || '');
-  const joined = strNames(save.captured).filter((n) => n !== king);
-  const dead = strNames(save.executed).filter((n) => n !== king);
-  if (!joined.length && !dead.length) { save.lastPost = null; return null; }
+  // 同一场战斗只处置一次：刷新 / 回跳到夹着 lastBattle 的存档时不能重复劝降、重复记战报
+  if (outcome && outcome.ts > 0 && save.lastPost && save.lastPost.ai === true
+    && Saves.num(save.lastPost.battleTs) === outcome.ts) return null;
 
-  // 我方被俘（project/89 的夏侯惇案例：save.captured 里混进了自家将）→ 不进面板，更不该被自家斩首。
-  // 但攻下城后，该城守将的静态归属（generals.json 的 city_by_times）立刻变成"我方"，
-  // 而他们**正是这一仗的俘虏**（本战只把这座城的守将送进战场，project/92 §10.1）：
-  // 只要 home 还在我方的版图里，garrison.json 里 home 的守将就按定义是敌方（守城战打赢时
-  // captured 里也不会有自家将）；城已丢（守城战败）时才是真的"我方被俘"，那时 home 不在 owned。
-  const mine = myGeneralNames();
-  const held = Array.isArray(save.owned) && save.owned.indexOf(home) >= 0;
-  const foes = held ? new Set(garrisonNames(home)) : new Set();
-  const ours = [];
-  for (const n of joined.concat(dead)) if (mine.has(n) && !foes.has(n) && ours.indexOf(n) < 0) ours.push(n);
-  if (ours.length) {
-    const drop = new Set(ours);
-    save.captured = joined.filter((n) => !drop.has(n));
-    save.executed = dead.filter((n) => !drop.has(n));
-    pushLog(`戰 報：（我方）${ours.join('、')} 被敵軍俘去，本城名單不變`, 'lost');
+  const won = decideBattleWon(save, outcome);
+  if (!won) return aiDisposeCaptives({ outcome, home, king });
+
+  // —— 我方胜：只处置**敌方**战俘 ——
+  // 先把"我方自己人"从待决队列里摘掉（脏档 / 混合战俘防御），再出卡；出卡后还要按 mine 硬过滤
+  // 一次：我方将绝不允许出现在自己的处置面板里（用户报的 P0 根因就是守城丢城后我方将漏成"敌俘"）。
+  const pending = strNames(save.captured).filter((n) => n !== king);
+  const doomed = strNames(save.executed).filter((n) => n !== king);
+  const oursHeld = uniqNames(pending.concat(doomed).filter((n) => own.has(n)));
+  if (oursHeld.length) {
+    const drop = new Set(oursHeld);
+    save.captured = pending.filter((n) => !drop.has(n));
+    save.executed = doomed.filter((n) => !drop.has(n));
+    pushLog(`戰 報：（我方）${oursHeld.join('、')} 被敵軍俘去，本城名單不變`, 'lost');
+  }
+  if (!strNames(save.captured).length && !strNames(save.executed).length) {
+    save.lastPost = null;
+    return null;
   }
 
   const cards = surrenderCandidates(save, GDATA, {
     atCity: garrisonNames(home).concat(probeKingNames()),   // probeKingNames：?surking= 驗收用
-    mine: Array.from(mine).filter((n) => !foes.has(n)),
+    mine: Array.from(own),
     king,
-  });
-  if (!needSurrenderPanel(cards)) { save.lastPost = null; return null; }   // 空列表不弹
+    won,                                                   // 胜者门（这里恒为 true，跟着信号走）
+  }).filter((c) => c && typeof c.name === 'string' && !own.has(c.name));
+  if (!needSurrenderPanel(cards, { won })) { save.lastPost = null; return null; }   // 空列表不弹
   // R196：這一批俘虜是「這一仗」的產物（`save.captured`/`executed` 由 main.js 戰後寫回）→ 面板要算本戰 1 敗；
   // 驗收探針（`?sur=`）只是種名單，沒有戰鬥 → 不記。
   surBattleReal = !surProbeOn();
   openSurrenderSheet(cards, home);
   return null;   // 还没落库：等玩家点完（finishSurrender 才写 roster/lastPost）
+}
+
+/**
+ * 我方战败时的战后处置：**敌方 AI** 处置我方被俘将（胜者才有处置权，玩家不参与）。
+ *
+ * 沿用战斗页已判结果、**不重新掷骰**（`roster.ts:planAiDisposal`）：`captured`/`joined` = 被敌劝降
+ * （转投敌营）、`executed` = 被敌斩首（出池）、`dead` = 阵亡、其余 = 释放（名单不动）。处置完把
+ * 名字从 `save.captured` / `save.executed`（待决队列）摘掉，否则下次回大地图会重复处理。
+ *
+ * 幂等：`lastPost.ai === true && lastPost.battleTs === lastBattle.ts` 时，上一节的
+ * `settleBattleReturn` 直接返回，不再走这里。
+ */
+function aiDisposeCaptives({ outcome, home, king }) {
+  const joined = uniqNames(strNames(save.captured).concat(outcome ? outcome.captured : []))
+    .filter((n) => n !== king);
+  const executed = uniqNames(strNames(save.executed).concat(outcome ? outcome.executed : []))
+    .filter((n) => n !== king);
+  const fallen = uniqNames(outcome ? outcome.dead : []);
+  const plan = planAiDisposal({ captured: joined, executed, dead: fallen, king });
+  if (!plan.length) { save.lastPost = null; return null; }
+
+  const res = applyAiDisposal(save, plan);
+  const disposed = new Set(plan.map((e) => e.name));
+  save.captured = strNames(save.captured).filter((n) => !disposed.has(n));
+  save.executed = strNames(save.executed).filter((n) => !disposed.has(n));
+
+  const verdict = {
+    recruit: '勸降，已轉投敵營',
+    execute: '斬首',
+    dead: '所殺，陣亡',
+    release: '釋放，已回本城',
+  };
+  const real = !surProbeOn();
+  for (const e of plan) {
+    pushLog(`戰 報：（我方）${e.name} 被敵軍${verdict[e.action] || '處置'}`, 'lost');
+    // R196：被俘 ⇒ 该将这一战是败场（与胜方面板的记法一致；探针不记，不编数）
+    if (real) {
+      try { Saves.noteGeneralResult(save, e.name, false); } catch (err) { console.warn('戰績落賬失敗', e.name, err); }
+    }
+  }
+  save.lastPost = {
+    city: home,
+    joined: [],                                             // 我方这一战没有招降任何人
+    dead: res.executed.concat(res.dead),                    // 战报的"殁"：被斩 + 阵亡
+    joinedAll: [],
+    deadAll: plan.filter((e) => e.action !== 'recruit').map((e) => e.name),
+    escaped: [],
+    released: res.released,
+    rejected: [],
+    month: Saves.num(save.month),
+    ts: Saves.num(save.ts),
+    ai: true,                                               // 这局的处置者是敌方 AI（不是玩家）
+    battleTs: outcome ? outcome.ts : 0,                     // 与 lastBattle.ts 对齐 → 幂等标记
+    aiRecruited: res.recruited,
+    aiReleased: res.released,
+  };
+  autosave();
+  render();
+  const bits = [];
+  if (res.recruited.length) bits.push(`勸降 ${res.recruited.length}`);
+  if (res.executed.length) bits.push(`斬首 ${res.executed.length}`);
+  if (res.dead.length) bits.push(`陣亡 ${res.dead.length}`);
+  if (res.released.length) bits.push(`釋放 ${res.released.length}`);
+  notice(bits.length ? `我軍戰敗：敵軍處置我軍俘將（${bits.join(' · ')}）` : '我軍戰敗：敵軍處置我軍俘將');
+  return null;
 }
 
 // ---------------------------------------------------------------- R85 逐將招降 / 斬首 / 釋放面板
@@ -4783,19 +4934,15 @@ function garrisonNames(city) {
     .filter((n) => typeof n === 'string' && n);
 }
 
-/** 我方在職武將名：用来把"我方被俘/被斩"从面板里剔掉（自己人不该被自己斩首） */
-function myGeneralNames() {
-  const out = new Set();
-  const king = String(save.monarch || save.king || '');
-  if (king) out.add(king);
-  const ctx = { scenIdx: currentScenarioIdx(), generals: GDATA.generals };
-  for (const city of (Array.isArray(save.owned) ? save.owned : [])) {
-    let list = [];
-    try { list = CM.rosterOf(save, city, ctx) || []; } catch { list = []; }
-    for (const x of list) {
-      const n = x && typeof x === 'object' ? x.NAME : x;
-      if (typeof n === 'string' && n) out.add(n);
-    }
+/** 名字数组去重（保序）；战报/待决队列用 */
+function uniqNames(list) {
+  const out = [];
+  const seen = new Set();
+  for (const raw of (Array.isArray(list) ? list : [])) {
+    const n = typeof raw === 'string' ? raw : '';
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
   }
   return out;
 }
@@ -5202,28 +5349,17 @@ function advanceMonth(n) {
     }
     Saves.ledgerAdd(save, { income, months: 1 });
 
-    // 守軍自然回補：上限 = min(人口/2500 + 110, 600)（與 Saves.cityTroops 同一個口徑），
-    // 每月按上限的 2% 緩慢補，補到上限為止。舊版是無腦 +6，小城也會被堆到 600。
-    let growCities = 0, growTroops = 0;
-    for (const c of ALL) {
-      const st = save.cities[c.NAME];
-      if (!st) continue;
-      const cap = Saves.cityTroops(c);
-      const cur = Saves.num(st.troops);
-      if (cur >= cap) continue;                      // 超上限的城不拉低，只是不再漲
-      const step = Math.max(1, Math.ceil(cap * 0.02));  // 600 上限 → 每月 +12
-      const add = Math.min(cap, cur + step) - cur;
-      if (add <= 0) continue;
-      st.troops = cur + add;
-      growCities += 1;
-      growTroops += add;
-    }
-    if (growCities) pushLog(`守 軍 回 補：${growCities} 城 +${growTroops} 兵（上限依人口）`, 'info');
+    // [F14] 守軍「每月白補 2%」已刪。原作換月**不補守軍**：兵只有三個來源 ——
+    //   城內「部隊徵兵」把預備兵換成兵（`city_model.enlist`）、出征帶回的倖存兵
+    //   （deploy/main 寫回）、以及 AI 的 ACT 補兵；守軍自然回補在 210 規格與內政指南裡都沒有。
+    //   舊碼（每月按上限 2% 補到滿）會讓每座城每月憑空漲兵，
+    //   與「100 金 → 1 預備兵 → 1 兵」的經濟鏈重複發兵（差異表 F14）。
 
-    // 內政代行（R10，`web/city_model.js:994` `autonomyTick`）：換月 lazy tick ——
-    //   · 每城補**預備兵**（原作 +0x82 上限 / +0x86 現值；Monthly 補上限的 10%）；
+    // 內政代行（R10，`web/city_model.js` `autonomyTick`）：換月 lazy tick ——
+    //   · **錢變兵（F13）**：每城 `n = min(floor(金/100), 預備兵上限-現值)`，金 -n*100、預備兵 +n，
+    //     直到錢花光或兵滿（原作：城里每 100 金钱 = 1 预备兵，随时间自动转换）；
     //   · 玩家在城內政頁標了「自治」的城各做一次開發（`save.auto`，`runAutonomy`）。
-    // AI 城不標自治（那會花玩家國庫），所以對敵方勢力只生效「預備兵補給」這半；
+    // AI 城不標自治（那會花玩家國庫），所以對敵方勢力只生效「錢變兵」這半；
     // AI 的內政動作仍走 R73 的 ACT=1 補金 / ACT=6 cheat（原作 ACT 表 9 項裡沒有「開發」）。
     // 與 R73/R74 不衝突：預備兵寫 `city.prep`，AI 出兵扣的是 `city.troops`（兩個池）。
     const tick = CM.autonomyTick(save, scenario.cities, { generals: GDATA.generals });

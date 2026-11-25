@@ -2,7 +2,7 @@
 //   node cdp.mjs launch            起有头浏览器并导航到 Cocos 页面，保持常驻
 //   node cdp.mjs run <steps.mjs>   连上现有页面，跑一个步骤模块
 //   node cdp.mjs close             关掉浏览器
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -147,7 +147,24 @@ async function close() {
   try { await send('Browser.close'); } catch {}
   ws.close();
   await sleep(500);
+  // Browser.close 偶尔只关标签页不退出进程（用户 2026-11-25 报过 CPU 越跑越高）。
+  // 这里按 profile 精确兜底，只杀 user-data-dir 指向本 profile 的 msedge，不碰用户自己的浏览器。
+  killProfile();
   console.log('closed');
+}
+
+/** 兜底：杀掉 user-data-dir 指向当前 PROFILE 的 msedge（同步执行，失败静默）。 */
+function killProfile() {
+  const script =
+    "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+    "Where-Object { $_.CommandLine -and $_.CommandLine -match 'edgeprof' -and $_.CommandLine -like '*" +
+    path.basename(PROFILE).replace(/'/g, "''") +
+    "*' } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }; 'ok'";
+  try {
+    execFileSync('pwsh', ['-NoProfile', '-Command', script], { stdio: 'ignore', timeout: 15000 });
+  } catch {
+    /* 没有 pwsh 或没有残留，都无所谓 */
+  }
 }
 
 const cmd = process.argv[2];

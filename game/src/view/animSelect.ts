@@ -69,6 +69,24 @@ export const HIT_TICKS = 16;
 /** 死亡窗口：阵亡后 0..23 tick（= 0.4 s @60Hz，旧值 12 @30Hz）；窗口结束即不再绘制（尸体消失，同旧行为）。 */
 export const DEATH_TICKS = 24;
 
+/**
+ * R194：受击反馈窗口（命中后 0..5 tick = 0.1 s @60Hz）。
+ *
+ * 为什么不用 `hit_back` 帧：士兵一击必死（`battle.ts` 的 `applyDamage(world, to, 1, from)`），
+ * 「活着且刚挨打」这个状态在士兵身上**从不出现**；而 `actions.json` 只有背视素材，敵方用不了。
+ * 所以受击改成 **view 层的程序化反馈**（后仰 + 白闪 + 冲击星），两侧、所有兵种统一生效。
+ */
+export const HIT_FLASH_TICKS = 6;
+
+/**
+ * 哪些兵种号可以用 `death_back`（`actions.json` 里的背视阵亡帧）。
+ *
+ * 那套素材画的是**朴刀兵**（holding 大刀/朴刀、背视），13 个兵种共用它会出现
+ * 「骑兵用朴刀的倒地姿势」——所以只让朴刀（0）用，其余兵种改走程序化倒地（见 `battleView.toppleCorpse`）。
+ * 补了各兵种专属阵亡帧之后，把对应的兵种号加进来即可。
+ */
+export const DEATH_FRAME_TROOPS: readonly number[] = [0];
+
 /** 图集文件名固定，由 work 打包脚本从 pack_atlas.py 的 atlas_00.png 改名而来。 */
 export const ACTION_JSON_URL = 'anim/actions.json';
 export const ACTION_IMG_URL = 'anim/actions_00.png';
@@ -171,28 +189,72 @@ export function usesActionFrames(u: Unit): boolean {
   return ACTION_SIDES.includes(u.side);
 }
 
-/** 该单位是否仍在死亡动画窗口内（battleView.drawActors 用来放行尸体 12 tick）。 */
-export function isDying(u: Unit, world: World): boolean {
-  if (!u || (u as unknown as { alive?: boolean }).alive !== false) return false;
-  if (!ACTION_SIDES.includes(u.side)) return false;
+/**
+ * 该单位阵亡了多久（tick）：`0..DEATH_TICKS-1`，不在窗口内返回 null。
+ *
+ * R194：从「只对我方」放宽到**两侧**——敵兵原本在 `drawActors` 里被整条跳过，
+ * 观感就是「原地消失」。现在两侧都留 24 tick，按侧决定画什么：
+ * 我方朴刀兵有 `death_back` 帧，其余兵种 / 敵方走程序化倒地。
+ */
+export function deathAgeOf(u: Unit, world: World): number | null {
+  if (!u || (u as unknown as { alive?: boolean }).alive !== false) return null;
   // 主将不走 drawSoldier（没有 death_back 素材），保持旧行为：阵亡立即从演员表剔除。
-  if ((u as unknown as { isGeneral?: boolean }).isGeneral === true) return false;
+  if ((u as unknown as { isGeneral?: boolean }).isGeneral === true) return null;
   const hitAt = numField(u, 'lastHitTick');
-  if (hitAt === null) return false;
+  if (hitAt === null) return null;
   const t = (numField(world, 'tick') ?? 0) - hitAt;
-  return t >= 0 && t < DEATH_TICKS;
+  return t >= 0 && t < DEATH_TICKS ? t : null;
+}
+
+/** 该单位是否仍在死亡动画窗口内（battleView.drawActors 用来放行尸体）。 */
+export function isDying(u: Unit, world: World): boolean {
+  return deathAgeOf(u, world) !== null && !!u && ACTION_SIDES.includes(u.side);
+}
+
+/**
+ * 出手动作的年龄：`0..ticks-1`，没出手 / 超出窗口返回 null。
+ *
+ * 口径与 `generalAtlas.attackAgeOf()` 一致：**读 `lastAttackTick`**（`battle.ts:2515`
+ * 在真正探到敌人、进入攻击分支的那一 tick 写入），而不是读 `u.cd`。
+ * 旧写法用 `u.cd > interval - 24` 判「在挥砍」，但 `u.cd` 在**移动/待機分支也会被重置**
+ * （`battle.ts:2534`），于是每个兵每个行动周期都有 60% 的时间在空挥——
+ * 真正那一刀反而没有任何额外表现。
+ *
+ * `window` 默认取 `ATTACK_TICKS`；`battleView.pushSpriteFrames` 传 24（士兵 10 帧铺满 24 tick）。
+ */
+export function attackAgeOf(u: Unit, tick: number, window: number = ATTACK_TICKS): number | null {
+  const t0 = numField(u, 'lastAttackTick');
+  if (t0 === null) return null;
+  const d = (numField({ tick }, 'tick') ?? tick) - t0;
+  return d >= 0 && d < Math.max(1, window) ? d : null;
+}
+
+/** 命中后的年龄：`0..HIT_FLASH_TICKS-1`，用来播后仰/白闪/冲击星；两侧通用。 */
+export function hitAgeOf(u: Unit, world: World): number | null {
+  const hitAt = numField(u, 'lastHitTick');
+  if (hitAt === null) return null;
+  const t = (numField(world, 'tick') ?? 0) - hitAt;
+  return t >= 0 && t < HIT_FLASH_TICKS ? t : null;
+}
+
+/** 该单位有没有「本人造型」的阵亡帧（目前只有朴刀兵有）。 */
+export function usesDeathFrames(u: Unit, world: World): boolean {
+  if (!u || !ACTION_SIDES.includes(u.side)) return false;
+  const troop = numField(world?.sides?.[u.side] ?? null, 'troop');
+  return troop !== null && DEATH_FRAME_TROOPS.includes(troop);
 }
 
 /**
  * 选帧。返回 null 表示「没有动作要播，调用方沿用走路序列」。
  *
- * - `!alive` 且 `lastHitTick` 在 0..11 tick 内 → `death_back`（士兵挨打即死，
- *   `lastHitTick` 就是阵亡 tick）；窗口外返回 null，调用方应跳过不画。
- * - 活着且 `lastHitTick` 在 0..7 tick 内 → `hit_back`。
- * - `attackAnimT` 在 0..9 内，或 `tick - lastAttackTick` 在 0..9 内 → `attack_back`。
+ * - `!alive` 且 `lastHitTick` 在 0..23 tick 内、且该兵种有对应素材（`usesDeathFrames`）
+ *   → `death_back`（士兵挨打即死，`lastHitTick` 就是阵亡 tick）；窗口外返回 null。
+ * - 活着且 `lastHitTick` 在 0..15 tick 内 → `hit_back`（**实际只对主将可能出现**，
+ *   而主将不走 `drawSoldier`；士兵的受击改由 `battleView.pushHitFlash` 程序化呈现）。
+ * - `attackAnimT` 在 0..19 内，或 `tick - lastAttackTick` 在 0..19 内 → `attack_back`。
  * - 其余 → null。
  *
- * 字段全部可能缺失（`Unit` 现在还没有这两个 tick 字段），缺失即视为无动作。
+ * 字段全部可能缺失（旧版 `Unit` 没有这两个 tick 字段），缺失即视为无动作。
  */
 export function pickActionFrame(u: Unit, world: World, atlas: ActionAtlas): ActionPick | null {
   if (!u || !world || !atlas) return null;
@@ -206,6 +268,9 @@ export function pickActionFrame(u: Unit, world: World, atlas: ActionAtlas): Acti
 
   // 1) 阵亡优先：死人不该再播受击/攻击。
   if (!alive) {
+    // R194：只有「素材对得上」的兵种才用 death_back，否则返回 null，
+    // 交给 battleView 走程序化倒地（否则骑兵会摆出朴刀兵的倒地姿势）。
+    if (!usesDeathFrames(u, world)) return null;
     if (hitAt === null) return null;
     const t = tick - hitAt;
     if (t < 0 || t >= DEATH_TICKS) return null;

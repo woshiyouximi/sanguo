@@ -26,6 +26,9 @@ import { DamageHost } from './syso_host';
 import { skillKindOfEx } from './skill_kind';
 import { wiseAppliedAtStart, wiseBonus } from './wises';
 import { normalizeWeather, weatherHitMod, weatherOf } from './weather';
+// R115：原作乱数发生器（`0x450132`）。给了 `CreateOptions.roll` 才走它，缺省仍是 mulberry32，
+// 既有 139 处 `seed:` 用例的确定性断言一位都不动。
+import type { SangoRng } from './sango_rng';
 // R37 策略派發 / 援軍：純邏輯在 strategy.ts，本檔只做接線（見 project/61_策略与援军.md）
 import {
   ARMY_FLAG,
@@ -44,7 +47,7 @@ import { tickBattleAi } from './battle_ai';
 // `±450/ROW_PX`（±6.3 行），那是等距投影时代的半屏行数；R193 改成透视后近排被放大，
 // 夹到 63.7 时最后一排的脚落到 1034.6（比 FIELD_BOTTOM 低 34.6px、被控制台盖住）。
 // 端点由 `field.ts` 从「带沿 ± 精灵身位」反解 ⇒ 这里只负责夹，不再自己算行数。
-import { CAM_HALF_ROWS, clampCameraX } from './field';
+import { ROWS_FAR, clampCameraX } from './field';
 
 /**
  * 战斗引擎 tick 率（Hz）＝ **60**。
@@ -462,6 +465,12 @@ export interface CreateOptions {
   data: GameData;
   seed?: number;
   /**
+   * 原作乱数流（R115）。给了就把它当作**战场随机源**：方位抽样走 `rand()%n`、
+   * 扫描先看哪一侧走 `rand() & 1`（见 `project/133` §4.1、`project/173` :378）。
+   * 不给则是 `mulberry32(seed)`，与 R208 之前逐位相同。
+   */
+  roll?: SangoRng;
+  /**
    * 战场地形 id 0..11（`terrains.json` 的 `_index` / 原作全局 `[0x4A6694]`）。
    * 缺省 0 = 城/平地类。它只作为 `terrainBonus()` 的查表行，不影响投影与站位。
    */
@@ -580,6 +589,16 @@ export interface World {
    * 不装 = AI 决策空转（`world.aiSides` 打开也不会动），便于纯内核场景。
    */
   aiCommand?: (world: World, side: Side, cmd: AiBattleCommand) => void;
+  /**
+   * 「不许穿阵」拦阻开关（R190 P0）。缺省 `true`；显式设 `false` 退回 R189 的行为
+   * ——**只判目标格**，与原作 `0x43C4C0`/`0x43C20D` 完全一致。
+   *
+   * 为什么要这条：用户实机反馈「我方武将直接穿过敌阵」「小兵放着旁边的敌人不管跑过去」。
+   * 取证结论是原作**没有**车道/路径拦阻（见 `project/155` §1.4、`work/orig_battle_behavior/03,04`），
+   * 旧实现与原作一致，所以这是**按用户观感新增**的规则，不是原作复刻。保留开关是为了
+   * 让对比测试与"纯原作语义"复盘能一键退回。规则本体见 `passBlocked()`。
+   */
+  blockPass?: boolean;
   /** 战前战绩（R63）：`updateRecord()` 的输入，`settle()` 里按胜负累加 */
   record: BattleRecord;
   /** AI 兵力劣势时自动全军撤退（R38），由 `CreateOptions.aiRetreat` 打开 */
@@ -588,6 +607,12 @@ export interface World {
   sides: Record<Side, SideRuntime>;
   fx: Fx[];
   rng: () => number;
+  /**
+   * 原作乱数流（R115）。`null` = 没接线，方向/扫描继续用 `rng`（旧行为）。
+   * 给了值时：`sampleStepOffsets()` 的权重抽样走 `roll.int(sum)`（= `rand()%n`），
+   * `adjacentEnemy()` 的先扫侧走 `roll.bit()`（= `rand() & 1`）。观感抖动仍走 `rng`。
+   */
+  roll: SangoRng | null;
   aiSides: Record<Side, boolean>;
   /**
    * 统计（调试/验收用）：每侧的出手次数与命中次数、主将挨打次数，
@@ -956,6 +981,7 @@ export function createWorld(opts: CreateOptions): World {
     reinforce: [],
     log: [],
     rng: mulberry32(opts.seed ?? 1),
+    roll: opts.roll ?? null,
     // 默认两侧都不放技：AI 放技是显式 opt-in，否则镜像局里 "B 有 AI" 会变成系统性优势
     aiSides: { A: opts.aiSides?.A ?? false, B: opts.aiSides?.B ?? false },
     // R67：伤害默认走脚本通道（MAGIC.SO `Hurt` → `SYSCALL 0x125` → 宿主函数）；`legacy` 只给对拍
@@ -1839,10 +1865,20 @@ export function hitChance(world: World, from: Unit, to: Unit): number {
  */
 export function hitRoll(world: World, from: Unit, to: Unit): boolean {
   const p = hitChance(world, from, to);
-  if (world.rng() * 300 < p) return true;
+  if (hitRollOnce(world, p)) return true;
   if (!statusBitOf(from, UNIT_STATUS.DOUBLE_HIT)) return false;
   const p2 = Math.trunc((p * 2) / 3);
-  return world.rng() * 300 < p2;
+  return hitRollOnce(world, p2);
+}
+
+/**
+ * 一次 `rand() % 300 < p`。接线了 `world.roll`（R115）就走原作流 `roll.int(300)`；
+ * 否则维持旧的 `world.rng() * 300 < p`（**逐位不变**，139 处 `seed:` 用例都靠这条）。
+ */
+function hitRollOnce(world: World, p: number): boolean {
+  const roll = world.roll;
+  if (roll) return roll.int(300) < p;
+  return world.rng() * 300 < p;
 }
 
 export function troopBonus(data: GameData, aTroop: number, bTroop: number): number {
@@ -1978,7 +2014,8 @@ export interface StepOffset {
 /**
  * `0x43C2A5` 方位抽样：按权重**无放回**抽，返回候选方位序列（顺序即试落点顺序）。
  *
- * 权重按 `0x450117(n) = rand()%n` 抽（本作走 `world.rng`，同一 seed 可复现）。
+ * 权重按 `0x450117(n) = rand()%n` 抽：给了 `roll`（R115 原作流）就用 `roll.int(sum)`，
+ * 否则退回 `Math.floor(rng() * sum)`（旧行为，同一 seed 可复现）。
  * `mode == -1`（基向量 0,0）时两轮都只给 (0,0)，即原地不动。
  */
 export function sampleStepOffsets(
@@ -1987,6 +2024,7 @@ export function sampleStepOffsets(
   w1: readonly number[],
   w2: readonly number[],
   rng: () => number,
+  roll?: SangoRng | null,
 ): { first: StepOffset[]; second: StepOffset[] } {
   const cx = sx > 0 ? 1 : sx < 0 ? -1 : 0;
   const cy = sy > 0 ? 1 : sy < 0 ? -1 : 0;
@@ -1997,7 +2035,7 @@ export function sampleStepOffsets(
     let sum = left.reduce((a, b) => a + b, 0);
     const out: StepOffset[] = [];
     while (sum > 0) {
-      let r = Math.floor(rng() * sum);
+      let r = roll ? roll.int(sum) : Math.floor(rng() * sum);
       let j = 0;
       while (j < 8 && r >= left[j]!) {
         r -= left[j]!;
@@ -2089,14 +2127,19 @@ function advanceSlides(world: World): void {
  * `rand()%0x30-0x18`（±24px）/ `rand()%0x24-0x12`（±18px）的抖动，再按
  * `±0x780000`(120px) / `±0x5A0000`(90px) 夹住位移，最后除以 0x28 帧线性积分。
  * 这里换成格单位（96×72 px/格）后就是 ±0.25 格。
+ *
+ * **R194 刻意偏离原作**：抖动幅度砍半成 `%0x18-0xC` / `%0x12-0x9`（±12/±9 px = ±0.125 格）。
+ * 依据是实机反馈「兵与兵互相穿模」：实测车道节距只有 43.59px，而 ±18px = 0.25 车道，
+ * 邻居的脚会被推到对方身上。砍半后「>50% 重叠」从 8.54 降到 5.59 对/帧（见
+ * `work/anim_fix/PATCH_jitter.md`）。要恢复原作手感只改下面两行即可，别连着改 clampPx。
  */
 function commitStep(u: Unit, cell: { gx: number; gy: number }, occ: Occ, rng: () => number): void {
   const from = unitCell(u);
   if (inGrid(from.gx, from.gy) && occ.get(cellKey(from.gx, from.gy)) === u) occ.delete(cellKey(from.gx, from.gy));
   occ.set(cellKey(cell.gx, cell.gy), u);
   // 0x60 = 96px/格（x 纵深），0x48 = 72px/格（y 车道）；0x30/0x24 是半格 = 格心
-  const jx = Math.floor(rng() * 0x30) - 0x18; // −24..+23 px
-  const jy = Math.floor(rng() * 0x24) - 0x12; // −18..+17 px
+  const jx = Math.floor(rng() * 0x18) - 0xc; // −12..+11 px（R194 砍半，原作 ±0x18）
+  const jy = Math.floor(rng() * 0x12) - 0x9; // −9..+8 px（R194 砍半，原作 ±0x12）
   const dx = clampPx((cell.gx - u.x) * 96 + jx, 0x780000 / 0x10000); // ±120 px
   const dy = clampPx((cell.gy - u.y) * 72 + jy, 0x5a0000 / 0x10000); // ±90 px
   u.slide = {
@@ -2168,6 +2211,119 @@ function yieldFriend(world: World, other: Unit, mover: Unit, occ: Occ): boolean 
 export type StepPick = { gx: number; gy: number } | { exit: true } | null;
 
 /**
+ * 「不许穿阵」拦阻（R190 P0，`[新设计]`：原作**没有**这条）。
+ *
+ * 原作取证（`project/155` §1.4 `0x43C4C0` + `0x43C20D`、`work/orig_battle_behavior/03,04`）：
+ * 走位只判**目标格**——界内 + 该格无人（`0x43B467`/`0x43AF7A`），第二轮也只拒敌格，
+ * 从不看路径、车道或相邻格。所以"擦着敌人身边走过去"在原作里同样合法。
+ *
+ * 用户实机反馈（R190 两条）：
+ *  ①「我方武将前方没有敌方武将和小兵阻挡后，直接穿过去了」
+ *  ②「两个小兵前方没有敌方的情况下，放着旁边的敌人不管直接跑过去了」
+ * 共同机制就是**擦过去**：目标格是空的 ⇒ 放行 ⇒ 观感上"敌阵不存在"。这里补两条拦阻，
+ * 只在**擦着敌人走**时生效：
+ *
+ *  A. 斜穿禁止：1 格斜步 `(dx,dy)` 的两个正交拐角 `(x+dx,y)` / `(x,y+dy)` **都**站着敌人
+ *     ⇒ 不许走（两敌之间的对角缝不钻）。只占一个拐角时仍可走：这是「贴侧被堵 → 斜插进敌人
+ *     那条车道 → 下一手同排攻击」的唯一入口，禁死会把战线锁成并排站着打不到的死局。
+ *     （probe：禁死版 R80 60v60 2600 tick 都打不完，放宽后 1400 上下打完。）
+ *  B. 夹缝禁止：目标格在**垂直于本步主轴**的两侧都被敌人夹住 ⇒ 不许挤进去（1 格缝不穿）。
+ *     例：B 兵 `(49,5)` 与 B 将 `(49,7)` 夹着 `(49,6)`，我方主将不许走进 `(49,6)`。
+ *  C. 贴侧不许纵深：往纵深退/进一格时，**当前格**的侧翼（`from.gy±1`）或**落点**的侧翼
+ *     （`ty±1`）有敌人 ⇒ 不许进。这是反馈②的主诉：敌人贴在旁边时既不挡路、也进不了
+ *     同排扫描（`0x43BBE6` 只沿 ±x），旧实现当它不存在，于是"放着旁边的敌人不管直接跑过去"。
+ *     禁的只是**纵深**方向，侧移不受限，所以被贴住时仍能靠横移脱身（见 REPORT「遗留风险」）。
+ *
+ * 三条都只看**目标格周围 1 格**，不扫车道、不看整条战线 —— 与"只判目标格"的模型同源，
+ * 只是把判据从"目标格是否被占"扩到"目标格是否贴着敌人"。`world.blockPass === false`
+ * 时完全退回旧行为（对比测试用）；**唯一豁免是溃逃 `u.flee`**（见函数内注释）。
+ */
+function passBlocked(
+  world: World,
+  u: Unit,
+  from: { gx: number; gy: number },
+  tx: number,
+  ty: number,
+  occ: Occ,
+): boolean {
+  if (world.blockPass === false) return false;
+  // 只有溃逃豁免：`0x4000` 退却态在原作里就是「散开跑」，被侧翼敌人堵死＝逃不掉。
+  // 突擊**不豁免**（用户抱怨的正是「全軍突擊時穿過去」）——冲锋路线同样要绕，不许踩过去。
+  if (u.flee) return false;
+  const enemyAt = (gx: number, gy: number): boolean => {
+    if (!inGrid(gx, gy)) return false;
+    const o = occ.get(cellKey(gx, gy));
+    return !!o && o.side !== u.side;
+  };
+  const dx = tx - from.gx;
+  const dy = ty - from.gy;
+  if (dx !== 0 && dy !== 0) {
+    // A. 斜穿：两个正交拐角**都被敌人占住**才算抄敌人的近路（两敌之间的对角缝不许钻）。
+    //    任一拐角被占时仍允许走 —— 这一步正是「被侧翼敌人贴住时斜插进敌人那条车道」的唯一入口
+    //    （敌人的格子永远不可进，同级 x 的上下格被 B 当夹缝拒，只剩斜插），
+    //    禁掉它会把战线锁成「并排站着互相打不到」的死局（R80 60v60 实测 2600 tick 打不完）。
+    const cx = enemyAt(from.gx + dx, from.gy);
+    const cy = enemyAt(from.gx, from.gy + dy);
+    if (cx && cy) return true;
+  }
+  if (dx === 0 && dy !== 0) {
+    // B. 竖向一步：左右两侧都是敌人 ⇒ 夹缝
+    return enemyAt(tx - 1, ty) && enemyAt(tx + 1, ty);
+  }
+  if (dx !== 0 && dy === 0) {
+    // C. 贴侧不许纵深：敌人贴在**现在这一格**的侧翼（`from.gy±1`）或**落点**的侧翼（`ty±1`）时，
+    //    不许沿纵深走。用户反馈②的主诉就是这个：敌人贴在旁边时既不挡路、也进不了同排扫描
+    //    （`0x43BBE6` 只沿 ±x），旧实现当它不存在，于是"放着旁边的敌人不管直接跑过去"。
+    //    只禁纵深（前后），侧移/上下的候选仍可走 ⇒ 被贴住时能靠侧移脱身，不会永久卡死。
+    if (enemyAt(from.gx, from.gy - 1) || enemyAt(from.gx, from.gy + 1)) return true;
+    if (enemyAt(tx, ty - 1) || enemyAt(tx, ty + 1)) return true;
+    return false;
+  }
+  return false;
+}
+
+/**
+ * 贴住就插进去（`[新设计]`，R190 v3，与 `passBlocked` 同一组规则）。
+ *
+ * 起因：`0x43BBE6` 只沿 ±x 扫同排 ⇒ 站在**相邻车道**的敌人既不挡路也进不了攻击扫描，
+ * `passBlocked` 只能拦住「纵深推进」，拦不住「斜着绕开」（用户反馈②：小兵放着旁边的敌人
+ * 不管直接跑过去）。这里补的是接敌那一步：正前 / 斜前格站着敌人、且我方横移一格能落进
+ * **敌人那条车道**（落点空格）时，本 tick 横移过去；下一手与敌人同排相邻 ⇒ `adjacentEnemy()`
+ * 必中（`0x43BBE6`），观感从「擦着敌人跑过去」变成「贴上去打」。
+ *
+ * 触发条件（写死，不抽样、不消耗 rng）：
+ *  1. 斜前格 `(from.gx+f, from.gy±1)` 有敌人（正前有敌时本来就打得到，不需要插）；
+ *  2. 横移落点 `(from.gx, 敌人车道)` 界内且**空**；
+ *  3. `passBlocked` 不否认（不往两敌夹缝里钻）。
+ *  4. 只有射程 1 的近战才插：弓/弩/飞刀（`attackRangeOf(u) > 1`，表在 `:186`）扫的是
+ *     **自己那一整排**，插进敌人车道换的是「这排换那排」，不是「够不着变够得着」；
+ *     放开会让远程兵种在 `tests/battle.test.ts:347` 的地形胜率口径里凭空变强。
+ * 候选顺序固定 `[-1, +1]`；不碰 `chooseStepCell` 的候选顺序与权重表
+ *（`project/173` §7 的抽样复刻度要保持）。
+ */
+function pullInStep(world: World, u: Unit, occ: Occ, kind?: StepPlanKind): { gx: number; gy: number } | null {
+  if (world.blockPass === false) return null;
+  if (u.flee) return null;
+  if (attackRangeOf(u) > 1) return null;
+  // 全軍突擊（`kind === 'rush'` 或 `world.rush[side]`）不做「插队贴打」：突擊是**玩家按下
+  // 冲锋**的命令，那一步横移会多抽 2 次 `commitStep` 抖动（RNG 流位移），把 `tests/weather.test.ts`
+  // 那种「聚合命中率」统计搅成噪声。拦阻（`passBlocked`）照旧生效——突擊也不许穿阵。
+  if (kind === 'rush' || world.rush?.[u.side]) return null;
+  const from = unitCell(u);
+  const f = u.side === 'A' ? -1 : 1; // 前进方向，与 `army_cmd.ts:673` 同源
+  for (const dy of [-1, 1]) {
+    const gy = from.gy + dy;
+    if (!inGrid(from.gx + f, gy)) continue;
+    const foe = occ.get(cellKey(from.gx + f, gy));
+    if (!foe || foe.side === u.side) continue; // 斜前没有敌人 ⇒ 不触发
+    if (occ.has(cellKey(from.gx, gy))) continue; // 落点必须空格
+    if (passBlocked(world, u, from, from.gx, gy, occ)) continue;
+    return { gx: from.gx, gy };
+  }
+  return null;
+}
+
+/**
  * `0x43C4C0` 试落点。
  *
  * 第一轮（`desc+4`）：界内 + 空格（`0x43B467`）即落。
@@ -2178,12 +2334,13 @@ export type StepPick = { gx: number; gy: number } | { exit: true } | null;
  */
 export function chooseStepCell(world: World, u: Unit, plan: StepPlan, occ: Occ): StepPick {
   const from = unitCell(u);
-  const { first, second } = sampleStepOffsets(plan.sx, plan.sy, plan.w1, plan.w2, world.rng);
+  const { first, second } = sampleStepOffsets(plan.sx, plan.sy, plan.w1, plan.w2, world.rng, world.roll);
   for (const d of first) {
     const tx = from.gx + d.dx;
     const ty = from.gy + d.dy;
     if (!inGrid(tx, ty)) continue;
     if (occ.has(cellKey(tx, ty))) continue;
+    if (passBlocked(world, u, from, tx, ty, occ)) continue;
     return { gx: tx, gy: ty };
   }
   for (const d of second) {
@@ -2194,11 +2351,15 @@ export function chooseStepCell(world: World, u: Unit, plan: StepPlan, occ: Occ):
       continue;
     }
     const other = occ.get(cellKey(tx, ty));
-    if (!other) return { gx: tx, gy: ty };
+    if (!other) {
+      if (passBlocked(world, u, from, tx, ty, occ)) continue;
+      return { gx: tx, gy: ty };
+    }
     if (other.side !== u.side) continue; // 敌格：一律拒绝（`+0x40` 阵营不同）
     if (other.lastActTick === world.tick) continue; // 本帧刚动作过
     if (((other.status ?? 0) & 0x1001) !== 0) continue;
-    if (yieldFriend(world, other, u, occ)) return { gx: tx, gy: ty };  }
+    if (yieldFriend(world, other, u, occ)) return { gx: tx, gy: ty };
+  }
   return null;
 }
 
@@ -2339,6 +2500,8 @@ function rowEnemyAt(u: Unit, occ: Occ, dir: 1 | -1, range: number): Unit | null 
  *
  * 原作先随机一个首扫方向（`dir0`），命中就返回；没命中再反方向扫一次。这里等价地
  * 「两侧都扫、只有两侧都有敌人才抽一次 rng」，避免每周期给全场随机流白插一路消耗。
+ * 接线了 `world.roll`（R115）时这一步走 `roll.bit()` = 原作 `rand() & 1`，
+ * 保证「先看哪一侧」的**流消耗**与原作同源（结果仍是二选一，不影响伤害）。
  */
 function adjacentEnemy(world: World, u: Unit, occ: Occ): Unit | null {
   const range = attackRangeOf(u);
@@ -2347,6 +2510,8 @@ function adjacentEnemy(world: World, u: Unit, occ: Occ): Unit | null {
   if (!left && !right) return null;
   if (left && !right) return left;
   if (right && !left) return right;
+  const roll = world.roll;
+  if (roll) return roll.bit() === 1 ? right : left;
   return world.rng() < 0.5 ? left : right;
 }
 
@@ -2414,6 +2579,15 @@ export function step(world: World): void {
     else plan = null;
     u.cd = interval;
     if (!plan || plan.kind === 'hold') continue;
+    // R190 v3：贴住就插进去 —— 斜前的邻道敌人先横移进它那条车道，下一手同排打得到。
+    // 後退（back）/ 撤退（retreat）不抢：那两种语义是「离开」，插上去等于抗令。
+    if (plan.kind !== 'back' && plan.kind !== 'retreat') {
+      const pull = pullInStep(world, u, occ, plan.kind);
+      if (pull) {
+        commitStep(u, pull, occ, world.rng);
+        continue;
+      }
+    }
     const pick = chooseStepCell(world, u, plan, occ);
     if (!pick) {
       // 两轮都没走成（`0x43C4C0` 失败）→ `0x43C084`：40 帧滑回格心（逻辑格不变）
@@ -3076,29 +3250,48 @@ export function project(camX: number, x: number, y: number): { sx: number; sy: n
   return { sx: y * LANE_PX + LANE_PX / 2, sy: 550 + (x - camX) * ROW_PX };
 }
 
+// 我方主将锚点：主将放屏幕 ~70% 高（r=+2）；三条守卫决定阵形过深时牺牲谁。
+const CAM_GEN_BACK = 2.0;   // 锚点前置量（行）
+const GEN_MAX_R = 5.0;      // 主将最差也得留 r=+5（离下沿还有 0.894 行）
+const GEN_MIN_R = -7.0;     // 主将最差不得出上沿超过 r=-7
+
 /**
- * 摄像机：两军都有兵时看双方前锋中点；一侧清空则看剩下那侧包围盒中心。
+ * 摄像机：**钉我方主将**（原作 `project/176:362-376` 记录镜头全程跟主将、敌将从未入镜）。
  *
- * 夹取走 `field.clampCameraX()`（`[CAM_MIN, CAM_MAX] ≈ [6.29, 64.49]`，由透视带沿 + 精灵身位反解），
- * 不再用 `450/ROW_PX`：常数投影是 12.6 行/屏，透视是 13.327 行/屏且两端不等（远 7.43、近 5.89），
- * 用旧半屏夹取会让夹取端点本身越界（camX=63.7 时最后一排的脚在 1034.6）。
- * `half` 只保留给「两军相距超过一屏」这道换镜判据，数值仍是 6.3 行，不参与夹取。
+ * 语义：`camX = genAX - 2`，即把主将放在屏幕 ~70% 高处（透视 sy≈692），
+ * 一屏 13.327 行（远 7.43 / 近 5.89）足够同时装下我方整阵（100 兵 11 排）。
+ * 三条守卫（阵形过深时按优先级牺牲）：
+ *   守 1  `cam ≤ aMin + ROWS_FAR`  前锋别顶出上沿 —— 阵深 > 9.43 行时开始触发；
+ *   守 2  `cam ≥ genAX - GEN_MAX_R` 主将别掉出下沿 —— 阵深 > 12.43 行（一屏装不下）时宁可丢前排；
+ *   守 3  `cam ≤ genAX - GEN_MIN_R` 主将别出上沿 —— 与前压时的下限兜底。
+ * 主将阵亡（或单位表里找不到）时退回旧的「跟我方前锋」行为，保证镜头不跳空。
+ * 夹取仍走 `field.clampCameraX()`（`[CAM_MIN, CAM_MAX] ≈ [6.29, 64.49]`）。
+ *
+ * 为什么不再取两军前锋中点：中点会把 camX 拉向敌阵（满员接战 50.5），
+ * 而我方主将仍在 r=+7.5 出画 ⇒ 既没让主将入画、又把敌人拉近；且 bMax 穿过 38.4 时
+ * 会产生 48.40→45.00 的 3.4 行突跳。钉主将后这两个问题同时消失。
  */
 export function camera(world: World): number {
-  const half = CAM_HALF_ROWS;
   let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
   let aN = 0, bN = 0;
+  let genAX = NaN;   // 我方主将 gx：world.sides.A.general 只有 hp/str/int、没有坐标，只能从 units 找
   for (const u of world.units) {
     if (!u.alive) continue;
-    if (u.side === 'A') { aN++; aMin = Math.min(aMin, u.x); aMax = Math.max(aMax, u.x); }
-    else { bN++; bMin = Math.min(bMin, u.x); bMax = Math.max(bMax, u.x); }
+    if (u.side === 'A') {
+      aN++; aMin = Math.min(aMin, u.x); aMax = Math.max(aMax, u.x);
+      if (u.isGeneral) genAX = u.x;
+    } else { bN++; bMin = Math.min(bMin, u.x); bMax = Math.max(bMax, u.x); }
   }
   let cam: number;
   if (aN && bN) {
-    const mid = (aMin + bMax) / 2;
-    // 开局两军相距 30 行、一屏只有 13.3 行：若直接取中点，屏幕上只有空战场（实测就是"点开战什么都看不见"）。
-    // 因此相距超过一屏时先跟住我方前锋——把它放在屏幕 ~65% 高处（约 2.6 行偏置），等接近了再过渡到中点。
-    cam = (aMin - bMax > 2 * half) ? aMin - 2.6 : mid;
+    if (Number.isFinite(genAX)) {
+      cam = genAX - CAM_GEN_BACK;               // 默认：钉我方主将
+      cam = Math.min(cam, aMin + ROWS_FAR);     // 守 1：我方前锋别顶出上沿
+      cam = Math.max(cam, genAX - GEN_MAX_R);   // 守 2：主将别掉出下沿
+      cam = Math.min(cam, genAX - GEN_MIN_R);   // 守 3：主将别出上沿
+    } else {
+      cam = aMin - 2.6;                         // 主将已阵亡：退回旧「跟前锋」
+    }
   }
   else if (aN) cam = (aMin + aMax) / 2;
   else if (bN) cam = (bMin + bMax) / 2;

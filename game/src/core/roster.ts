@@ -56,6 +56,17 @@ export const DEAD = '陣亡';
  */
 export const RELEASED = '釋放';
 
+/**
+ * `roster._moved[name]` 的哨兵值：被我方战败后**被敌军带走**（我方战败时，敌方 AI 按
+ * 战斗页已判的"劝降成功"处置）→ 他已在敌营，不再回我方任何城的名单。
+ *
+ * 与 `DEAD` 的区别：人没死，将来敌方守城时还会出现（可再被俘/招降）；与 `RELEASED`
+ * 的区别：不是"放回原势力"，而是转投敌方。`city_model.js:rosterOf()` 只认"落腳城"，
+ * 这个值不等于任何城名 → 他从此不在我方名单（`stationedNames()` 仍把他算作"不在野"，
+ * 不会被当成在野将重复搜索）。重新招降时会摘掉哨兵（见 `applyCapturesToRoster()`）。
+ */
+export const ENEMY_HELD = '敵軍';
+
 /** 只需要这几个字段，测试里传 `{ captures: [...] }` 就够；`executed` 可选 */
 export type PostBattle = Pick<PostBattleReport, 'captures'> &
   Partial<Pick<PostBattleReport, 'executed'>>;
@@ -222,11 +233,11 @@ export function applyCapturesToRoster(
 
   const list = cityList(raw, city);
   const added: string[] = [];
-  // 曾经释放过的将再被招降：先摘掉 `RELEASED` 哨兵，否则 `rosterOf()` 仍当他"不在任何城"
+  // 曾经释放过 / 被敌军带走过的将再被招降：先摘掉哨兵，否则 `rosterOf()` 仍当他"不在任何城"
   const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : null) as
     Record<string, string> | null;
   for (const name of pending) {
-    if (moved && moved[name] === RELEASED) delete moved[name];
+    if (moved && (moved[name] === RELEASED || moved[name] === ENEMY_HELD)) delete moved[name];
     // 幂等：同一批里重复、或上一次调用已经写进去的，都不再 push
     if (list.includes(name) || added.includes(name)) continue;
     list.push(name);
@@ -382,6 +393,15 @@ export interface SurrenderOpts {
   mine?: string[];
   /** 我方君主名（`save.monarch || save.king`） */
   king?: string;
+  /**
+   * 这一仗是不是**我方胜**（胜者才有处置权）。
+   *
+   * `false` 时直接返回空卡（比"过滤"更硬）：我方战败时 `save.captured`/`save.executed`
+   * 里装的是**我方**被俘将（main.js:932-937 不分胜负都写），若只靠 `mine` 过滤，
+   * 守城丢城后我方将已不在 `owned` 里（静态归属跟着城走），仍会漏进面板 —— 用户报的
+   * "我方决定我方俘虏"就是这么来的。缺省 `undefined` = 旧行为（web 侧还没接胜负信号）。
+   */
+  won?: boolean;
 }
 
 export interface SurrenderResult {
@@ -563,12 +583,16 @@ function kingCardOf(data: GameData, name: string): SurrenderCard {
  *
  * 同名同时出现在两个名单里时**以斩首为准**（引擎不会这么写，防脏档）。
  * 已死的（`_moved='陣亡'`）、我方自己人（`opts.mine`）、我方君主（`opts.king`）都不出卡。
+ *
+ * `opts.won === false`（我方战败）→ **一张卡都不出**：处置俘虏是胜者的权利，我方战败时
+ * 名单里的是我方被俘将，交给 `planAiDisposal()` 由敌方 AI 处置（见本文件末尾「胜者门」）。
  */
 export function surrenderCandidates(
   save: CampaignSave,
   data: GameData,
   opts: SurrenderOpts = {},
 ): SurrenderCard[] {
+  if (opts.won === false) return []; // 胜者门：败者没有处置权
   const cards: SurrenderCard[] = [];
   const taken = new Set<string>();
   const executed = new Set(nameListOf(save?.executed));
@@ -603,12 +627,19 @@ export function surrenderCandidates(
 }
 
 /**
- * 面板要不要弹：没卡就不弹。
+ * 面板要不要弹：没卡就不弹；我方战败（`opts.won === false`）也不弹。
  *
  * `project/89` 的空城/无俘战（例如只打死守将没抓到人）不该每次都拦玩家一下 ——
  * web 侧必须先问这个函数再决定开不开 `#surrenderSheet`。
+ *
+ * `opts.won === false` 是「胜者门」的最后一层保险：即使调用方传了非空 cards（脏档/
+ * 旧调用点），我方战败时也一律不开面板（处置权在敌方 AI 手里）。
  */
-export function needSurrenderPanel(cards: readonly SurrenderCard[]): boolean {
+export function needSurrenderPanel(
+  cards: readonly SurrenderCard[] | null | undefined,
+  opts: { won?: boolean } = {},
+): boolean {
+  if (opts.won === false) return false;
   return Array.isArray(cards) && cards.length > 0;
 }
 
@@ -730,4 +761,253 @@ function rememberReleased(save: CampaignSave, names: readonly string[]): void {
     list.push(name);
   }
   box.released = list;
+}
+
+// ---------------------------------------------------------------------------
+// 「胜者才有处置权」（2026-11，P0：我方战败却由我方决定我方俘将）
+//
+// 原作 `0x491D8C "抓到敵將，如何處理?"` 是**胜者**的战后结算面板；败方没有被俘将的
+// 处置权，他们的俘虏由胜方（AI）按战斗页已经算好的结果处置。web 侧原先只按
+// `save.captured` / `save.executed` 有没有名字开面板，分不出这一仗谁赢：
+// main.js 战后的 `writeBackCampaign()`（:932-937）**不分胜负**把 `post.captures`
+// （劝降成功）写进 `save.captured`、把 `post.executed`（斩首）写进 `save.executed`。
+// 我方守城失败/攻城失败时，这两个键里装的是**我方**被俘将 —— 于是玩家会看到
+// "自己决定自己被俘武将怎么处置"的荒谬面板（用户实机反馈 P0）。
+//
+// 这一节的四件事：
+//   1. `readBattleOutcome()`：读 main.js 战后写回的 `save.lastBattle`（唯一权威胜负信号）；
+//   2. `decideBattleWon()`：`lastBattle` 缺失（旧档/验收探针）时的兜底推断；
+//   3. `ourForceNames()`：**明确属于我方**的武将名（roster 名单 + `_moved` 落腳城），
+//      用来把"我方被俘"从候选卡里剔掉 —— 不再靠"刚打下的城静态归属"这种会随战果翻转的判据；
+//   4. `planAiDisposal()` / `applyAiDisposal()`：我方战败时，敌方 AI **沿用战斗页已判结果**
+//      （`captured`/`joined` = 劝降成功、`executed` = 斩首、其余 = 释放），**不重新掷骰**。
+//
+// 胜者门的三层：
+//   · `surrenderCandidates(..., { won: false })` → 空卡；
+//   · `needSurrenderPanel(cards, { won: false })` → false；
+//   · web 侧 `settleBattleReturn()` 只在 `decideBattleWon()` 为真时才调上面两个。
+// ---------------------------------------------------------------------------
+
+/** main.js `writeBackCampaign()` 战后写回的胜负/俘虏记录（`save.lastBattle`） */
+export interface BattleOutcome {
+  /** 这一仗我方是否获胜（`winner === 'A'` 的战斗页语义） */
+  won: boolean;
+  /** 战场城（攻城 = 目标城；守城 = 被攻的城） */
+  city: string;
+  /** 是否是守城战（`?defend=1`） */
+  defend: boolean;
+  /** 被敌方劝降成功（离队入敌）的我方将 */
+  captured: string[];
+  /** 被敌方斩首的我方将 */
+  executed: string[];
+  /** 战场阵亡的我方将 */
+  dead: string[];
+  /** 战后招降进我方的敌将（胜者门用不到，留给战报） */
+  joined: string[];
+  /** 写入时刻（同一场战斗的幂等标记） */
+  ts: number;
+}
+
+/** 敌方 AI 对我方俘将的处置：劝降 / 斩首 / 阵亡 / 释放 */
+export type AiDisposalAction = 'recruit' | 'execute' | 'dead' | 'release';
+
+export interface AiDisposalEntry {
+  name: string;
+  action: AiDisposalAction;
+}
+
+export interface AiDisposalInput {
+  /** 战斗页判"劝降成功"的我方将（在 `save.captured` / `lastBattle.captured` 里） */
+  captured?: readonly string[];
+  /** 战斗页判"斩首"的我方将 */
+  executed?: readonly string[];
+  /** 战场阵亡的我方将 */
+  dead?: readonly string[];
+  /** 其余被俘但既没被判劝降也没被判斩首的（按原作 = 释放） */
+  released?: readonly string[];
+  /** 我方君主：君主不可俘（引擎已排除，防脏档） */
+  king?: string;
+}
+
+export interface AiDisposalResult {
+  /** 本次新打上 `_moved='敵軍'` 哨兵的名字 */
+  recruited: string[];
+  /** 本次新从池里移除（斩首）的名字 */
+  executed: string[];
+  /** 本次新从池里移除（阵亡）的名字 */
+  dead: string[];
+  /** 释放回本势力的名字（名单不动，只给战报用） */
+  released: string[];
+}
+
+/**
+ * 读 `save.lastBattle`（main.js 战后写回）。
+ *
+ * 契约（lead 定，生产者 `writeBackCampaign()` 补）：
+ * `{ won: boolean, defend: boolean, city: string, captured: string[], executed: string[],
+ *    dead: string[], joined: string[], ts: number }`。
+ *
+ * 形状不对 / `won` 不是布尔 → 返回 null（走 `decideBattleWon()` 的兜底），不抛。
+ */
+export function readBattleOutcome(save: CampaignSave): BattleOutcome | null {
+  const box = save as Record<string, unknown>;
+  const raw = box.lastBattle;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.won !== 'boolean') return null;
+  return {
+    won: rec.won,
+    city: typeof rec.city === 'string' ? rec.city : '',
+    defend: rec.defend === true,
+    captured: nameListOf(rec.captured),
+    executed: nameListOf(rec.executed),
+    dead: nameListOf(rec.dead),
+    joined: nameListOf(rec.joined),
+    ts: typeof rec.ts === 'number' && Number.isFinite(rec.ts) ? rec.ts : 0,
+  };
+}
+
+/**
+ * 这一仗我方是否获胜（胜者门）。
+ *
+ * 权威信号是 `save.lastBattle.won`（`readBattleOutcome()`）。缺失时的兜底推断：
+ *   1. `save.last` 指向城、但该城已不在 `owned` → 城丢了 = 我方败（守城失败）；
+ *   2. `save.captured` / `save.executed` 里有**明确属于我方**的人（`ourForceNames()`）→
+ *      我方败（我方将在被处置名单里）；
+ *   3. 否则按"我方胜"处理（与旧行为一致：只把非我方的人送进面板）。
+ *
+ * 兜底第 3 条在"攻城失败、且被俘的我方将既不在 roster 名单、也没有 `_moved` 记录"时会
+ * 误判为胜 —— 这种旧档只能靠 `lastBattle` 修；新流程（main.js 写 lastBattle）不走兜底。
+ */
+export function decideBattleWon(
+  save: CampaignSave,
+  outcome: BattleOutcome | null = readBattleOutcome(save),
+): boolean {
+  if (outcome) return outcome.won;
+  const owned = Array.isArray(save.owned) ? save.owned.map((n) => String(n ?? '')) : [];
+  const home = typeof save.last === 'string' ? save.last : '';
+  if (home && owned.indexOf(home) < 0) return false;
+  const ours = new Set(ourForceNames(save));
+  for (const n of nameListOf(save.captured).concat(nameListOf(save.executed))) {
+    if (ours.has(n)) return false;
+  }
+  return true;
+}
+
+/**
+ * **明确属于我方**的武将名（不靠静态 `city_by_times` 归属，避免"刚打下的城守将
+ * 立刻变成我方"这种随战果翻转的判据）：
+ *   · `save.roster[城]` 的名单（招降/调动写进来的）；
+ *   · `roster._moved[name] = 城名`（被调动到某座城的）；
+ *   · 已 `DEAD` 的不算；`RELEASED` / `ENEMY_HELD` 是"不在我方"的哨兵，不算。
+ *
+ * 君主不在这里（调用方用 `save.monarch || save.king` 另加）。
+ */
+export function ourForceNames(save: CampaignSave): string[] {
+  const raw = rawRoster(save, false);
+  const moved = movedOf(save);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (name: string): void => {
+    if (!name || seen.has(name)) return;
+    const to = moved[name];
+    if (to === DEAD || to === RELEASED || to === ENEMY_HELD) return;
+    seen.add(name);
+    out.push(name);
+  };
+  for (const city of cityKeys(raw)) {
+    for (const name of nameListOf(raw[city])) push(name);
+  }
+  for (const [name, to] of Object.entries(moved)) {
+    if (to === DEAD || to === RELEASED || to === ENEMY_HELD) continue;
+    push(name);
+  }
+  return out;
+}
+
+/**
+ * 把名字从**所有城**的名单里删掉，并打 `_moved='敵軍'` 哨兵（被我方战败后被敌军带走）。
+ *
+ * 斩首优先：已 `DEAD` 的不改（脏档防御）。
+ *
+ * @returns 本次**新打上**敌军哨兵的名字（幂等重放返回空数组）
+ */
+export function markEnemyHeld(save: CampaignSave, names: Iterable<string>): string[] {
+  const raw = rawRoster(save);
+  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : (raw._moved = {})) as
+    Record<string, string>;
+  const out: string[] = [];
+  for (const n of names) {
+    const name = String(n ?? '');
+    if (!name) continue;
+    if (moved[name] === DEAD) continue;
+    for (const city of cityKeys(raw)) {
+      const list = raw[city] as string[];
+      const at = list.indexOf(name);
+      if (at >= 0) list.splice(at, 1);
+    }
+    if (moved[name] !== ENEMY_HELD) out.push(name);
+    moved[name] = ENEMY_HELD;
+  }
+  return out;
+}
+
+/**
+ * 我方战败时，敌方 AI 对我方俘将的处置计划（纯函数，确定性：同输入同输出）。
+ *
+ * **沿用战斗页已判结果、不重新掷骰**（lead 契约）：`captured`/`joined` = 劝降成功、
+ * `executed` = 斩首、`dead` = 阵亡、其余（`released`）= 释放。同名以先出现的为准
+ * （captured → executed → dead → released），君主排除（`0x40975E`）。
+ */
+export function planAiDisposal(input: AiDisposalInput): AiDisposalEntry[] {
+  const king = String(input?.king ?? '');
+  const plan: AiDisposalEntry[] = [];
+  const seen = new Set<string>();
+  const add = (list: readonly string[] | undefined, action: AiDisposalAction): void => {
+    for (const rawName of list ?? []) {
+      const name = String(rawName ?? '');
+      if (!name || name === king || seen.has(name)) continue;
+      seen.add(name);
+      plan.push({ name, action });
+    }
+  };
+  add(input?.captured, 'recruit');
+  add(input?.executed, 'execute');
+  add(input?.dead, 'dead');
+  add(input?.released, 'release');
+  return plan;
+}
+
+/**
+ * 落库敌方 AI 的处置（`planAiDisposal()` 的结果）：
+ *   · recruit → `markEnemyHeld()`：从所有城名单删除 + `_moved='敵軍'`（转投敌营）；
+ *   · execute / dead → `removeFromPools()`：从所有城名单删除 + `_moved='陣亡'`；
+ *   · release → 名单不动（我方将放回本城；他本来就没被移出名单）。
+ *
+ * 幂等：同一份计划重放，`recruited` / `executed` / `dead` 都是空数组。
+ * web 侧在 AI 处置后必须把已处置的名字从 `save.captured` / `save.executed` 摘掉
+ * （那是"待处置队列"，不清下一次回大地图会重复弹）。
+ */
+export function applyAiDisposal(
+  save: CampaignSave,
+  plan: readonly AiDisposalEntry[],
+): AiDisposalResult {
+  const out: AiDisposalResult = { recruited: [], executed: [], dead: [], released: [] };
+  for (const entry of plan ?? []) {
+    const name = String(entry?.name ?? '');
+    const action = entry?.action;
+    if (!name || !action) continue;
+    if (action === 'recruit') {
+      if (isDead(save, name)) continue;
+      if (markEnemyHeld(save, [name]).length) out.recruited.push(name);
+      continue;
+    }
+    if (action === 'execute' || action === 'dead') {
+      const removed = removeFromPools(save, [name]);
+      if (removed.length) (action === 'execute' ? out.executed : out.dead).push(name);
+      continue;
+    }
+    out.released.push(name);
+  }
+  return out;
 }
