@@ -15,6 +15,8 @@
  *  - `0x4031B5`：`bit & 4` 时 `w2 += 0xC`(12)，另两条加成 `+0x96`(150) / `+0x3E8`(1000)。
  */
 import type { Side, World } from './battle.ts';
+// R115：`0x4687A0` 的加权抽样在原作里也是 `rand()%sum`（`0x450117`）；接线了 `world.roll` 就走它
+import type { SangoRng } from './sango_rng.ts';
 
 /**
  * 决策周期 = 60 帧（`0x444385` 的 `mov [倒计时], 0x3C`，见 project/173 Q3）。
@@ -128,11 +130,12 @@ export function aiWeights(world: World, side: Side): number[] {
 }
 
 /** 加权抽一个 case（`0x4687A0` 无放回抽样的第一个；其余候选不参与本次分派） */
-function pickCase(weights: readonly number[], rng: () => number): number {
+function pickCase(weights: readonly number[], rng: () => number, roll?: SangoRng | null): number {
   let sum = 0;
   for (const v of weights) sum += Math.max(0, v);
   if (sum <= 0) return CASE_NONE;
-  let r = Math.floor(rng() * sum);
+  // R115：接线了原作流就走 `rand()%n`，否则维持 `floor(rng()*sum)`
+  let r = roll ? roll.int(sum) : Math.floor(rng() * sum);
   for (let i = 0; i < weights.length; i++) {
     const v = Math.max(0, weights[i] ?? 0);
     if (r < v) return i;
@@ -149,7 +152,7 @@ function pickCase(weights: readonly number[], rng: () => number): number {
  */
 export function decideBattleAi(world: World, side: Side): number {
   const weights = aiWeights(world, side);
-  const pick = pickCase(weights, world.rng);
+  const pick = pickCase(weights, world.rng, world.roll);
   if (pick === CASE_RUSH) {
     world.aiCommand?.(world, side, 'advance');
     world.aiCommand?.(world, side, 'rush');

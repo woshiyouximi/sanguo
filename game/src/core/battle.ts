@@ -26,6 +26,9 @@ import { DamageHost } from './syso_host.ts';
 import { skillKindOfEx } from './skill_kind.ts';
 import { wiseAppliedAtStart, wiseBonus } from './wises.ts';
 import { normalizeWeather, weatherHitMod, weatherOf } from './weather.ts';
+// R115：原作乱数发生器（`0x450132`）。给了 `CreateOptions.roll` 才走它，缺省仍是 mulberry32，
+// 既有 139 处 `seed:` 用例的确定性断言一位都不动。
+import type { SangoRng } from './sango_rng.ts';
 // R37 策略派發 / 援軍：純邏輯在 strategy.ts，本檔只做接線（見 project/61_策略与援军.md）
 import {
   ARMY_FLAG,
@@ -462,6 +465,12 @@ export interface CreateOptions {
   data: GameData;
   seed?: number;
   /**
+   * 原作乱数流（R115）。给了就把它当作**战场随机源**：方位抽样走 `rand()%n`、
+   * 扫描先看哪一侧走 `rand() & 1`（见 `project/133` §4.1、`project/173` :378）。
+   * 不给则是 `mulberry32(seed)`，与 R208 之前逐位相同。
+   */
+  roll?: SangoRng;
+  /**
    * 战场地形 id 0..11（`terrains.json` 的 `_index` / 原作全局 `[0x4A6694]`）。
    * 缺省 0 = 城/平地类。它只作为 `terrainBonus()` 的查表行，不影响投影与站位。
    */
@@ -588,6 +597,12 @@ export interface World {
   sides: Record<Side, SideRuntime>;
   fx: Fx[];
   rng: () => number;
+  /**
+   * 原作乱数流（R115）。`null` = 没接线，方向/扫描继续用 `rng`（旧行为）。
+   * 给了值时：`sampleStepOffsets()` 的权重抽样走 `roll.int(sum)`（= `rand()%n`），
+   * `adjacentEnemy()` 的先扫侧走 `roll.bit()`（= `rand() & 1`）。观感抖动仍走 `rng`。
+   */
+  roll: SangoRng | null;
   aiSides: Record<Side, boolean>;
   /**
    * 统计（调试/验收用）：每侧的出手次数与命中次数、主将挨打次数，
@@ -956,6 +971,7 @@ export function createWorld(opts: CreateOptions): World {
     reinforce: [],
     log: [],
     rng: mulberry32(opts.seed ?? 1),
+    roll: opts.roll ?? null,
     // 默认两侧都不放技：AI 放技是显式 opt-in，否则镜像局里 "B 有 AI" 会变成系统性优势
     aiSides: { A: opts.aiSides?.A ?? false, B: opts.aiSides?.B ?? false },
     // R67：伤害默认走脚本通道（MAGIC.SO `Hurt` → `SYSCALL 0x125` → 宿主函数）；`legacy` 只给对拍
@@ -1839,10 +1855,20 @@ export function hitChance(world: World, from: Unit, to: Unit): number {
  */
 export function hitRoll(world: World, from: Unit, to: Unit): boolean {
   const p = hitChance(world, from, to);
-  if (world.rng() * 300 < p) return true;
+  if (hitRollOnce(world, p)) return true;
   if (!statusBitOf(from, UNIT_STATUS.DOUBLE_HIT)) return false;
   const p2 = Math.trunc((p * 2) / 3);
-  return world.rng() * 300 < p2;
+  return hitRollOnce(world, p2);
+}
+
+/**
+ * 一次 `rand() % 300 < p`。接线了 `world.roll`（R115）就走原作流 `roll.int(300)`；
+ * 否则维持旧的 `world.rng() * 300 < p`（**逐位不变**，139 处 `seed:` 用例都靠这条）。
+ */
+function hitRollOnce(world: World, p: number): boolean {
+  const roll = world.roll;
+  if (roll) return roll.int(300) < p;
+  return world.rng() * 300 < p;
 }
 
 export function troopBonus(data: GameData, aTroop: number, bTroop: number): number {
@@ -1978,7 +2004,8 @@ export interface StepOffset {
 /**
  * `0x43C2A5` 方位抽样：按权重**无放回**抽，返回候选方位序列（顺序即试落点顺序）。
  *
- * 权重按 `0x450117(n) = rand()%n` 抽（本作走 `world.rng`，同一 seed 可复现）。
+ * 权重按 `0x450117(n) = rand()%n` 抽：给了 `roll`（R115 原作流）就用 `roll.int(sum)`，
+ * 否则退回 `Math.floor(rng() * sum)`（旧行为，同一 seed 可复现）。
  * `mode == -1`（基向量 0,0）时两轮都只给 (0,0)，即原地不动。
  */
 export function sampleStepOffsets(
@@ -1987,6 +2014,7 @@ export function sampleStepOffsets(
   w1: readonly number[],
   w2: readonly number[],
   rng: () => number,
+  roll?: SangoRng | null,
 ): { first: StepOffset[]; second: StepOffset[] } {
   const cx = sx > 0 ? 1 : sx < 0 ? -1 : 0;
   const cy = sy > 0 ? 1 : sy < 0 ? -1 : 0;
@@ -1997,7 +2025,7 @@ export function sampleStepOffsets(
     let sum = left.reduce((a, b) => a + b, 0);
     const out: StepOffset[] = [];
     while (sum > 0) {
-      let r = Math.floor(rng() * sum);
+      let r = roll ? roll.int(sum) : Math.floor(rng() * sum);
       let j = 0;
       while (j < 8 && r >= left[j]!) {
         r -= left[j]!;
@@ -2178,7 +2206,7 @@ export type StepPick = { gx: number; gy: number } | { exit: true } | null;
  */
 export function chooseStepCell(world: World, u: Unit, plan: StepPlan, occ: Occ): StepPick {
   const from = unitCell(u);
-  const { first, second } = sampleStepOffsets(plan.sx, plan.sy, plan.w1, plan.w2, world.rng);
+  const { first, second } = sampleStepOffsets(plan.sx, plan.sy, plan.w1, plan.w2, world.rng, world.roll);
   for (const d of first) {
     const tx = from.gx + d.dx;
     const ty = from.gy + d.dy;
@@ -2339,6 +2367,8 @@ function rowEnemyAt(u: Unit, occ: Occ, dir: 1 | -1, range: number): Unit | null 
  *
  * 原作先随机一个首扫方向（`dir0`），命中就返回；没命中再反方向扫一次。这里等价地
  * 「两侧都扫、只有两侧都有敌人才抽一次 rng」，避免每周期给全场随机流白插一路消耗。
+ * 接线了 `world.roll`（R115）时这一步走 `roll.bit()` = 原作 `rand() & 1`，
+ * 保证「先看哪一侧」的**流消耗**与原作同源（结果仍是二选一，不影响伤害）。
  */
 function adjacentEnemy(world: World, u: Unit, occ: Occ): Unit | null {
   const range = attackRangeOf(u);
@@ -2347,6 +2377,8 @@ function adjacentEnemy(world: World, u: Unit, occ: Occ): Unit | null {
   if (!left && !right) return null;
   if (left && !right) return left;
   if (right && !left) return right;
+  const roll = world.roll;
+  if (roll) return roll.bit() === 1 ? right : left;
   return world.rng() < 0.5 ? left : right;
 }
 

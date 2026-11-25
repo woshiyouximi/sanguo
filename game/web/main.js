@@ -8,6 +8,9 @@
  * 战斗规则一行都不在这里实现。
  */
 import { camera, cast, createWorld, defaultAim, fxTtlOf, QI_MAX, allRush, isRushing, requestRetreat, settle, step, TICK_HZ } from '../dist/core/battle.js';
+// R115：原作乱数流（`0x450132`）。战斗的方向抽样（`0x43C2A5` 权重 `rand()%n`）、
+// 「先扫哪一侧」（`rand() & 1`）、AI 选令（`0x4687A0`）都改走这条流，同一 `?seed=` 可复现。
+import { sangoRng } from '../dist/core/sango_rng.js';
 import { knownMagicOf } from '../dist/core/capture.js';
 import { applyWise, applyWiseOnBattleStart } from '../dist/core/wises.js';
 import { ARMY_BTN, applyArmyCmd, applyArmyCmdKind, armyCmdDefOf, armyCmdsOf, armyOrderOf, installArmyOrders } from '../dist/core/army_cmd.js';
@@ -631,6 +634,9 @@ function makeWorld() {
 const world = createWorld({
     data: d,
     seed: cfg.seed,
+    // R115：方向/扫描/AI 选令走原作 1998 年的乱数流（`0x450132`），见 core/sango_rng.ts。
+    // 观感抖动（脚步像素偏移等）仍用 seed 派生的 mulberry32，两者互不影响。
+    roll: sangoRng(cfg.seed ?? 1),
     a: {
       troop: cfg.aTroop,
       formation: cfg.aForm,
