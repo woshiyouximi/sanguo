@@ -95,7 +95,39 @@ ok('無資源：20 行名字都有字', (() => {
 ok('無資源：仍有 Graphics 繪製（底板/行底色/降級描邊）', drawCalls(panel) > 30, drawCalls(panel));
 const plateNodes = ['BookPlate', 'BookG', 'BookTabForcePlate', 'BookClearPlate', 'BookBackPlate'].map((n) => nodeOf(panel, n));
 ok('無資源：九宮底板節點都存在（降級成 Graphics 描邊，不是缺節點）', plateNodes.every((n) => n !== null));
-ok('無資源：節點數與有資源時同量級（≤ 240）', nodesOf(panel).length <= 240, nodesOf(panel).length);
+ok('無資源：節點數與有資源時同量級（≤ 260；R208 起 +20 行頭像圖層）', nodesOf(panel).length <= 260, nodesOf(panel).length);
+
+// R208：行頭像載不到圖 → 20 個圖層都不 active，行首字牌仍在
+const rowImgs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => {
+  let hit = null;
+  (function walk(node) {
+    if (!hit && node.name === `BookRowFaceImg${i}`) hit = node;
+    for (const child of node.children || []) walk(child);
+  })(panel.node);
+  return hit;
+});
+ok('無資源：行頭像圖層存在（20 個）', (() => {
+  let n = 0;
+  for (let i = 0; i < 20; i += 1) {
+    let hit = null;
+    (function walk(node) {
+      if (!hit && node.name === `BookRowFaceImg${i}`) hit = node;
+      for (const child of node.children || []) walk(child);
+    })(panel.node);
+    if (hit) n += 1;
+  }
+  return n === 20;
+})());
+ok('無資源：行頭像圖層全部不 active（載不到不留空框）', rowImgs.every((n) => !!n && n.active === false));
+ok('無資源：行首字牌仍然顯示（降級可讀）', rowImgs.every((n) => {
+  const idx = Number(String(n.name).replace('BookRowFaceImg', ''));
+  let letter = null;
+  (function walk(node) {
+    if (!letter && node.name === `BookRowFace${idx}`) letter = node;
+    for (const child of node.children || []) walk(child);
+  })(panel.node);
+  return !!letter && letter.active === true;
+}));
 
 // 開單將卡：沒圖也要看到首字色塊
 const row0 = centerOf(BOOK.bookRowRect(0));

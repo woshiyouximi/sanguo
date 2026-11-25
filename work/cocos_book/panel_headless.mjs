@@ -142,7 +142,7 @@ same('BOOK 頁碼文案', '第 1 / 21 頁　（篩選後 401 人）', dbg0.pageT
 
 const nodes0 = nodesOf(panel);
 console.log(`BOOK 節點數 = ${nodes0.length}`);
-ok('BOOK 節點數 ≤ 240（判據：池子大小，與 401 條無關）', nodes0.length <= 240, nodes0.length);
+ok('BOOK 節點數 ≤ 260（判據：池子大小，與 401 條無關；R208 起 +20 個行頭像圖層）', nodes0.length <= 260, nodes0.length);
 ok('BOOK 節點數 > 150（該畫的都畫了）', nodes0.length > 150, nodes0.length);
 const rowNameCount = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].filter(
   (i) => nodeOf(panel, `BookRowName${i}`) !== null,
@@ -180,6 +180,47 @@ ok('BOOK 首字格 20 行全非空', rowFace.every((t) => t.length >= 1), rowFac
 same('BOOK 我方行勢力欄 = 張角（我方排最前）', '張角', rowForce[0]);
 same('BOOK 我方行狀態欄 = 在職', '在職', rowStatus[0]);
 same('BOOK 我方行首字 = 名字首字', Array.from(rowNameLabels[0])[0], rowFace[0]);
+
+/* ------------------------------------------------------------------ */
+/* 行頭像（R208：行首 26×26 色格上疊 face/thumb）                        */
+/* ------------------------------------------------------------------ */
+console.log('── 行頭像 ──');
+const faceImgs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19].map((i) =>
+  nodeOf(panel, `BookRowFaceImg${i}`),
+);
+same('BOOK 行頭像圖層 20 個（與 ROW_POOL 同序）', 20, faceImgs.filter((n) => n !== null).length);
+const img0 = faceImgs[0];
+ok(
+  'BOOK 行頭像 0（我方首行）真載到 face/thumb',
+  !!img0 && img0.active === true && /^face\/thumb\//.test(String(img0.sprite)),
+  img0 && img0.sprite,
+);
+same('BOOK 行頭像格位置 = face 欄第 1 行（設計 28,319，26×26 居中）', { x: 28 + 13 - 375, y: 667 - (312 + 7 + 13) }, { x: img0.x, y: img0.y });
+// 真機上 thumb 30×40 → contain 縮成 19.5×26；mock 的 SpriteFrame 沒有 originalSize（拿不到 30×40），
+// 所以這裡斷言「高度撐滿 26、寬度不超過 26」——真機縮放那一半由 `ArtLayer.apply()` 的 contain 分支保證。
+ok('BOOK 行頭像高度撐滿 26、寬度不溢出（contain）', Math.abs(img0.h - 26) < 0.01 && img0.w <= 26.01 && img0.w >= 19.4, {
+  w: img0.w,
+  h: img0.h,
+});
+ok(
+  'BOOK 首字牌在圖到了之後隱藏（文字仍留著，降級可回）',
+  nodeOf(panel, 'BookRowFace0').active === false && rowFace[0].length >= 1,
+  nodeOf(panel, 'BookRowFace0'),
+);
+const withImg = faceImgs.filter((n) => !!n && n.active === true && n.sprite).length;
+ok('BOOK 第一頁多數行有真頭像（FACE 映射 400/401）', withImg >= 10, withImg);
+ok('BOOK 有圖的行：首字牌隱藏；沒圖的行：首字牌仍在', (() => {
+  for (let i = 0; i < 20; i += 1) {
+    const img = faceImgs[i];
+    const letter = nodeOf(panel, `BookRowFace${i}`);
+    if (!img || !letter) return false;
+    if (img.active === true && img.sprite) {
+      if (letter.active !== false) return false;
+    } else if (letter.active !== true) return false;
+  }
+  return true;
+})(), withImg);
+
 
 // 表頭 / 頁簽 / chips / 首字
 same('BOOK 表頭 7 欄', ['名', '武', '智', '級', '所 屬 城', '勢 力', '狀 態'], [0, 1, 2, 3, 4, 5, 6].map((i) => textOf(panel, `BookHead${i}`)));
@@ -287,7 +328,10 @@ same('BOOK 卡片選中的人', rowName0, dbgCard.selected);
 ok('BOOK 卡片 meta 含勢力與狀態', dbgCard.cardMeta.includes(PLAYER) && dbgCard.cardMeta.includes('在職'), dbgCard.cardMeta);
 ok('BOOK 卡片體/技/兵一行', /體/.test(dbgCard.cardVital) && /技/.test(dbgCard.cardVital) && /兵/.test(dbgCard.cardVital), dbgCard.cardVital);
 ok('BOOK 卡片忠/氣/疲一行', /忠/.test(dbgCard.cardMood) && /氣/.test(dbgCard.cardMood) && /疲/.test(dbgCard.cardMood), dbgCard.cardMood);
-ok('BOOK 卡片必殺技有字且帶級別', /必殺技/.test(dbgCard.cardSkill) && /Lv\s?\d+/.test(dbgCard.cardSkill), dbgCard.cardSkill);
+// R208：SKILL 是多段技能表，卡片顯示「已學會的最高一段」；行等級 ≥1 就一定學到第一段，
+// 所以這裡斷言「有真技名」且「不帶（LvN）未解鎖標註」（模型層細節見 model_assert ④）。
+ok('BOOK 卡片必殺技行有真技名（不是 —）', /必殺技/.test(dbgCard.cardSkill) && !/—/.test(dbgCard.cardSkill), dbgCard.cardSkill);
+ok('BOOK 卡片必殺技不帶未解鎖等級標註', !/（Lv/.test(dbgCard.cardSkill), dbgCard.cardSkill);
 ok('BOOK 卡片軍師技有字', /軍師技/.test(dbgCard.cardWise) && dbgCard.cardWise.length > 6, dbgCard.cardWise);
 ok('BOOK 卡片裝備含兵/馬/書', /兵/.test(dbgCard.cardEquip) && /馬/.test(dbgCard.cardEquip) && /書/.test(dbgCard.cardEquip), dbgCard.cardEquip);
 ok('BOOK 卡片立繪真載到圖（face/full 或 hero）', dbgCard.cardPortrait !== 'none' && dbgCard.cardPortrait.length > 0, dbgCard.cardPortrait);
@@ -297,7 +341,7 @@ ok('BOOK 立繪 SpriteFrame 路徑 = face/ 或 hero/', !!cardArt && (String(card
 const faceLabel = nodeOf(panel, 'BookCardFace');
 ok('BOOK 立繪下的首字降級層存在且非空', !!faceLabel && String(faceLabel.label).length >= 1, faceLabel && faceLabel.label);
 const nodesCard = nodesOf(panel).length;
-ok('BOOK 卡片打開後節點數 ≤ 245', nodesCard <= 245, nodesCard);
+ok('BOOK 卡片打開後節點數 ≤ 265（R208 起 +20 行頭像圖層）', nodesCard <= 265, nodesCard);
 
 const [ccx, ccy] = centerOf(BOOK.BOOK_LAYOUT.cardClose);
 touch(ccx, ccy);

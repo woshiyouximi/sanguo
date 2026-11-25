@@ -37,7 +37,8 @@ import {
   UITransform,
   Vec3,
 } from 'cc';
-import { addOutline, ArtSprite, loadFrame } from './ArtLayer';
+import type { SpriteFrame } from 'cc';
+import { addOutline, ArtSprite, loadFrame, loadFrameCached } from './ArtLayer';
 import {
   BOOK_PAGE_SIZE,
   NO_CITY_KEY,
@@ -78,6 +79,10 @@ export interface BookRect {
 /** 一頁 20 行、行高 40 → 800 高的列表區。行節點池就是這個數。 */
 export const ROW_POOL = BOOK_PAGE_SIZE;
 export const ROW_H = 40;
+/** 行頭像同時在載的上限：一頁 20 行不要一次打 20 個 `bundle.load`（微信小遊戲當時要≤10 並發）。 */
+export const FACE_LOAD_MAX = 3;
+/** 行頭像格的邊長（與 `drawList()` 畫的 26×26 色格同尺寸） */
+export const ROW_FACE_PX = 26;
 /** 勢力/城 篩選 chips：1 個「全部」+ 8 個分組 */
 export const CHIP_POOL = 9;
 /** 首字 chips：8 個一頁 + ◀ ▶ */
@@ -388,6 +393,19 @@ export class GeneralBookPanel extends Component {
   private portraitFor = '';
   private portraitVia = 'none';
 
+  /* ---- 行頭像（R208）：節點池 20 個，圖是非同步來的，名字認領 ---- */
+
+  /** 20 個行頭像圖層，與 `rowNodes` 同序；空行/換人時先把 node 收掉 */
+  private rowFaces: ArtSprite[] = [];
+  /** 該行當前要的人名（`''` = 空行）；圖回來時靠它判斷「這張臉還屬於這一行嗎」 */
+  private rowFaceName: string[] = [];
+  /** 名字 → 載到的圖（`null` = 五級回落全失敗，負快取，別每頁重試同一人） */
+  private faceFrames = new Map<string, SpriteFrame | null>();
+  /** 等載佇列（限流見 `FACE_LOAD_MAX`） */
+  private faceQueue: Array<{ i: number; name: string }> = [];
+  private faceBusy = 0;
+  private facePumping = false;
+
   /* --------------------------------------------------------------------- */
   /* 對外 API                                                              */
   /* --------------------------------------------------------------------- */
@@ -494,7 +512,7 @@ export class GeneralBookPanel extends Component {
       this.headLabels.push(this.makeLabel(`BookHead${i}`, text, rect, 18, COLORS.textFaint, align));
     }
 
-    // 行節點池 20 個
+    // 行節點池 20 個（頭像圖層排在 8 個 Label 之後 = 蓋在首字牌上面，圖到了再關首字）
     for (let i = 0; i < ROW_POOL; i += 1) {
       this.rowNodes.push({
         face: this.makeLabel(`BookRowFace${i}`, '', bookColRect('face', i), 18, COLORS.text, 'center'),
@@ -506,6 +524,16 @@ export class GeneralBookPanel extends Component {
         force: this.makeLabel(`BookRowForce${i}`, '', bookColRect('force', i), 18, COLORS.textDim, 'left'),
         status: this.makeLabel(`BookRowStatus${i}`, '', bookColRect('status', i), 18, COLORS.textDim, 'center'),
       });
+      const faceCol = bookColRect('face', i);
+      const img = new ArtSprite(
+        this.node,
+        `BookRowFaceImg${i}`,
+        { x: faceCol.x, y: faceCol.y + (ROW_H - ROW_FACE_PX) / 2, w: ROW_FACE_PX, h: ROW_FACE_PX },
+        'contain',
+      );
+      img.setVisible(true);
+      this.rowFaces.push(img);
+      this.rowFaceName.push('');
     }
 
     // 翻頁
@@ -934,6 +962,9 @@ export class GeneralBookPanel extends Component {
       const row = rows[i];
       const rect = bookRowRect(i);
       if (!row) {
+        this.rowFaceName[i] = '';
+        const img = this.rowFaces[i];
+        if (img) img.node.active = false;
         for (const key of Object.keys(nodes) as Array<keyof BookRowNodes>) nodes[key].node.active = false;
         continue;
       }
@@ -967,8 +998,95 @@ export class GeneralBookPanel extends Component {
       );
 
       const picked = row;
+      this.syncRowFace(i, row.name);
       this.addHit(`row:${i}:${row.name}`, rect, () => this.openCard(picked));
     }
+  }
+
+  /* --------------------------------------------------------------------- */
+  /* 行頭像（R208）                                                        */
+  /* --------------------------------------------------------------------- */
+
+  /**
+   * 讓第 `index` 行顯示 `name` 的頭像。
+   *
+   * 三條原則：
+   * 1. **首字牌是底，臉是浮層**：圖沒到、載失敗、沒 FACE 映射時看到的是「勢力色格 + 首字」，
+   *    永遠不會白塊（與本檔開頭 §3 的承諾一致）。
+   * 2. **名字認領**：非同步圖回來時這一格可能已經翻到別人的名字上了，`rowFaceName[index]`
+   *    對不上就丟掉，絕不把張三的臉貼到李四那行。
+   * 3. **限流 + 快取**：一頁 20 行只同時載 `FACE_LOAD_MAX` 個；載到的圖按名字存進
+   *    `faceFrames`（含 `null` 負快取），翻頁回來直接用，不再打 bundle。
+   */
+  private syncRowFace(index: number, name: string): void {
+    const img = this.rowFaces[index];
+    if (!img) return;
+    const letter = this.rowNodes[index] ? this.rowNodes[index].face : null;
+    if (this.rowFaceName[index] !== name) {
+      this.rowFaceName[index] = name;
+      img.node.active = false; // 換人：先收掉上一張臉，等新圖到了再顯示
+      const hit = this.faceFrames.get(name);
+      if (hit !== undefined) {
+        this.applyRowFace(index, hit);
+        return;
+      }
+      this.faceQueue.push({ i: index, name });
+      this.pumpFaces();
+    }
+    if (letter) letter.node.active = !(this.rowFaceName[index] === name && img.state === 'ready');
+  }
+
+  /** 把一張（可能為 null 的）圖套到第 `index` 行；null = 隱藏圖、露出首字牌。 */
+  private applyRowFace(index: number, frame: SpriteFrame | null): void {
+    const img = this.rowFaces[index];
+    if (!img) return;
+    const letter = this.rowNodes[index] ? this.rowNodes[index].face : null;
+    if (!frame) {
+      img.apply(null);
+      if (letter) letter.node.active = true;
+      return;
+    }
+    const ok = img.apply(frame); // 'contain'：30×40 縮成 19.5×26，不變形、不溢出
+    if (letter) letter.node.active = !ok;
+  }
+
+  /** 佇列泵：最多 `FACE_LOAD_MAX` 個在載；`facePumping` 防同步回呼把泵遞迴進去。 */
+  private pumpFaces(): void {
+    if (this.facePumping) return;
+    this.facePumping = true;
+    while (this.faceBusy < FACE_LOAD_MAX && this.faceQueue.length > 0) {
+      const job = this.faceQueue.shift();
+      if (!job) break;
+      if (this.rowFaceName[job.i] !== job.name) continue; // 這行已經翻走了，別浪費一次載入
+      const hit = this.faceFrames.get(job.name);
+      if (hit !== undefined) {
+        this.applyRowFace(job.i, hit);
+        continue;
+      }
+      this.faceBusy += 1;
+      let got: SpriteFrame | null = null;
+      const cap = {
+        apply: (frame: SpriteFrame | null): boolean => {
+          if (frame) got = frame;
+          return frame !== null;
+        },
+      };
+      loadPortrait(
+        cap,
+        job.name,
+        'thumb', // 30×40：26px 的行格子用 thumb 就夠，full 是 100×120（4 倍像素）
+        loadFrameCached,
+        (result) => {
+          this.faceBusy -= 1;
+          const frame = result.via === 'none' ? null : got;
+          this.faceFrames.set(job.name, frame);
+          if (this.rowFaceName[job.i] === job.name) this.applyRowFace(job.i, frame);
+          this.pumpFaces();
+        },
+        true,
+      );
+    }
+    this.facePumping = false;
   }
 
   private drawNav(pages: number, filtered: number): void {

@@ -205,52 +205,67 @@ same('③ owned 傳空不影響分組求和', 401, byCityNoOwn.reduce((n, g) => 
 /* ================================================================== */
 /* ④ 技能過濾（level ≤ 當前等級）5 樣本含關羽                          */
 /* ================================================================== */
-section('④ 技能過濾（level ≤ 當前等級）');
 const SAMPLES = [
-  { name: '關羽', skill: [40, 110], wise: [39, 54] },
-  { name: '張飛', skill: [39, 104], wise: [24, 13] },
-  { name: '呂布', skill: [39, 110], wise: [1, 9] },
-  { name: '諸葛亮', skill: [40, 44], wise: [37, 67] },
-  { name: '盜賊', skill: [8, 22], wise: [8, 8] },
+  { name: '關羽', tiers: 8, tier1: [1, 50], top: [40, 110], wise: [39, 54] },
+  { name: '張飛', tiers: 8, tier1: [1, 46], top: [39, 104], wise: [24, 13] },
+  { name: '呂布', tiers: 8, tier1: [1, 50], top: [39, 110], wise: [1, 9] },
+  { name: '諸葛亮', tiers: 8, tier1: [1, 6], top: [40, 44], wise: [37, 67] },
+  { name: '盜賊', tiers: 8, tier1: [1, 11], top: [8, 22], wise: [8, 8] },
 ];
 for (const sample of SAMPLES) {
   const raw = rawOf.get(sample.name);
   ok(`④ 樣本 ${sample.name} 存在於 generals.json`, !!raw);
-  same(`④ ${sample.name} 的 SKILL 解析出 1 對`, [[...sample.skill]], GB.parseSkillPairs(raw.SKILL));
+  const pairs = GB.parseSkillPairs(raw.SKILL);
+  same(`④ ${sample.name} 的 SKILL 解析出 ${sample.tiers} 段`, sample.tiers, pairs.length);
+  same(`④ ${sample.name} 第一段`, [[...sample.tier1]], pairs.slice(0, 1));
+  same(`④ ${sample.name} 最高一段`, [[...sample.top]], pairs.slice(-1));
   same(`④ ${sample.name} 的 WISESKILL 解析出 1 對`, [[...sample.wise]], GB.parseSkillPairs(raw.WISESKILL));
-  // 解鎖邊界：剛好等於等級 → 解鎖；差 1 級 → 未解鎖
-  const atSkill = GB.skillOf(raw.SKILL, sample.skill[0], magics);
-  ok(`④ ${sample.name} 必殺技在等級 ${sample.skill[0]} 解鎖（level ≤ 當前等級）`, atSkill.unlocked === true);
-  const belowSkill = GB.skillOf(raw.SKILL, sample.skill[0] - 1, magics);
-  ok(`④ ${sample.name} 必殺技在等級 ${sample.skill[0] - 1} 未解鎖`, belowSkill.unlocked === false);
+  // 1 級：第一段一定學到；0 級：一段都沒有 → 回落第一段並標「未解鎖」
+  const at1 = GB.skillOf(raw.SKILL, 1, magics);
+  ok(`④ ${sample.name} 1 級學到第一段`, at1.unlocked === true && at1.level === 1 && at1.id === sample.tier1[1], at1);
+  const at0 = GB.skillOf(raw.SKILL, 0, magics);
+  ok(`④ ${sample.name} 0 級顯示第一段且未解鎖`, at0.unlocked === false && at0.level === 1, at0);
+  const atTop = GB.skillOf(raw.SKILL, sample.top[0], magics);
+  ok(
+    `④ ${sample.name} ${sample.top[0]} 級學到最高一段`,
+    atTop.unlocked === true && atTop.level === sample.top[0] && atTop.id === sample.top[1],
+    atTop,
+  );
   const atWise = GB.skillOf(raw.WISESKILL, sample.wise[0], wises);
   ok(`④ ${sample.name} 軍師技在等級 ${sample.wise[0]} 解鎖`, atWise.unlocked === true);
   const belowWise = GB.skillOf(raw.WISESKILL, sample.wise[0] - 1, wises);
   ok(`④ ${sample.name} 軍師技在等級 ${sample.wise[0] - 1} 未解鎖`, belowWise.unlocked === false);
-  ok(`④ ${sample.name} 技能 id 解出真名（不是 #id）`, !!atSkill.name && !/^#/.test(atSkill.name) && !!atWise.name && !/^#/.test(atWise.name));
+  ok(`④ ${sample.name} 技能 id 解出真名（不是 #id）`, !!at1.name && !/^#/.test(at1.name) && !!atWise.name && !/^#/.test(atWise.name));
 }
-same('④ 關羽必殺技名 = 鬼哭神號（magic 110）', '鬼哭神號', GB.skillOf(rawOf.get('關羽').SKILL, 40, magics).name);
+// 中間等級的「最高已學會」挑選：關羽 20 級 → 17 級那一段（77），不是 1 級那段、也不是 22 級那段
+const guanAt20 = GB.skillOf(rawOf.get('關羽').SKILL, 20, magics);
+ok('④ 關羽 20 級取「已學會的最高一段」= 17 級 77', guanAt20.level === 17 && guanAt20.id === 77 && guanAt20.unlocked === true, guanAt20);
+same('④ 關羽必殺技名 = 鬼哭神號（magic 110，40 級那一段）', '鬼哭神號', GB.skillOf(rawOf.get('關羽').SKILL, 40, magics).name);
 same('④ 關羽軍師技名 = 十面埋伏（wise 54）', '十面埋伏', GB.skillOf(rawOf.get('關羽').WISESKILL, 39, wises).name);
 same('④ 諸葛亮必殺技名 = 天地無用（magic 44）', '天地無用', GB.skillOf(rawOf.get('諸葛亮').SKILL, 40, magics).name);
 same('④ 呂布軍師技名 = 快速集氣（wise 9）', '快速集氣', GB.skillOf(rawOf.get('呂布').WISESKILL, 1, wises).name);
-// 名冊預設等級（無存檔 → 20 級）：關羽 40 級必殺技應為未解鎖
+// 名冊預設等級：R85 之後取「劇本 0 起始等級」，關羽是 1 級（不再一律 20）
 const rowGuan = rowOf.get('關羽');
-same('④ 名冊裡關羽等級 = 20（新檔無 generalLevel）', 20, rowGuan.level);
-ok('④ 20 級的關羽必殺技顯示未解鎖（level 40 > 20）', rowGuan.skill.unlocked === false);
-ok('④ 20 級的關羽軍師技也未解鎖（level 39 > 20）', rowGuan.wise.unlocked === false);
-// 存檔覆蓋：generalLevel 給 40 → 解鎖
+same('④ 名冊裡關羽等級 = 1（劇本 0 起始等級，R85 scenarioLevelOf）', 1, rowGuan.level);
+ok(
+  '④ 1 級的關羽已學到第一段（50），顯示真名不帶 Lv',
+  rowGuan.skill.unlocked === true && rowGuan.skill.level === 1 && !/Lv/.test(GB.skillLine(rowGuan.skill, '必殺技')),
+  GB.skillLine(rowGuan.skill, '必殺技'),
+);
+ok('④ 1 級的關羽軍師技未解鎖（39 > 1）', rowGuan.wise.unlocked === false, rowGuan.wise);
+// 存檔覆蓋：generalLevel 給 40 → 學到最高一段（鬼哭神號）
 const rows40 = GB.buildBook({ generals, magics, wises, save: { ...save, generalLevel: { 關羽: 40 } }, officersByCity, ownerOf: garrisonOwner });
 const guan40 = rows40.find((r) => r.name === '關羽');
 same('④ 存檔 generalLevel 覆蓋後關羽 40 級', 40, guan40.level);
-ok('④ 40 級的關羽必殺技解鎖', guan40.skill.unlocked === true);
-ok('④ 40 級的關羽軍師技仍解鎖（39 ≤ 40）', guan40.wise.unlocked === true);
-// 20 級時全體解鎖數（報告要寫的兩個數）
-const unlockedSkill20 = rows.filter((r) => r.skill.unlocked).length;
-const unlockedWise20 = rows.filter((r) => r.wise.unlocked).length;
-same('④ 新檔 20 級：必殺技只 4 人解鎖（級別 8 的 1 人 + 20 的 3 人）', 4, unlockedSkill20);
-same('④ 新檔 20 級：軍師技 103 人解鎖（級別 1 的 102 + 8 的 1）', 103, unlockedWise20);
-ok('④ skillLine 未解鎖時帶等級標註', /Lv\s?40/.test(GB.skillLine(rowGuan.skill, '必殺技')), GB.skillLine(rowGuan.skill, '必殺技'));
-ok('④ skillLine 解鎖時不帶等級', !/Lv/.test(GB.skillLine(guan40.skill, '必殺技')), GB.skillLine(guan40.skill, '必殺技'));
+ok('④ 40 級的關羽必殺技 = 鬼哭神號（最高一段）', guan40.skill.unlocked === true && guan40.skill.id === 110 && guan40.skill.name === '鬼哭神號', guan40.skill);
+ok('④ 40 級的關羽軍師技也解鎖（39 ≤ 40）', guan40.wise.unlocked === true);
+// 全體解鎖數（報告要寫的兩個數）：每將第一段都是 1 級 ⇒ 行等級 ≥1 就學得到
+const unlockedSkill = rows.filter((r) => r.skill.unlocked).length;
+const unlockedWise = rows.filter((r) => r.wise.unlocked).length;
+same('④ 401 將在各自等級下必殺技全解鎖（第一段都是 1 級）', 401, unlockedSkill);
+same('④ 現行起始等級下軍師技 102 人解鎖（盜賊的 8 級招沒到）', 102, unlockedWise);
+ok('④ 未解鎖時 skillLine 帶等級標註', /Lv\s?1/.test(GB.skillLine(GB.skillOf(rawOf.get('關羽').SKILL, 0, magics), '必殺技')));
+ok('④ 解鎖時 skillLine 不帶等級', !/Lv/.test(GB.skillLine(GB.skillOf(rawOf.get('關羽').SKILL, 20, magics), '必殺技')));
 ok('④ 舊式「級別,技id」字串以外的輸入安全回空', GB.parseSkillPairs('').length === 0 && GB.parseSkillPairs(null).length === 0 && GB.parseSkillPairs('abc').length === 0);
 ok('④ 技能表缺資料時回 #id 兜底而不是崩', GB.skillOf('40, 110', 40, null).name === '#110');
 

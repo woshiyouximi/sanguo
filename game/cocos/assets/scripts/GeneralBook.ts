@@ -23,11 +23,13 @@
  *
  * ## 三個「不是 bug」的資料事實（先看再改）
  *
- * 1. **`SKILL` / `WISESKILL` 是字串，不是陣列**：`types.ts` 宣告成
- *    `Array<[number, number]>`，但 generals.json 401 條**全是** `"40, 110"` 這種
- *    「級別, 技 id」的單對字串（`typeof === 'string'` 401/401）。
- *    每將恰好 1 條必殺技 + 1 條軍師技（`work/cocos_book/model_assert.mjs` 斷言）。
- *    這裡自己 `parseSkillPairs()` 解析，不信型別宣告。
+ * 1. **`SKILL` 是多段技能表**：generals.json 401 條的 `SKILL` 都是
+ *    `["1, 50", "6, 63", …, "40, 110"]` 這種「級別, 技 id」的**字串陣列**
+ *    （每將 1..8 段，401/401 是 `Array` of `string`）；`WISESKILL` 仍是單段字串。
+ *    `types.ts` 宣告成 `Array<[number, number]>`，四種形狀都可能在運行期出現 ——
+ *    一律走 `parseSkillPairs()`（判據與 `BattleInput.ts:learnedSkillSeqs()` 對齊），
+ *    不信型別宣告。R208 之前只吃字串，導致名冊卡片那行永遠「必殺技　—」。
+ *    每段都要在 `magics.json` 裡查得到名字（`work/cocos_book/model_assert.mjs` 斷言）。
  *
  * 2. **401 條裡只有 142 條「在場」**：另外 259 條 `Status === '未'`、`CITY === ''`
  *    （本劇本未登場）。所以名冊必然有一個「未登場」大桶（259 人），
@@ -36,8 +38,8 @@
  * 3. **等級不在資料表裡**：generals.json 沒有 `level` 欄位（`BaseEXP` 是基礎經驗，不是等級）。
  *    原作把等級存在**存檔**（段4 +0x04E → `save.generalLevel[名]`，見 `game/web/saves.js:26`），
  *    新檔這張表是空的 ⇒ 全員 20 級（`CityModel.ts:371 levelOf()` 的兜底，web `qs.lv || 20` 同口徑）。
- *    技能過濾因此在**新檔**下幾乎全員「未解鎖」，這是資料事實；面板會把未解鎖的招
- *    連同解鎖等級一起顯示（`必殺技 鬼哭神號 · Lv40 未解鎖`），不會顯示成空字串。
+ *    20 級時第一段（等級 1）一定學到了，所以卡片顯示的是**已學會的最高一段**，
+ *    真要顯示「未解鎖 + 等級」只有等級低於第一段（正常存檔不會發生）才看得到。
  *
  * ## 零依賴
  *
@@ -189,22 +191,51 @@ export function clampInt(value: unknown, lo: number, hi: number): number {
   return intOr(value, lo, lo, hi);
 }
 
-/**
- * 解析 `SKILL` / `WISESKILL`：`"40, 110"` → `[[40, 110]]`。
- *
- * 為什麼不用 `split(',')` 直接取兩段：`盜賊`（id 0）的 `SKILLLEVEL2 = "01,01,01"`
- * 是三段，`POS` 這種空格分隔的欄位也在隔壁 —— 一次性把數字全抽出來再兩兩配對，
- * 段數是奇數時最後一段自動丟掉，不會把 `NaN` 塞進技能表。
- */
-export function parseSkillPairs(raw: unknown): Array<[number, number]> {
-  if (typeof raw !== 'string') return [];
+/** `"1, 50, 6, 63"` → `[1, 50, 6, 63]`：只收整數段，其餘（`POS` 之類）丟掉 */
+function numPieces(raw: string): number[] {
   const nums: number[] = [];
   for (const piece of raw.split(/[,，、\s]+/)) {
     if (!/^-?\d+$/.test(piece)) continue;
     nums.push(Number(piece));
   }
+  return nums;
+}
+
+/**
+ * 解析 `SKILL` / `WISESKILL` → `[[級別, 技 id], …]`。
+ *
+ * **四種落盤形狀都要吃**（`BattleInput.ts:learnedSkillSeqs()` 是同一組判據的權威實作，
+ * 兩邊不要各自演化）：`["1, 50", "6, 63", …]`（現行 generals.json，每將 1..8 段）、
+ * `"40, 110"`（單段字串）、`[[1, 50], …]`（二維）、`[1, 50]`（扁平一對）。
+ *
+ * 為什麼字串不像 `BattleInput` 那樣 `split(',')` 直接取兩段：`盜賊`（id 0）的
+ * `SKILLLEVEL2 = "01,01,01"` 是三段，`POS` 這種空格分隔的欄位也在隔壁 —— 一次性把
+ * 數字全抽出來再兩兩配對，段數是奇數時最後一段自動丟掉，不會把 `NaN` 塞進技能表。
+ *
+ * R208 之前只看字串：generals.json 的 `SKILL` 改成多段字串陣列後，名冊卡片那一行
+ * 一直顯示「必殺技　—」（`work/cocos_book/model_assert.mjs` ① 全紅就是這個）。
+ */
+export function parseSkillPairs(raw: unknown): Array<[number, number]> {
   const out: Array<[number, number]> = [];
-  for (let i = 0; i + 1 < nums.length; i += 2) out.push([nums[i], nums[i + 1]]);
+  const addFlat = (nums: number[]): void => {
+    for (let i = 0; i + 1 < nums.length; i += 2) out.push([nums[i], nums[i + 1]]);
+  };
+  if (Array.isArray(raw)) {
+    if (raw.length > 0 && raw.every((x) => typeof x === 'number')) {
+      addFlat(raw as number[]);
+      return out;
+    }
+    for (const item of raw) {
+      if (typeof item === 'string') addFlat(numPieces(item));
+      else if (Array.isArray(item)) {
+        const need = Number(item[0]);
+        const seq = Number(item[1]);
+        if (Number.isFinite(need) && Number.isFinite(seq)) out.push([need, seq]);
+      }
+    }
+    return out;
+  }
+  if (typeof raw === 'string') addFlat(numPieces(raw));
   return out;
 }
 
@@ -278,17 +309,30 @@ export function levelOf(raw: unknown, save?: unknown): number {
   return clampInt(cityLevelOf(rec as unknown as CityGeneral, null), 1, 99);
 }
 
-/** 一條技能 + 是否已解鎖 */
+/**
+ * 一條技能 + 是否已解鎖。
+ *
+ * 多段技能表取「**已學會的最高一段**」，跟 `BattleInput.ts:learnedSkillSeqs()` 同口徑：
+ * 一級一級學上去，卡片那一行顯示當前等級學到的最後一招；一段都沒學會才顯示第一段
+ * （也就是「下一段要學的」，帶 `（LvN）` 標註）。
+ */
 export function skillOf(raw: unknown, level: number, table: unknown): BookSkill | null {
   const pairs = parseSkillPairs(raw);
   if (pairs.length === 0) return null;
-  const [lv, id] = pairs[0];
+  const cur = clampInt(level, 0, 99);
+  let best: [number, number] | null = null;
+  for (const pair of pairs) {
+    const need = clampInt(pair[0], 0, 99);
+    if (need > cur) continue;
+    if (!best || need >= clampInt(best[0], 0, 99)) best = pair;
+  }
+  const [lv, id] = best ?? pairs[0];
   const name = skillNameOf(table, id);
   return {
     level: clampInt(lv, 0, 99),
     id,
     name: name || `#${id}`,
-    unlocked: clampInt(lv, 0, 99) <= level,
+    unlocked: clampInt(lv, 0, 99) <= cur,
   };
 }
 
@@ -606,7 +650,7 @@ export function skillText(skill: BookSkill | null): string {
   return skill.unlocked ? skill.name : `${skill.name}（Lv${skill.level}）`;
 }
 
-/** 卡片「必殺技」欄：已解鎖的招 + 「還有 N 招未解鎖」 */
+/** 卡片「必殺技」欄：`必殺技　已學會的那一招`（一段都沒學會時帶 `（LvN）`） */
 export function skillLine(skill: BookSkill | null, label: string): string {
   if (!skill) return `${label}　—`;
   return `${label}　${skillText(skill)}`;

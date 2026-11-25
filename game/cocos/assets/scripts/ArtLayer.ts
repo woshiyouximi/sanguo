@@ -117,6 +117,46 @@ export function loadFrame(path: string, cb: (frame: SpriteFrame | null) => void)
 }
 
 /**
+ * frame 快取（LRU，只快取成功）。
+ *
+ * 為什麼需要：名冊 20 行一頁，翻頁/切篩選會反覆要同一批 `face/thumb`；`loadFrame()`
+ * 每次都 `bundle.load` 一遍、每次 new 一張 `Texture2D`。401 人翻十頁就是上千次重複解碼。
+ * 這裡只加一層「path → SpriteFrame」的 Map，**不改 `loadFrame()` 的語義**（它仍然是
+ * 「每次都載」），所以既有的 11 處呼叫端行為不變；要快取的地方自己換成 `loadFrameCached()`。
+ *
+ * 上限 120 張：thumb 30×40 RGBA ≈ 4.8 KB，120 張 ≈ 0.6 MB，夠蓋住 6 頁的翻頁回訪。
+ */
+const FRAME_CACHE_MAX = 120;
+const frameCache = new Map<string, SpriteFrame>();
+
+/** 帶 LRU 快取的 `loadFrame()`：命中時同步回呼（呼叫端已經是「圖到了再套」的寫法）。 */
+export function loadFrameCached(path: string, cb: (frame: SpriteFrame | null) => void): void {
+  const hit = frameCache.get(path);
+  if (hit) {
+    // LRU：命中後重插到隊尾（Map 保插入序，隊首就是最久沒用的）
+    frameCache.delete(path);
+    frameCache.set(path, hit);
+    cb(hit);
+    return;
+  }
+  loadFrame(path, (frame) => {
+    if (frame) {
+      frameCache.set(path, frame);
+      if (frameCache.size > FRAME_CACHE_MAX) {
+        const oldest = frameCache.keys().next();
+        if (!oldest.done) frameCache.delete(oldest.value);
+      }
+    }
+    cb(frame);
+  });
+}
+
+/** 清空 frame 快取（換場景/釋放 bundle 時呼叫；目前只有測試用）。 */
+export function clearFrameCache(): void {
+  frameCache.clear();
+}
+
+/**
  * 一张「底图」：创建时是空节点（不占渲染），图到了才显示。
  * `state` 供调用方决定要不要继续画 Graphics 占位。
  */
