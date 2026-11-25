@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+const p = 'F:/sanguo/game/tests/core_smoke.test.ts';
+let s = fs.readFileSync(p, 'utf8');
+const before = s;
+s = s.replaceAll('300 tick', '1200 tick');
+s = s.replace('const MAX_TICKS = 300;', 'const MAX_TICKS = 1200;');
+s = s.replace('72 场 ≈ 2.5 s', '72 场 ≈ 8 s');
+const left = s.match(/.{0,20}300.{0,20}/g) ?? [];
+console.log('remaining 300:', JSON.stringify(left));
+if (s !== before) fs.writeFileSync(p, s);
+console.log('MAX_TICKS:', (s.match(/const MAX_TICKS = (\d+);/) ?? [])[1]);

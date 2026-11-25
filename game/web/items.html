@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<link rel="icon" href="data:,">
+<title>三國群英傳 2 · 豎屏重製 · 物品與裝備</title>
+<style>
+  :root{--bg:#0E1116;--panel:#161B22;--panel-2:#1D242D;--line:rgba(216,179,106,.26);
+    --gold:#D8B36A;--gold-2:#F3E0B4;--ink:#E9E4D6;--ink-2:#B6AF9E;--ink-3:#7A7566;--jade:#4F7E6C}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:#000;height:100%}
+  body{display:flex;align-items:center;justify-content:center;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink)}
+  #stage{position:relative;width:750px;height:1334px;display:flex;flex-direction:column;overflow:hidden;
+    background:url("assets/bg/items_bg.png") center top / cover no-repeat,
+      radial-gradient(120% 70% at 50% 0%,#1B2430 0%,#0E1116 62%),var(--bg);transform-origin:top left}
+  /* items_bg 是 AI 重绘（不是原作素材），不受"透明度 ≥.55"的占位约束；
+     但这一页字最密（77 件／34 组属性），压暗仍需偏重，取 .38→.62 */
+  #stage::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
+    background:linear-gradient(180deg,rgba(8,11,15,.38) 0%,rgba(8,11,15,.50) 50%,rgba(8,11,15,.62) 100%)}
+  #stage>*{position:relative;z-index:1}
+  /* 页眉下缘/页脚上缘：原作横条 WAR05（111×12，金线＋藏青底）拉满，当分隔线 */
+  header{flex:none;padding:20px 22px 10px;border-bottom:0;
+    background:linear-gradient(180deg,rgba(216,179,106,.08),rgba(10,13,17,.5)),
+      url("assets/ui/orig/bar_div.png") left bottom / 100% 11px no-repeat}
+  h1{margin:0;font-size:30px;letter-spacing:.12em;color:var(--gold-2);text-shadow:0 2px 10px rgba(0,0,0,.75)}
+  .sub{margin-top:5px;font-size:16px;color:var(--ink-2);text-shadow:0 1px 6px rgba(0,0,0,.8)}
+  .sub b{color:var(--gold)}
+  .body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 18px}
+  /* 武將卡：原作窗框 E1_D（241×73，藏青外影＋4px 金线＋暗红内影）九宫 slice 8 / 描边 8px。
+     伪元素画框（不吃布局），中间不 fill，卡片自己的 rgba 暗底照旧透出来 */
+  .sec{flex:none;position:relative;background:rgba(16,20,26,.72);
+    border:0;border-radius:6px;padding:10px 12px;box-shadow:0 10px 26px rgba(0,0,0,.32)}
+  .sec::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border:8px solid transparent;border-image:url("assets/ui/orig/frame_panel.png") 8 / 8px / 0 stretch}
+
+  /* ---- 武將 ---- */
+  .gline{display:flex;gap:12px;align-items:center}
+  /* 头像框：原作方格框 D0_B（64×68）九宫 slice 12 / 描边 6px */
+  .gline img{width:72px;height:92px;object-fit:cover;object-position:50% 14%;background:#0B0E12;
+    border:6px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .gi{flex:1;min-width:0}
+  .gi .nm{font-size:25px}
+  .gi .st{font-size:16px;color:var(--ink-2);margin-top:3px}
+  .gi .st b{color:var(--gold-2);font-weight:400}
+  .gi .st i{font-style:normal;color:#7FD1A8}
+  .slots{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:8px}
+  /* 四个装备槽：同一块 D0_B 当牌面（伪元素，尺寸/内边距不变）；
+     槽名前面挂原作图鉴里的道具小图（assets/items/*.png，56×56，不新增文件），16px 像素化 */
+  .slot{position:relative;height:54px;background:rgba(20,26,34,.78);
+    padding:5px 9px;display:flex;flex-direction:column;justify-content:center}
+  .slot::after{content:"";position:absolute;inset:0;pointer-events:none;
+    border:6px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .slot .k{font-size:13px;color:var(--ink-3);letter-spacing:.1em;display:flex;align-items:center;gap:4px}
+  .slot .k::before{content:"";flex:none;width:16px;height:16px;
+    background:center / contain no-repeat;image-rendering:pixelated;opacity:.85}
+  .slot[data-slot="weapon"] .k::before{background-image:url("assets/items/WEAPONA1.png")}
+  .slot[data-slot="horse"]  .k::before{background-image:url("assets/items/HORSEHA.png")}
+  .slot[data-slot="book"]   .k::before{background-image:url("assets/items/BOOK01.png")}
+  .slot[data-slot="amulet"] .k::before{background-image:url("assets/items/JEWEL01.png")}
+  .slot .v{font-size:15px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+  .slot.on{background:rgba(40,32,16,.9)}
+  .slot.on::after{box-shadow:inset 0 0 0 2px rgba(216,179,106,.55)}
+  .slot.on .v{color:var(--gold-2)}
+  .pick{display:flex;gap:8px;overflow-x:auto;padding:8px 0 2px;margin-top:6px;border-top:1px solid rgba(255,255,255,.05)}
+  .pick .it{position:relative;flex:none;height:54px;padding:0 12px 0 6px;
+    background:rgba(20,26,34,.78);display:flex;align-items:center;gap:7px;font-size:17px;color:var(--ink-2)}
+  .pick .it::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border:6px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .pick .it img{width:30px;height:40px;object-fit:cover;object-position:50% 14%;border-radius:6px;background:#0B0E12}
+  .pick .it.on{color:var(--gold-2);background:rgba(40,32,16,.9)}
+  .pick .it.on::before{box-shadow:inset 0 0 0 2px rgba(216,179,106,.55),inset 0 0 12px rgba(216,179,106,.2)}
+
+  /* ---- 兩欄 ---- */
+  /* 两栏外框：同一块 E1_D 九宫，直接画在盒子上（.listcol 是 overflow:hidden 的壳，
+     .detcol 自己是滚动容器，边框画在滚动区之外，滚内容时框不动） */
+  .main{flex:1 1 auto;min-height:0;display:flex;gap:12px}
+  .listcol{flex:none;width:430px;display:flex;flex-direction:column;min-height:0;
+    background:rgba(16,20,26,.72);border:8px solid transparent;
+    border-image:url("assets/ui/orig/frame_panel.png") 8 / 8px / 0 stretch;
+    overflow:hidden;box-shadow:0 10px 26px rgba(0,0,0,.32)}
+  .detcol{flex:1;min-width:0;min-height:0;overflow-y:auto;
+    background:rgba(16,20,26,.72);border:8px solid transparent;
+    border-image:url("assets/ui/orig/frame_panel.png") 8 / 8px / 0 stretch;
+    padding:12px 14px;box-shadow:0 10px 26px rgba(0,0,0,.32)}
+
+  /* ---- 分組頁籤 ---- */
+  .gtabs{flex:none;display:flex;gap:6px;padding:9px 10px;border-bottom:0;
+    background:url("assets/ui/orig/bar_div.png") left bottom / 100% 9px no-repeat}
+  .gtabs .t{position:relative;height:32px;padding:0 9px;
+    background:rgba(20,26,34,.78);font-size:14px;color:var(--ink-2);display:flex;align-items:center;letter-spacing:.06em}
+  .gtabs .t::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border:4px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 4px / 0 stretch}
+  .gtabs .t.on{color:var(--gold-2);background:rgba(40,32,16,.9)}
+  .gtabs .t.on::before{box-shadow:inset 0 0 0 2px rgba(216,179,106,.6)}
+
+  /* ---- 物品列表 ---- */
+  #itemlist{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 8px 10px}
+  /* 分组粘头顶条：底下压一条原作横条 WAR05 当分隔（原来那条 1px 灰线换掉） */
+  .ghead{position:sticky;top:0;z-index:2;padding:9px 6px 6px;font-size:15px;letter-spacing:.14em;
+    color:var(--gold);background:rgba(22,28,36,.94) url("assets/ui/orig/bar_div.png") left bottom / 100% 8px no-repeat}
+  .ghead span{font-size:13px;letter-spacing:0;color:var(--ink-3);margin-left:6px}
+  .irow{position:relative;display:flex;gap:10px;align-items:center;padding:7px 8px;
+    border:1px solid transparent;margin-top:3px;cursor:pointer}
+  /* 选中行：原作「目標選擇」漸層框 WAR08（100×120，黄→红，四角带钩）九宫 slice 12 / 描边 8px。
+     伪元素叠上去 → 行高不变，切换选中不会顶动列表 */
+  .irow.on{background:rgba(40,32,16,.9)}
+  .irow.on::after{content:"";position:absolute;inset:0;pointer-events:none;
+    border:8px solid transparent;border-image:url("assets/ui/orig/plate_sel.png") 12 / 8px / 0 stretch}
+  .irow .ico{width:48px;height:48px;flex:none;border-radius:8px;background:#0B0E12;object-fit:contain;
+    image-rendering:pixelated}
+  .irow .mid{flex:1;min-width:0}
+  .irow .nm{font-size:19px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .irow .ds{font-size:14px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .irow .rt{flex:none;text-align:right;min-width:96px}
+  .irow .lv{font-size:13px;color:var(--ink-3)}
+  .irow .bd{font-size:13px;color:var(--jade);margin-top:2px;white-space:nowrap}
+  .irow .bd.no{color:#8A8172}
+  .tag{font-size:11px;color:var(--gold);border:1px solid rgba(216,179,106,.45);border-radius:5px;
+    padding:0 4px;margin-left:6px;vertical-align:2px}
+  .tag.use{color:var(--ink-3);border-color:rgba(255,255,255,.14)}
+
+  /* ---- 詳情卡 ---- */
+  .dhead{display:flex;flex-direction:column;align-items:center}
+  /* 详情大图：原作方格框 D0_B 九宫 slice 12 / 描边 8px（内容区 110×110，100×100 的图仍居中） */
+  .big{width:126px;height:126px;
+    border:8px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 8px / 0 stretch;
+    background:radial-gradient(60% 60% at 50% 40%,rgba(35,43,54,.96),rgba(11,14,18,.96));display:flex;align-items:center;justify-content:center}
+  .big img{width:100px;height:100px;image-rendering:pixelated}
+  .dname{font-size:23px;color:var(--gold-2);margin-top:8px;text-align:center}
+  .dtype{font-size:13px;color:var(--ink-3);margin-top:3px;letter-spacing:.06em}
+  .dfoot{font-size:13px;color:#8A8172;margin-top:3px}
+  .sect{margin-top:10px;font-size:14px;letter-spacing:.12em;color:var(--gold);
+    border-bottom:1px solid rgba(255,255,255,.07);padding-bottom:4px}
+  .stats{display:grid;grid-template-columns:1fr 1fr;column-gap:16px}
+  .kv{display:flex;justify-content:space-between;gap:8px;font-size:15px;padding:2.5px 0;color:var(--ink-2)}
+  .kv b{color:var(--ink);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kv b.plus{color:#7FD1A8}
+  .kv b.zero{color:#565248}
+  .desc{margin-top:9px;padding:8px 10px;border-radius:10px;background:rgba(14,19,25,.82);
+    border:1px solid rgba(255,255,255,.05);font-size:15px;color:var(--ink-2);line-height:1.5}
+  .prev{margin-top:8px;font-size:14px;color:#7FD1A8;line-height:1.5}
+  .prev.warn{color:#E0B77A}
+  .dhint{padding:30px 0;text-align:center;font-size:15px;color:var(--ink-3)}
+
+  /* ---- 底部 ---- */
+  footer{flex:none;padding:10px 18px calc(12px + env(safe-area-inset-bottom));border-top:0;
+    background:linear-gradient(180deg,rgba(10,13,17,.86),rgba(8,10,14,.95)),
+      url("assets/ui/orig/bar_div.png") left top / 100% 11px no-repeat}
+  .row{display:flex;gap:10px}
+  /* 按钮：原作空按钮牌 D3_2H（308×40）九宫 slice 16 / 描边 10px */
+  .btn{flex:1;height:80px;border:10px solid transparent;
+    border-image:url("assets/ui/orig/plate_btn.png") 16 / 10px / 0 stretch;
+    background:linear-gradient(165deg,#2A3038,#191D23);color:var(--ink);font-size:27px;letter-spacing:.1em;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer}
+  .btn small{font-size:14px;color:var(--ink-3);letter-spacing:0}
+  .btn.primary{background:linear-gradient(165deg,#4A3A1E,#2A2114);color:var(--gold-2);
+    box-shadow:inset 0 0 0 2px rgba(216,179,106,.45),0 0 20px rgba(216,179,106,.10)}
+  .btn.dim{opacity:.45}
+  #hint{padding:7px 2px 0;font-size:14px;color:var(--ink-2);line-height:1.5;text-shadow:0 1px 5px rgba(0,0,0,.8)}
+  #hint a{color:var(--gold);text-decoration:none}
+  #toast{position:absolute;left:50%;top:152px;transform:translate(-50%,-8px);padding:9px 18px;border-radius:10px;
+    background:rgba(20,16,10,.96);border:1px solid rgba(216,179,106,.5);color:var(--gold-2);font-size:17px;
+    opacity:0;transition:opacity .18s,transform .18s;pointer-events:none;z-index:20;cursor:pointer}
+  /* 提示條可點關（project/93 §4）：.on 時才吃點擊，平時不擋底下的格位 */
+  #toast.on{opacity:1;transform:translate(-50%,0);pointer-events:auto}
+</style>
+</head>
+<body>
+<div id="stage">
+  <header>
+    <h1>物 品 裝 備</h1>
+    <div class="sub">共 <b>77</b> 件 · 可裝備 <b>55</b> · 背包 <b id="bagN">—</b> 件 · 已裝備 <b id="eqN">—</b>/4</div>
+  </header>
+  <div class="body">
+    <div class="sec">
+      <div class="gline">
+        <img id="gimg" alt="">
+        <div class="gi">
+          <div class="nm" id="gname">—</div>
+          <div class="st" id="gstat">—</div>
+          <div class="st" id="gcity">—</div>
+        </div>
+      </div>
+      <div class="slots" id="gslots"></div>
+      <div class="pick" id="genpick"></div>
+    </div>
+    <div class="main">
+      <div class="listcol">
+        <div class="gtabs" id="gtabs"></div>
+        <div id="itemlist"></div>
+      </div>
+      <div class="detcol" id="detail"></div>
+    </div>
+  </div>
+  <footer>
+    <div class="row">
+      <div class="btn" id="act"><span id="actMain">裝 備</span><small id="actSub">—</small></div>
+      <div class="btn" id="unlock"><span>全部解鎖</span><small>調試</small></div>
+    </div>
+    <div id="hint">加成＝武將基礎＋四槽（兵器·坐騎·兵書·寶物）；兵符與陣法書是使用品，不佔槽、不加屬性。<a href="./campaign.html">回大地圖</a></div>
+  </footer>
+  <div id="toast"></div>
+</div>
+
+<!-- [115_release] 调试口统一开关（?dev=1）；放在业务脚本之前，模块里读 window.SGDev -->
+<script src="./release.js"></script>
+<script src="./devflags.js"></script>
+<!-- [audio] 音效总线（window.SG.audio）：本页原来完全静音 -->
+<script src="./audio.js"></script>
+<!-- [face] 原作肖像映射（window.SG.portraitUrl）：FACE 100×120 / thumb 30×40 -->
+<script src="./face_map.js"></script>
+<!-- [115_release] 兜底：本页没有全屏错误框，脚本/模块加载失败时至少给一条人话 + 重試 -->
+<script>
+  (function () {
+    var booted = false;
+    window.__sgItemsOk = function () { booted = true; };
+    function fail(why) {
+      if (booted || document.getElementById('sg-fallback')) return;
+      var d = document.createElement('div');
+      d.id = 'sg-fallback';
+      d.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;padding:10px 14px;'
+        + 'background:#3a1d1a;color:#f3ddcb;font:14px/1.5 system-ui,"Microsoft YaHei",sans-serif;text-align:center';
+      d.textContent = '道具頁沒有載入完整，請重新整理一次。';
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = '重 試';
+      b.style.cssText = 'margin-left:10px;padding:4px 12px;border-radius:6px;border:1px solid #d8b36a;'
+        + 'background:#d8b36a;color:#1a1408;font:inherit;cursor:pointer';
+      b.addEventListener('click', function () { location.reload(); });
+      d.appendChild(b);
+      d.setAttribute('data-why', String(why || ''));
+      if (document.body) document.body.insertBefore(d, document.body.firstChild);
+    }
+    window.addEventListener('error', function (ev) {
+      var el = ev.target;
+      if (el && el !== window && el.tagName === 'SCRIPT') fail('script: ' + (el.getAttribute('src') || '(inline)'));
+      else if (ev.message) fail(ev.message);
+    }, true);
+    window.addEventListener('unhandledrejection', function (ev) { fail('rejection: ' + (ev.reason || '')); });
+    setTimeout(function () { if (!booted) fail('timeout: 4s 內未就緒'); }, 4000);
+  })();
+</script>
+<script type="module">
+import {
+  SLOTS, SLOT_NAMES, STAT_KEYS, STAT_NAMES, GROUP_ORDER, GROUP_LABELS,
+  num, bitsOf, slotOf, groupOf, isTalisman, isFormBook,
+  registerItems, itemOf, allItems, normalizeEquips, equipItem, unequipSlot,
+  equippedSlot, applyEquip, runtimeGeneral, bonusOf,
+} from './items_model.js';
+
+// [audio] 道具页属于大地图子页：沿用 17（切页不重播，浏览器里同一首）
+const audio = () => window.SG?.audio;
+// [face] 原作肖像：face_map.js 提供 name → assets/face/{full,thumb}/NNN.webp，缺映射回落 AI 立绘
+const portraitUrl = (name, variant) => (window.SG?.portraitUrl
+  ? window.SG.portraitUrl(name, variant)
+  : `assets/hero/${encodeURIComponent(name)}.webp`);
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+function fit() {
+  const s = Math.min(window.innerWidth / 750, window.innerHeight / 1334);
+  // 同 campaign.html：先定位缩放后的盒，再 scale，否则 1200x900 下标题会被裁掉
+  stage.style.position = 'absolute';
+  stage.style.left = Math.round((window.innerWidth - 750 * s) / 2) + 'px';
+  stage.style.top = Math.round((window.innerHeight - 1334 * s) / 2) + 'px';
+  stage.style.transform = `scale(${s})`;
+  document.body.style.width = 750 * s + 'px';
+  document.body.style.height = 1334 * s + 'px';
+}
+window.addEventListener('resize', fit);
+fit();
+
+const KEY = 'sanguo_items_v1';
+const CAMPAIGN_KEY = 'sanguo_campaign_v1';
+/** 初始背包 12 件：兵符 2 · 書 2 · 武器 3 · 馬 2 · 其餘（寶物）3 */
+const DEFAULT_BAG = [1, 4, 49, 52, 14, 20, 45, 56, 57, 73, 76, 77];
+
+const TYPE_NAMES = {
+  JEWEL_WEAPON: '兵器', JEWEL_HORSE: '坐騎', JEWEL_THING: '兵書', JEWEL_MISC: '雜項',
+};
+const ATTRIB_NAMES = { '': '—', ONLYONE: '唯一（ONLYONE）', USED: '使用（USED）' };
+
+/* ================= 存檔 ================= */
+
+function loadSave() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { raw = null; }
+  const save = { equip: {}, bag: [] };
+  if (raw && typeof raw === 'object') {
+    if (Array.isArray(raw.bag)) save.bag = raw.bag.map(Number).filter((n) => Number.isFinite(n));
+    if (raw.equip && typeof raw.equip === 'object') {
+      for (const [name, e] of Object.entries(raw.equip)) save.equip[name] = normalizeEquips(e);
+    }
+  }
+  if (!save.bag.length) save.bag = DEFAULT_BAG.slice();
+  save.bag = [...new Set(save.bag.filter((n) => itemOf(n)))];
+  // 裝備中的物品一定在背包裡（背包＝擁有清單，不是容器）
+  for (const name of Object.keys(save.equip)) {
+    for (const seq of Object.values(save.equip[name])) {
+      if (!save.bag.includes(seq)) save.bag.push(seq);
+    }
+  }
+  return save;
+}
+
+function persist() {
+  const equip = {};
+  for (const [name, e] of Object.entries(state.save.equip)) {
+    const clean = normalizeEquips(e);
+    if (Object.keys(clean).length) equip[name] = clean;
+  }
+  state.save.equip = equip;
+  localStorage.setItem(KEY, JSON.stringify({ equip, bag: state.save.bag }));
+}
+
+function campaignOwned() {
+  try {
+    const s = JSON.parse(localStorage.getItem(CAMPAIGN_KEY) || '{}');
+    return Array.isArray(s.owned) ? s.owned.filter(Boolean) : [];
+  } catch { return []; }
+}
+
+/* ================= 資料 ================= */
+
+const [items, generals] = await Promise.all([
+  fetch('../data/items.json').then((r) => r.json()),
+  fetch('../data/generals.json').then((r) => r.json()),
+]);
+registerItems(items);
+
+const SORTED = [...allItems()].sort((a, b) => num(a.Sort) - num(b.Sort));
+const GROUPS = GROUP_ORDER.map((key) => ({
+  key, label: GROUP_LABELS[key], items: SORTED.filter((it) => groupOf(it) === key),
+}));
+
+// 與 deploy.html 同一套：CITY 命中我方城池；我方的城池清單為空時退化成「CITY 非空」的全員
+const ownedCities = campaignOwned();
+const pool = generals
+  .filter((g) => g.NAME !== '盜賊' && (ownedCities.length ? ownedCities.includes(g.CITY) : !!g.CITY))
+  .sort((a, b) => (num(b.STR) + num(b.INT)) - (num(a.STR) + num(a.INT)))
+  .slice(0, 12);
+if (!pool.length) pool.push(generals.find((g) => g.NAME === '關羽') || generals[0]);
+
+const state = { filter: 'all', selSeq: 0, genName: '', save: loadSave() };
+
+function curGen() { return pool.find((g) => g.NAME === state.genName) || pool[0]; }
+function equipsOf(name) { return normalizeEquips(state.save.equip[name] || {}); }
+function iconSrc(it) {
+  const stem = String(it.Sprite || '').split(/[\\/]/).pop();
+  // 【F-ui 修的既有 bug】这里原本写死 .webp，但 assets/items/ 下 57 张 JEWEL 原图全是 .png，
+  // 于是 77 件道具的列表小图 + 详情大图全是 404 裂图（hero 才是 .webp）。只改扩展名，逻辑不动。
+  return 'assets/items/' + encodeURIComponent(stem) + '.png';
+}
+
+/* ================= 初始選擇 ================= */
+
+state.genName = pool[0].NAME;
+const firstOwned = SORTED.find((it) => slotOf(it) && state.save.bag.includes(num(it.Sequence)));
+state.selSeq = firstOwned ? num(firstOwned.Sequence) : num(SORTED[0].Sequence);
+
+// 除錯參數：?dev=1&gen=關羽&seq=45&act=equip（給無頭截圖與人工驗收用）
+// [115_release] 統一開關：沒有 ?dev=1 時這三個參數一律不認 —— 發布形態下誰都不能用 URL 指定武將/道具。
+const devQ = window.SGDev || { DEV: false, val: () => null };
+const qGen = devQ.val('gen');
+if (qGen && pool.some((g) => g.NAME === qGen)) state.genName = qGen;
+const qSeq = Number(devQ.val('seq'));
+if (itemOf(qSeq)) state.selSeq = qSeq;
+
+/* ================= 提示條 ================= */
+// 統一規矩（project/93 §4）：預設 6s 自動消失、重要提示 12s、點一下立刻關。
+// 舊版固定 1800ms 而且點不掉；時間長短靠呼叫端傳 ms（重要的事傳 12000）。
+let toastTimer = 0;
+function hideToast() {
+  clearTimeout(toastTimer);
+  $('toast').classList.remove('on');
+}
+/** @param {string} msg @param {number} [ms] 預設 6000；重要提示傳 12000 */
+function toast(msg, ms = 6000) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, Math.max(1200, ms));
+}
+$('toast').addEventListener('click', hideToast);
+
+/* ================= 繪製 ================= */
+
+function renderHeader() {
+  $('bagN').textContent = state.save.bag.length;
+  $('eqN').textContent = Object.keys(equipsOf(curGen().NAME)).length;
+}
+
+function renderGen() {
+  const g = curGen();
+  const base = runtimeGeneral(g);
+  const out = applyEquip(base, equipsOf(g.NAME));
+  const img = $('gimg');
+  img.style.visibility = '';
+  img.src = portraitUrl(g.NAME, 'full');
+  img.onerror = () => { img.style.visibility = 'hidden'; };
+  $('gname').textContent = g.NAME;
+  const pair = (k, label) => {
+    const b = num(base[k]), a = num(out[k]);
+    return a === b ? `${label} <b>${b}</b>` : `${label} <b>${b}</b><i>→${a}</i>`;
+  };
+  $('gstat').innerHTML = [pair('STR', '武力'), pair('INT', '智力'), pair('MaxHP', '生命'), pair('Speed', '速度')].join(' · ');
+  $('gcity').textContent = `所在 ${g.CITY || '—'} · 忠誠 ${num(g.Loyal) || '—'}`;
+  const eqs = equipsOf(g.NAME);
+  $('gslots').innerHTML = SLOTS.map((slot) => {
+    const it = itemOf(eqs[slot]);
+    return `<div class="slot ${it ? 'on' : ''}" data-slot="${slot}">`
+      + `<div class="k">${SLOT_NAMES[slot]}</div>`
+      + `<div class="v">${it ? it.Name : '—'}</div></div>`;
+  }).join('');
+  $('genpick').innerHTML = pool.map((x) => {
+    const on = x.NAME === g.NAME ? 'on' : '';
+    return `<div class="it ${on}" data-gen="${x.NAME}">`
+      + `<img src="${portraitUrl(x.NAME, 'thumb')}" onerror="this.style.visibility='hidden'" alt="">`
+      + `<span>${x.NAME}</span></div>`;
+  }).join('');
+}
+
+function rowHtml(it, eqs) {
+  const seq = num(it.Sequence);
+  const slot = slotOf(it);
+  const on = equippedSlot(eqs, seq);
+  const tag = on ? '<span class="tag">已裝備</span>'
+    : (slot ? '' : '<span class="tag use">使用品</span>');
+  let bd = '—', cls = 'bd no';
+  if (slot) {
+    bd = STAT_KEYS.filter((k) => num(it[k]))
+      .map((k) => `${STAT_NAMES[k]}${num(it[k]) > 0 ? '+' : ''}${num(it[k])}`).join(' ');
+    if (!bd) bd = '無加成';
+    cls = 'bd';
+  } else if (isTalisman(it)) { bd = it.Description.replace(/^可使用/, '解鎖'); cls = 'bd no'; }
+  else if (isFormBook(it)) { bd = it.Description.replace(/^學會/, ''); cls = 'bd no'; }
+  return `<div class="irow ${seq === state.selSeq ? 'on' : ''}" data-seq="${seq}">`
+    + `<img class="ico" src="${iconSrc(it)}" alt="">`
+    + `<div class="mid"><div class="nm">${it.Name}${tag}</div><div class="ds">${it.Description}</div></div>`
+    + `<div class="rt"><div class="lv">Lv ${num(it.Level)}</div><div class="${cls}">${bd}</div></div></div>`;
+}
+
+function renderTabs() {
+  const tabs = [{ key: 'all', label: '全部' }, ...GROUPS.map((g) => ({ key: g.key, label: g.label.replace(/\s/g, '') }))];
+  $('gtabs').innerHTML = tabs.map((t) => {
+    const on = state.filter === t.key ? 'on' : '';
+    return `<div class="t ${on}" data-filter="${t.key}">${t.label}</div>`;
+  }).join('');
+}
+
+function renderList(resetScroll) {
+  const box = $('itemlist');
+  const st = box.scrollTop;
+  const eqs = equipsOf(curGen().NAME);
+  const shown = state.filter === 'all' ? GROUPS : GROUPS.filter((g) => g.key === state.filter);
+  let html = '';
+  for (const g of shown) {
+    if (!g.items.length) continue;
+    const owned = g.items.filter((it) => state.save.bag.includes(num(it.Sequence))).length;
+    html += `<div class="ghead">${g.label}<span>${g.items.length} 件 · 已擁有 ${owned}</span></div>`;
+    html += g.items.map((it) => rowHtml(it, eqs)).join('');
+  }
+  box.innerHTML = html;
+  box.scrollTop = resetScroll ? 0 : st;
+}
+
+function fieldRows(it) {
+  const rows = [
+    ['編號 Sequence', num(it.Sequence)],
+    ['原作 TYPE', it.TYPE],
+    ['標記 Attrib', ATTRIB_NAMES[it.Attrib] ?? it.Attrib ?? '—'],
+    ['使用等級', num(it.Level)],
+    ['排序 Sort', num(it.Sort)],
+    ['兵器型 WeaponType', num(it.WeaponType) || '—'],
+    ['外形 WeaponObject', num(it.WeaponObject) || '—'],
+    ['搜索型 SearchType', num(it.SearchType) || '—'],
+    ['出現率 Rate', num(it.Rate) || '—'],
+    ['Force 位', bitsOf(it.Force).join(' / ') || '—'],
+    ['Battle 位', bitsOf(it.Battle).join(' / ') || '—'],
+    ['圖示 Sprite', String(it.Sprite || '—').split(/[\\/]/).pop()],
+  ];
+  return rows.map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('');
+}
+
+function renderDetail() {
+  const el = $('detail');
+  const it = itemOf(state.selSeq);
+  if (!it) { el.innerHTML = '<div class="dhint">未選擇物品</div>'; return; }
+  const seq = num(it.Sequence);
+  const slot = slotOf(it);
+  const g = curGen();
+  const eqs = equipsOf(g.NAME);
+  const on = equippedSlot(eqs, seq);
+  const inBag = state.save.bag.includes(seq);
+  const b = bonusOf(it);
+
+  const stats = STAT_KEYS.map((k) => {
+    const v = b[k];
+    const txt = v ? `${v > 0 ? '+' : ''}${v}` : '—';
+    return `<div class="kv"><span>${STAT_NAMES[k]}</span><b class="${v ? 'plus' : 'zero'}">${txt}</b></div>`;
+  }).join('');
+
+  let prev = '';
+  if (!slot) {
+    prev = `<div class="prev warn">使用品：不佔裝備槽，也不加任何屬性</div>`;
+  } else if (on) {
+    prev = `<div class="prev">${g.NAME} 已裝備於「${SLOT_NAMES[on]}」槽</div>`;
+  } else {
+    const before = applyEquip(runtimeGeneral(g), eqs);
+    const after = applyEquip(runtimeGeneral(g), equipItem(eqs, seq));
+    const diff = STAT_KEYS.filter((k) => num(after[k]) !== num(before[k]))
+      .map((k) => `${STAT_NAMES[k]} ${before[k]}→${after[k]}`);
+    prev = `<div class="prev">裝上後：${diff.length ? diff.join(' · ') : '數值無變化'}</div>`;
+  }
+
+  const foot = [inBag ? '在背包' : '未擁有', on ? '裝備中' : (slot ? `可裝備 · ${SLOT_NAMES[slot]}槽` : '不可裝備')];
+  el.innerHTML = `
+    <div class="dhead">
+      <div class="big"><img src="${iconSrc(it)}" alt=""></div>
+      <div class="dname">${it.Name}</div>
+      <div class="dtype">${TYPE_NAMES[it.TYPE] || it.TYPE} · Lv ${num(it.Level)}</div>
+      <div class="dfoot">${foot.join(' · ')}</div>
+    </div>
+    <div class="sect">加 成 表</div>
+    <div class="stats">${stats}</div>
+    <div class="desc">${it.Description}</div>
+    ${prev}
+    <div class="sect">原 作 欄 位</div>
+    ${fieldRows(it)}
+  `;
+}
+
+function renderFooter() {
+  const it = itemOf(state.selSeq);
+  const slot = it ? slotOf(it) : null;
+  const on = it ? equippedSlot(equipsOf(curGen().NAME), num(it.Sequence)) : null;
+  const act = $('act');
+  act.classList.toggle('dim', !slot);
+  act.classList.toggle('primary', !!slot && !on);
+  if (!it) { $('actMain').textContent = '裝 備'; $('actSub').textContent = '—'; return; }
+  if (!slot) {
+    $('actMain').textContent = '不 可 裝 備';
+    $('actSub').textContent = isTalisman(it) ? '兵符 · 使用品' : (isFormBook(it) ? '陣法書 · 使用品' : '使用品');
+  } else if (on) {
+    $('actMain').textContent = '卸 下';
+    $('actSub').textContent = `${SLOT_NAMES[on]} · ${it.Name}`;
+  } else {
+    $('actMain').textContent = '裝 備';
+    $('actSub').textContent = `${SLOT_NAMES[slot]} · ${it.Name}`;
+  }
+}
+
+function renderAll(resetScroll) {
+  renderHeader();
+  renderGen();
+  renderTabs();
+  renderList(resetScroll);
+  renderDetail();
+  renderFooter();
+}
+
+/* ================= 動作 ================= */
+
+/** 把列表滾到指定物品：選中列貼在分組標題下方，避免被 sticky 表頭蓋住。
+ *  用 offsetTop（不受 #stage 的 transform:scale 影響）而不是 getBoundingClientRect。 */
+function revealRow(seq) {
+  const box = $('itemlist');
+  const row = document.querySelector(`.irow[data-seq="${seq}"]`);
+  if (!row) return;
+  const head = document.querySelector('.ghead');
+  const hh = head ? head.offsetHeight : 0;
+  const top = row.offsetTop - box.offsetTop;      // 列在捲動內容裡的位置
+  const visibleTop = box.scrollTop + hh;
+  const visibleBottom = box.scrollTop + box.clientHeight;
+  if (top < visibleTop || top + row.offsetHeight > visibleBottom) {
+    box.scrollTop = Math.max(0, top - hh - 2);
+  }
+}
+
+function selectSeq(seq) {
+  state.selSeq = seq;
+  const it = itemOf(seq);
+  if (it && state.filter !== 'all' && groupOf(it) !== state.filter) {
+    state.filter = 'all';
+    renderTabs();
+    renderList(true);
+  }
+  document.querySelectorAll('.irow').forEach((el) => {
+    el.classList.toggle('on', Number(el.dataset.seq) === seq);
+  });
+  renderDetail();
+  renderFooter();
+  revealRow(seq);
+}
+
+/** 把目前選中的物品裝上（on=true）或卸下；已處於目標狀態時什麼都不做（可重複呼叫）。 */
+function setEquip(on, quiet) {
+  const it = itemOf(state.selSeq);
+  if (!it) return;
+  const slot = slotOf(it);
+  if (!slot) { if (!quiet) toast('使用品不佔裝備槽'); return; }
+  const seq = num(it.Sequence);
+  if (on && !state.save.bag.includes(seq)) { if (!quiet) toast('背包裡沒有這件'); return; }
+  const name = curGen().NAME;
+  const eqs = equipsOf(name);
+  if (!!equippedSlot(eqs, seq) === !!on) return;      // 已是目標狀態
+  const next = on ? equipItem(eqs, seq) : unequipSlot(eqs, slot);
+  state.save.equip[name] = next;
+  persist();
+  renderAll(false);
+  if (!quiet) toast(on ? `已裝備 ${it.Name}` : `已卸下 ${it.Name}`);
+}
+
+function toggleEquip(quiet) {
+  const it = itemOf(state.selSeq);
+  if (!it) return;
+  setEquip(!equippedSlot(equipsOf(curGen().NAME), num(it.Sequence)), quiet);
+}
+
+function unlockAll() {
+  state.save.bag = SORTED.map((it) => num(it.Sequence));
+  persist();
+  renderAll(false);
+  toast(`已解鎖全部 ${state.save.bag.length} 件`);
+}
+
+/* ================= 事件 ================= */
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-gen],[data-slot],[data-filter],.irow');
+  if (!t) return;
+  if (t.dataset.gen) {
+    state.genName = t.dataset.gen;
+    renderAll(false);
+    return;
+  }
+  if (t.dataset.slot) {
+    const slot = t.dataset.slot;
+    const seq = equipsOf(curGen().NAME)[slot];
+    if (seq !== undefined) selectSeq(seq);
+    else toast(`${SLOT_NAMES[slot]}槽是空的`);
+    return;
+  }
+  if (t.dataset.filter) {
+    state.filter = t.dataset.filter;
+    renderTabs();
+    renderList(true);
+    return;
+  }
+  if (t.classList.contains('irow')) selectSeq(Number(t.dataset.seq));
+});
+
+$('act').addEventListener('click', () => toggleEquip(false));
+$('unlock').addEventListener('click', unlockAll);
+
+/* ================= 啟動 ================= */
+
+renderAll(true);
+if (itemOf(qSeq)) revealRow(state.selSeq);
+// [115_release] ?act= 也是调试口，只在 ?dev=1 时生效
+const qAct = devQ.val('act');
+if (qAct === 'equip') setEquip(true, true);
+if (qAct === 'unequip') setEquip(false, true);
+// [audio] 大地图子页 → 17 大地图曲（与 campaign.html 同曲，不重播）
+audio()?.bgm('map');
+// [115_release] 告诉兜底脚本"这个模块跑通了"，4s 看门狗不再报错
+window.__sgItemsOk?.();
+</script>
+</body>
+</html>

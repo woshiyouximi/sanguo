@@ -1,0 +1,15 @@
+﻿import io
+p = r'F:\sanguo\project\165_打包前原作对比门禁.md'
+add = """
+### \u00a74.1 \u95e8\u7981\u81ea\u8eab\u7684 SKIP \u767b\u8bb0\uff08R171\uff09
+
+| \u5173 | SKIP \u539f\u56e0 | \u5904\u7406 |
+|---|---|---|
+| G8 assert_layout.mjs | \u8be5\u811a\u672c\u8fde\u7684\u662f\u5916\u90e8\u5df2\u5728\u8dd1\u7684 devtools(9333)\uff0c\u4e0d\u81ea\u5df1\u5f00\u6d4f\u89c8\u5668 | \u95e8\u7981\u73b0\u5728\u5148\u63a2 9333 \u7aef\u53e3\uff1a\u6ca1\u5f00\u5c31 `SKIP`\u5e76\u5199\u660e\u300c\u5148 node work\\cocos_verify\\cdp.mjs launch\u300d\uff0c\u4e0d\u5047\u88c5 PASS\uff1b\u8fd9\u4e00\u5173\u5728 13:0x \u7684\u6784\u5efa\u4e0a\u5b9e\u6d4b 15/15 PASS |
+| G8 skin_nodes_assert.mjs | \u65e7\u8def\u5f84 `work\\cocos_skin\\` \u4e0b\u4e0d\u5b58\u5728 | \u5df2\u6539\u6210\u5019\u9009\u8def\u5f84\u961f\u5217\uff08`work\\cocos_skinapply\\` \u547d\u4e2d\uff09\uff0c\u5b9e\u8dd1 107/107 PASS |
+
+\u7ed3\u8bba\uff1a\u53ef\u6253\u5305\u524d\u5fc5\u987b\u770b\u5230\u300cPASS 12 / FAIL 0\u300d\uff1bSKIP \u53ea\u5141\u8bb8\u4e0a\u8868\u4e24\u9879\u3002
+"""
+with io.open(p, 'a', encoding='utf-8', newline='\n') as f:
+    f.write(add)
+print('ok')

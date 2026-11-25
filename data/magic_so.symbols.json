@@ -1,0 +1,4333 @@
+{
+ "format": "smartscript-symbols-v1",
+ "source": "extract/pak/SCRIPT/MAGIC.SO",
+ "bytes": 261008,
+ "version": 256,
+ "codeStart": 64,
+ "codeEnd": 243360,
+ "strOff": 258616,
+ "marker": 121,
+ "globalSlots": 121,
+ "functionCount": 463,
+ "stringCount": 580,
+ "instructionCount": 30720,
+ "functions": [
+  {
+   "idx": 0,
+   "name": "GetByte_Old",
+   "num": 0,
+   "off": 64,
+   "argc": 1
+  },
+  {
+   "idx": 1,
+   "name": "GetByte_Signed_Old",
+   "num": 0,
+   "off": 172,
+   "argc": 1
+  },
+  {
+   "idx": 2,
+   "name": "GetShort_Old",
+   "num": 0,
+   "off": 276,
+   "argc": 1
+  },
+  {
+   "idx": 3,
+   "name": "GetShort_Signed_Old",
+   "num": 0,
+   "off": 568,
+   "argc": 1
+  },
+  {
+   "idx": 4,
+   "name": "GetInt_Old",
+   "num": 0,
+   "off": 672,
+   "argc": 1
+  },
+  {
+   "idx": 5,
+   "name": "SetInt_Old",
+   "num": 0,
+   "off": 1052,
+   "argc": 2
+  },
+  {
+   "idx": 6,
+   "name": "SetShort_Old",
+   "num": 0,
+   "off": 1916,
+   "argc": 2
+  },
+  {
+   "idx": 7,
+   "name": "SetByte_Old",
+   "num": 0,
+   "off": 2012,
+   "argc": 2
+  },
+  {
+   "idx": 8,
+   "name": "SetString_Old",
+   "num": 0,
+   "off": 2096,
+   "argc": 2
+  },
+  {
+   "idx": 9,
+   "name": "DelayAmbientSound",
+   "num": 0,
+   "off": 2164,
+   "argc": 3
+  },
+  {
+   "idx": 10,
+   "name": "GetSoldierMaxX2",
+   "num": 0,
+   "off": 2244,
+   "argc": 1
+  },
+  {
+   "idx": 11,
+   "name": "GetSoldierMaxX",
+   "num": 0,
+   "off": 2756,
+   "argc": 1
+  },
+  {
+   "idx": 12,
+   "name": "HoldAllDelay",
+   "num": 0,
+   "off": 3340,
+   "argc": 1
+  },
+  {
+   "idx": 13,
+   "name": "ProduceShadowTime",
+   "num": 0,
+   "off": 3384,
+   "argc": 2
+  },
+  {
+   "idx": 14,
+   "name": "MovingShadow",
+   "num": 0,
+   "off": 3544,
+   "argc": 5
+  },
+  {
+   "idx": 15,
+   "name": "LockByCenter",
+   "num": 0,
+   "off": 3880,
+   "argc": 7
+  },
+  {
+   "idx": 16,
+   "name": "LockTargetXY",
+   "num": 0,
+   "off": 4088,
+   "argc": 9
+  },
+  {
+   "idx": 17,
+   "name": "LockTargetTime2",
+   "num": 0,
+   "off": 4336,
+   "argc": 3
+  },
+  {
+   "idx": 18,
+   "name": "Hurt",
+   "num": 0,
+   "off": 4792,
+   "argc": 3
+  },
+  {
+   "idx": 19,
+   "name": "MoveCamera",
+   "num": 0,
+   "off": 5008,
+   "argc": 3
+  },
+  {
+   "idx": 20,
+   "name": "LockCameraSimple",
+   "num": 0,
+   "off": 5552,
+   "argc": 2
+  },
+  {
+   "idx": 21,
+   "name": "LockCameraSimple2",
+   "num": 0,
+   "off": 5812,
+   "argc": 2
+  },
+  {
+   "idx": 22,
+   "name": "LockCameraLine",
+   "num": 0,
+   "off": 6072,
+   "argc": 4
+  },
+  {
+   "idx": 23,
+   "name": "LockCameraLineDelay",
+   "num": 0,
+   "off": 6652,
+   "argc": 4
+  },
+  {
+   "idx": 24,
+   "name": "LockCamera",
+   "num": 0,
+   "off": 7180,
+   "argc": 4
+  },
+  {
+   "idx": 25,
+   "name": "LockCamera2",
+   "num": 0,
+   "off": 8124,
+   "argc": 5
+  },
+  {
+   "idx": 26,
+   "name": "FireMan",
+   "num": 0,
+   "off": 9232,
+   "argc": 3
+  },
+  {
+   "idx": 27,
+   "name": "CreateBlood",
+   "num": 0,
+   "off": 9536,
+   "argc": 3
+  },
+  {
+   "idx": 28,
+   "name": "Blood",
+   "num": 0,
+   "off": 9752,
+   "argc": 2
+  },
+  {
+   "idx": 29,
+   "name": "SmallFireBall",
+   "num": 0,
+   "off": 9952,
+   "argc": 4
+  },
+  {
+   "idx": 30,
+   "name": "SmallFireBall2",
+   "num": 0,
+   "off": 10344,
+   "argc": 4
+  },
+  {
+   "idx": 31,
+   "name": "SmallFireBall3",
+   "num": 0,
+   "off": 10772,
+   "argc": 4
+  },
+  {
+   "idx": 32,
+   "name": "SmallFireBall4",
+   "num": 0,
+   "off": 11164,
+   "argc": 4
+  },
+  {
+   "idx": 33,
+   "name": "DownBrightness",
+   "num": 0,
+   "off": 11556,
+   "argc": 2
+  },
+  {
+   "idx": 34,
+   "name": "RaiseBrightness",
+   "num": 0,
+   "off": 11724,
+   "argc": 2
+  },
+  {
+   "idx": 35,
+   "name": "CreateDot",
+   "num": 0,
+   "off": 11884,
+   "argc": 1
+  },
+  {
+   "idx": 36,
+   "name": "CreateDots",
+   "num": 0,
+   "off": 12312,
+   "argc": 1
+  },
+  {
+   "idx": 37,
+   "name": "CreateLines",
+   "num": 0,
+   "off": 12524,
+   "argc": 1
+  },
+  {
+   "idx": 38,
+   "name": "CreateLine",
+   "num": 0,
+   "off": 12892,
+   "argc": 2
+  },
+  {
+   "idx": 39,
+   "name": "PowerExplode",
+   "num": 0,
+   "off": 14272,
+   "argc": 2
+  },
+  {
+   "idx": 40,
+   "name": "KeepPower",
+   "num": 0,
+   "off": 14484,
+   "argc": 2
+  },
+  {
+   "idx": 41,
+   "name": "StepShow",
+   "num": 0,
+   "off": 14944,
+   "argc": 2
+  },
+  {
+   "idx": 42,
+   "name": "HitGeneral",
+   "num": 0,
+   "off": 15156,
+   "argc": 6
+  },
+  {
+   "idx": 43,
+   "name": "DisableAttack",
+   "num": 0,
+   "off": 15896,
+   "argc": 3
+  },
+  {
+   "idx": 44,
+   "name": "NoMoreSoldierCallback",
+   "num": 1000,
+   "off": 15972,
+   "argc": 2
+  },
+  {
+   "idx": 45,
+   "name": "CastFail",
+   "num": 0,
+   "off": 16348,
+   "argc": 2
+  },
+  {
+   "idx": 46,
+   "name": "HalfMoonAll",
+   "num": 0,
+   "off": 16540,
+   "argc": 5
+  },
+  {
+   "idx": 47,
+   "name": "HalfMoonCallback",
+   "num": 1001,
+   "off": 16964,
+   "argc": 2
+  },
+  {
+   "idx": 48,
+   "name": "ShowHalfMoonSmoke",
+   "num": 0,
+   "off": 17220,
+   "argc": 1
+  },
+  {
+   "idx": 49,
+   "name": "CreateHalfMoonSmoke",
+   "num": 0,
+   "off": 17732,
+   "argc": 5
+  },
+  {
+   "idx": 50,
+   "name": "HalfMoon",
+   "num": 0,
+   "off": 18232,
+   "argc": 1
+  },
+  {
+   "idx": 51,
+   "name": "ProduceSoldier",
+   "num": 0,
+   "off": 20212,
+   "argc": 2
+  },
+  {
+   "idx": 52,
+   "name": "MoreSoldier",
+   "num": 0,
+   "off": 21376,
+   "argc": 2
+  },
+  {
+   "idx": 53,
+   "name": "BombLight",
+   "num": 0,
+   "off": 22472,
+   "argc": 2
+  },
+  {
+   "idx": 54,
+   "name": "ShootObjectCallback",
+   "num": 3001,
+   "off": 23716,
+   "argc": 2
+  },
+  {
+   "idx": 55,
+   "name": "ZoomFreq",
+   "num": 0,
+   "off": 24596,
+   "argc": 2
+  },
+  {
+   "idx": 56,
+   "name": "CosZoomY",
+   "num": 0,
+   "off": 24816,
+   "argc": 2
+  },
+  {
+   "idx": 57,
+   "name": "ScaleShadow",
+   "num": 0,
+   "off": 25024,
+   "argc": 6
+  },
+  {
+   "idx": 58,
+   "name": "FireTail",
+   "num": 0,
+   "off": 25600,
+   "argc": 3
+  },
+  {
+   "idx": 59,
+   "name": "FlyLight",
+   "num": 0,
+   "off": 25988,
+   "argc": 5
+  },
+  {
+   "idx": 60,
+   "name": "ShootObject",
+   "num": 0,
+   "off": 27032,
+   "argc": 2
+  },
+  {
+   "idx": 61,
+   "name": "RushcartCallback",
+   "num": 4001,
+   "off": 28824,
+   "argc": 2
+  },
+  {
+   "idx": 62,
+   "name": "CreateRushCart",
+   "num": 0,
+   "off": 28908,
+   "argc": 5
+  },
+  {
+   "idx": 63,
+   "name": "RushCart",
+   "num": 0,
+   "off": 29320,
+   "argc": 1
+  },
+  {
+   "idx": 64,
+   "name": "LockTargetTime3",
+   "num": 0,
+   "off": 31148,
+   "argc": 5
+  },
+  {
+   "idx": 65,
+   "name": "LockGeneral",
+   "num": 0,
+   "off": 31452,
+   "argc": 2
+  },
+  {
+   "idx": 66,
+   "name": "BigThunderCallback",
+   "num": 5002,
+   "off": 31884,
+   "argc": 2
+  },
+  {
+   "idx": 67,
+   "name": "ThunderAttachAttack",
+   "num": 0,
+   "off": 32604,
+   "argc": 3
+  },
+  {
+   "idx": 68,
+   "name": "ThunderAttach",
+   "num": 0,
+   "off": 33904,
+   "argc": 1
+  },
+  {
+   "idx": 69,
+   "name": "ThunderCallback",
+   "num": 5001,
+   "off": 34416,
+   "argc": 2
+  },
+  {
+   "idx": 70,
+   "name": "LockTargetTime",
+   "num": 0,
+   "off": 34792,
+   "argc": 3
+  },
+  {
+   "idx": 71,
+   "name": "CreateThunderSparkle",
+   "num": 0,
+   "off": 35164,
+   "argc": 3
+  },
+  {
+   "idx": 72,
+   "name": "CreateThunderSmoke",
+   "num": 0,
+   "off": 35588,
+   "argc": 2
+  },
+  {
+   "idx": 73,
+   "name": "LockThunder",
+   "num": 0,
+   "off": 35884,
+   "argc": 3
+  },
+  {
+   "idx": 74,
+   "name": "Thunder",
+   "num": 0,
+   "off": 36300,
+   "argc": 2
+  },
+  {
+   "idx": 75,
+   "name": "BigThunder",
+   "num": 0,
+   "off": 38648,
+   "argc": 0
+  },
+  {
+   "idx": 76,
+   "name": "HideArrow",
+   "num": 0,
+   "off": 39356,
+   "argc": 2
+  },
+  {
+   "idx": 77,
+   "name": "TraceArrow",
+   "num": 0,
+   "off": 39484,
+   "argc": 2
+  },
+  {
+   "idx": 78,
+   "name": "ArrowCallback1",
+   "num": 6001,
+   "off": 40168,
+   "argc": 2
+  },
+  {
+   "idx": 79,
+   "name": "ArrowCallback2",
+   "num": 6002,
+   "off": 40384,
+   "argc": 2
+  },
+  {
+   "idx": 80,
+   "name": "FlyArrowLU",
+   "num": 6003,
+   "off": 40688,
+   "argc": 0
+  },
+  {
+   "idx": 81,
+   "name": "FlyArrowRU",
+   "num": 6004,
+   "off": 41084,
+   "argc": 0
+  },
+  {
+   "idx": 82,
+   "name": "FlyArrowLB2",
+   "num": 0,
+   "off": 41480,
+   "argc": 5
+  },
+  {
+   "idx": 83,
+   "name": "FlyArrowRB2",
+   "num": 0,
+   "off": 42016,
+   "argc": 5
+  },
+  {
+   "idx": 84,
+   "name": "FlyArrowLB1",
+   "num": 0,
+   "off": 42552,
+   "argc": 4
+  },
+  {
+   "idx": 85,
+   "name": "FlyArrowRB1",
+   "num": 0,
+   "off": 43080,
+   "argc": 4
+  },
+  {
+   "idx": 86,
+   "name": "ChangeRightFirePos",
+   "num": 0,
+   "off": 43616,
+   "argc": 2
+  },
+  {
+   "idx": 87,
+   "name": "ChangeLeftFirePos",
+   "num": 0,
+   "off": 43784,
+   "argc": 2
+  },
+  {
+   "idx": 88,
+   "name": "AddSoldierRight",
+   "num": 0,
+   "off": 43952,
+   "argc": 3
+  },
+  {
+   "idx": 89,
+   "name": "AddSoldierLeft",
+   "num": 0,
+   "off": 44076,
+   "argc": 3
+  },
+  {
+   "idx": 90,
+   "name": "ProduceArrowSoldier",
+   "num": 0,
+   "off": 44200,
+   "argc": 3
+  },
+  {
+   "idx": 91,
+   "name": "ArrowSupport",
+   "num": 0,
+   "off": 45612,
+   "argc": 2
+  },
+  {
+   "idx": 92,
+   "name": "StoneEmitterCallback1",
+   "num": 7001,
+   "off": 48712,
+   "argc": 2
+  },
+  {
+   "idx": 93,
+   "name": "StoneEmitterCallback2",
+   "num": 7002,
+   "off": 48928,
+   "argc": 2
+  },
+  {
+   "idx": 94,
+   "name": "StoneEmitterCmd3",
+   "num": 7005,
+   "off": 49232,
+   "argc": 0
+  },
+  {
+   "idx": 95,
+   "name": "StoneExplode",
+   "num": 0,
+   "off": 49880,
+   "argc": 1
+  },
+  {
+   "idx": 96,
+   "name": "FallExplode1",
+   "num": 7003,
+   "off": 50152,
+   "argc": 0
+  },
+  {
+   "idx": 97,
+   "name": "Func7005",
+   "num": 0,
+   "off": 50576,
+   "argc": 1
+  },
+  {
+   "idx": 98,
+   "name": "FireStoneExplode",
+   "num": 0,
+   "off": 50972,
+   "argc": 1
+  },
+  {
+   "idx": 99,
+   "name": "FallExplode2",
+   "num": 7004,
+   "off": 51336,
+   "argc": 0
+  },
+  {
+   "idx": 100,
+   "name": "Func7006",
+   "num": 0,
+   "off": 51868,
+   "argc": 1
+  },
+  {
+   "idx": 101,
+   "name": "ProduceStoneEmitter",
+   "num": 0,
+   "off": 52184,
+   "argc": 5
+  },
+  {
+   "idx": 102,
+   "name": "TraceStoneShadow",
+   "num": 0,
+   "off": 52712,
+   "argc": 4
+  },
+  {
+   "idx": 103,
+   "name": "FlyStoneLB1",
+   "num": 0,
+   "off": 53016,
+   "argc": 5
+  },
+  {
+   "idx": 104,
+   "name": "FlyStoneRB1",
+   "num": 0,
+   "off": 53844,
+   "argc": 5
+  },
+  {
+   "idx": 105,
+   "name": "FlyStoneLB2",
+   "num": 0,
+   "off": 54672,
+   "argc": 5
+  },
+  {
+   "idx": 106,
+   "name": "FlyStoneRB2",
+   "num": 0,
+   "off": 55896,
+   "argc": 5
+  },
+  {
+   "idx": 107,
+   "name": "StoneEmitter",
+   "num": 0,
+   "off": 57132,
+   "argc": 3
+  },
+  {
+   "idx": 108,
+   "name": "ExplodeRoundCallback",
+   "num": 8001,
+   "off": 60292,
+   "argc": 2
+  },
+  {
+   "idx": 109,
+   "name": "ProduceAirCircle",
+   "num": 0,
+   "off": 60596,
+   "argc": 3
+  },
+  {
+   "idx": 110,
+   "name": "ProduceRound",
+   "num": 0,
+   "off": 61040,
+   "argc": 4
+  },
+  {
+   "idx": 111,
+   "name": "CreateExplodeRound",
+   "num": 0,
+   "off": 61668,
+   "argc": 2
+  },
+  {
+   "idx": 112,
+   "name": "ExplodeRound",
+   "num": 0,
+   "off": 61992,
+   "argc": 3
+  },
+  {
+   "idx": 113,
+   "name": "EightWayFireCallback",
+   "num": 9001,
+   "off": 62740,
+   "argc": 2
+  },
+  {
+   "idx": 114,
+   "name": "CreateEightWay",
+   "num": 0,
+   "off": 63088,
+   "argc": 5
+  },
+  {
+   "idx": 115,
+   "name": "EightWayFireMotion",
+   "num": 0,
+   "off": 63760,
+   "argc": 5
+  },
+  {
+   "idx": 116,
+   "name": "EightWayFire",
+   "num": 0,
+   "off": 63920,
+   "argc": 3
+  },
+  {
+   "idx": 117,
+   "name": "ConvexStoneCallback",
+   "num": 10001,
+   "off": 64736,
+   "argc": 2
+  },
+  {
+   "idx": 118,
+   "name": "Func10002",
+   "num": 10002,
+   "off": 64776,
+   "argc": 2
+  },
+  {
+   "idx": 119,
+   "name": "Func10003",
+   "num": 10003,
+   "off": 65188,
+   "argc": 2
+  },
+  {
+   "idx": 120,
+   "name": "TraceStone",
+   "num": 0,
+   "off": 65600,
+   "argc": 2
+  },
+  {
+   "idx": 121,
+   "name": "BrokenStone",
+   "num": 0,
+   "off": 66380,
+   "argc": 6
+  },
+  {
+   "idx": 122,
+   "name": "ProduceSomethingXY",
+   "num": 0,
+   "off": 66868,
+   "argc": 6
+  },
+  {
+   "idx": 123,
+   "name": "ConvexStone",
+   "num": 0,
+   "off": 68968,
+   "argc": 1
+  },
+  {
+   "idx": 124,
+   "name": "TornadorCallback",
+   "num": 11001,
+   "off": 70972,
+   "argc": 2
+  },
+  {
+   "idx": 125,
+   "name": "TornadoMotion",
+   "num": 0,
+   "off": 71440,
+   "argc": 7
+  },
+  {
+   "idx": 126,
+   "name": "TornadoStoneMotion",
+   "num": 0,
+   "off": 71708,
+   "argc": 2
+  },
+  {
+   "idx": 127,
+   "name": "TornadoStone",
+   "num": 0,
+   "off": 72176,
+   "argc": 1
+  },
+  {
+   "idx": 128,
+   "name": "BottomSmoke",
+   "num": 0,
+   "off": 72424,
+   "argc": 1
+  },
+  {
+   "idx": 129,
+   "name": "BottomMotion",
+   "num": 0,
+   "off": 72744,
+   "argc": 2
+  },
+  {
+   "idx": 130,
+   "name": "ProduceTornado",
+   "num": 0,
+   "off": 72968,
+   "argc": 1
+  },
+  {
+   "idx": 131,
+   "name": "DummyMotion",
+   "num": 0,
+   "off": 73716,
+   "argc": 4
+  },
+  {
+   "idx": 132,
+   "name": "CreateDummyRef",
+   "num": 0,
+   "off": 74248,
+   "argc": 3
+  },
+  {
+   "idx": 133,
+   "name": "WaitTarget",
+   "num": 0,
+   "off": 74444,
+   "argc": 3
+  },
+  {
+   "idx": 134,
+   "name": "GetSpeed",
+   "num": 0,
+   "off": 74812,
+   "argc": 4
+  },
+  {
+   "idx": 135,
+   "name": "GetDir",
+   "num": 0,
+   "off": 75076,
+   "argc": 4
+  },
+  {
+   "idx": 136,
+   "name": "Tornado",
+   "num": 0,
+   "off": 76204,
+   "argc": 1
+  },
+  {
+   "idx": 137,
+   "name": "DuplicatorCallback",
+   "num": 12001,
+   "off": 78332,
+   "argc": 2
+  },
+  {
+   "idx": 138,
+   "name": "TraceDuplicator",
+   "num": 0,
+   "off": 78752,
+   "argc": 2
+  },
+  {
+   "idx": 139,
+   "name": "MoveDuplicator",
+   "num": 0,
+   "off": 79212,
+   "argc": 3
+  },
+  {
+   "idx": 140,
+   "name": "ProduceDuplicator",
+   "num": 0,
+   "off": 79560,
+   "argc": 4
+  },
+  {
+   "idx": 141,
+   "name": "DuplicatorShadow",
+   "num": 0,
+   "off": 79688,
+   "argc": 5
+  },
+  {
+   "idx": 142,
+   "name": "Duplicator",
+   "num": 0,
+   "off": 80184,
+   "argc": 1
+  },
+  {
+   "idx": 143,
+   "name": "StopAllSoldier",
+   "num": 0,
+   "off": 81692,
+   "argc": 2
+  },
+  {
+   "idx": 144,
+   "name": "Func13001",
+   "num": 0,
+   "off": 81988,
+   "argc": 1
+  },
+  {
+   "idx": 145,
+   "name": "ProduceSomethingXY2",
+   "num": 0,
+   "off": 82520,
+   "argc": 4
+  },
+  {
+   "idx": 146,
+   "name": "Frozen",
+   "num": 0,
+   "off": 82724,
+   "argc": 0
+  },
+  {
+   "idx": 147,
+   "name": "DemonDancingCallback",
+   "num": 14001,
+   "off": 85104,
+   "argc": 2
+  },
+  {
+   "idx": 148,
+   "name": "CreateLastAttack",
+   "num": 0,
+   "off": 85188,
+   "argc": 2
+  },
+  {
+   "idx": 149,
+   "name": "DemonDancing",
+   "num": 0,
+   "off": 85480,
+   "argc": 0
+  },
+  {
+   "idx": 150,
+   "name": "FlyingSwordCallback",
+   "num": 15001,
+   "off": 88264,
+   "argc": 2
+  },
+  {
+   "idx": 151,
+   "name": "Func15010",
+   "num": 0,
+   "off": 88480,
+   "argc": 2
+  },
+  {
+   "idx": 152,
+   "name": "Func15009",
+   "num": 0,
+   "off": 88872,
+   "argc": 3
+  },
+  {
+   "idx": 153,
+   "name": "TraceSmallSword",
+   "num": 0,
+   "off": 89104,
+   "argc": 1
+  },
+  {
+   "idx": 154,
+   "name": "CreateSmallSwords",
+   "num": 0,
+   "off": 89664,
+   "argc": 3
+  },
+  {
+   "idx": 155,
+   "name": "SwordBomb",
+   "num": 0,
+   "off": 90680,
+   "argc": 3
+  },
+  {
+   "idx": 156,
+   "name": "CreateBigSword",
+   "num": 0,
+   "off": 92840,
+   "argc": 2
+  },
+  {
+   "idx": 157,
+   "name": "SwordAttack",
+   "num": 0,
+   "off": 93404,
+   "argc": 2
+  },
+  {
+   "idx": 158,
+   "name": "ProduceSwordShadow",
+   "num": 0,
+   "off": 93884,
+   "argc": 3
+  },
+  {
+   "idx": 159,
+   "name": "LargerSword",
+   "num": 0,
+   "off": 93980,
+   "argc": 4
+  },
+  {
+   "idx": 160,
+   "name": "PrepareSword",
+   "num": 0,
+   "off": 94508,
+   "argc": 3
+  },
+  {
+   "idx": 161,
+   "name": "FlyingSword",
+   "num": 0,
+   "off": 94752,
+   "argc": 1
+  },
+  {
+   "idx": 162,
+   "name": "CreateHolyBall",
+   "num": 0,
+   "off": 95852,
+   "argc": 3
+  },
+  {
+   "idx": 163,
+   "name": "RoundHolyBall",
+   "num": 0,
+   "off": 96440,
+   "argc": 4
+  },
+  {
+   "idx": 164,
+   "name": "IncreaseHP",
+   "num": 0,
+   "off": 96688,
+   "argc": 0
+  },
+  {
+   "idx": 165,
+   "name": "CreateHolyLight",
+   "num": 0,
+   "off": 96844,
+   "argc": 2
+  },
+  {
+   "idx": 166,
+   "name": "TraceHolyLight",
+   "num": 0,
+   "off": 97812,
+   "argc": 4
+  },
+  {
+   "idx": 167,
+   "name": "Heal",
+   "num": 0,
+   "off": 98104,
+   "argc": 1
+  },
+  {
+   "idx": 168,
+   "name": "FireDragonCallback",
+   "num": 17001,
+   "off": 98540,
+   "argc": 2
+  },
+  {
+   "idx": 169,
+   "name": "CreateStart",
+   "num": 0,
+   "off": 98752,
+   "argc": 2
+  },
+  {
+   "idx": 170,
+   "name": "sc4501",
+   "num": 0,
+   "off": 99060,
+   "argc": 2
+  },
+  {
+   "idx": 171,
+   "name": "sc4502",
+   "num": 0,
+   "off": 100580,
+   "argc": 3
+  },
+  {
+   "idx": 172,
+   "name": "FireDragon",
+   "num": 0,
+   "off": 102092,
+   "argc": 1
+  },
+  {
+   "idx": 173,
+   "name": "CallDragonCallback",
+   "num": 18001,
+   "off": 104648,
+   "argc": 2
+  },
+  {
+   "idx": 174,
+   "name": "sc3601",
+   "num": 0,
+   "off": 104884,
+   "argc": 5
+  },
+  {
+   "idx": 175,
+   "name": "sc3602",
+   "num": 0,
+   "off": 105524,
+   "argc": 4
+  },
+  {
+   "idx": 176,
+   "name": "sc3603",
+   "num": 0,
+   "off": 106032,
+   "argc": 4
+  },
+  {
+   "idx": 177,
+   "name": "sc2512",
+   "num": 0,
+   "off": 106452,
+   "argc": 1
+  },
+  {
+   "idx": 178,
+   "name": "sc3604",
+   "num": 18002,
+   "off": 106768,
+   "argc": 0
+  },
+  {
+   "idx": 179,
+   "name": "CallDragon",
+   "num": 0,
+   "off": 107376,
+   "argc": 1
+  },
+  {
+   "idx": 180,
+   "name": "RunningBowCallback",
+   "num": 19001,
+   "off": 109952,
+   "argc": 2
+  },
+  {
+   "idx": 181,
+   "name": "CreateBowLight",
+   "num": 0,
+   "off": 110408,
+   "argc": 4
+  },
+  {
+   "idx": 182,
+   "name": "CreateBow",
+   "num": 0,
+   "off": 110640,
+   "argc": 2
+  },
+  {
+   "idx": 183,
+   "name": "TraceBow",
+   "num": 0,
+   "off": 110892,
+   "argc": 2
+  },
+  {
+   "idx": 184,
+   "name": "RunningBow",
+   "num": 0,
+   "off": 111184,
+   "argc": 1
+  },
+  {
+   "idx": 185,
+   "name": "BlackHoleCallback",
+   "num": 0,
+   "off": 112400,
+   "argc": 2
+  },
+  {
+   "idx": 186,
+   "name": "KillMan",
+   "num": 0,
+   "off": 112688,
+   "argc": 2
+  },
+  {
+   "idx": 187,
+   "name": "Engulf",
+   "num": 0,
+   "off": 113064,
+   "argc": 4
+  },
+  {
+   "idx": 188,
+   "name": "CreateBlackHoleBall",
+   "num": 0,
+   "off": 114356,
+   "argc": 1
+  },
+  {
+   "idx": 189,
+   "name": "CreateBlackHoleStars",
+   "num": 0,
+   "off": 114688,
+   "argc": 1
+  },
+  {
+   "idx": 190,
+   "name": "CreateBlackHoleStar",
+   "num": 0,
+   "off": 115076,
+   "argc": 5
+  },
+  {
+   "idx": 191,
+   "name": "CreateBlackHole",
+   "num": 0,
+   "off": 115460,
+   "argc": 3
+  },
+  {
+   "idx": 192,
+   "name": "BlackHole",
+   "num": 0,
+   "off": 117116,
+   "argc": 1
+  },
+  {
+   "idx": 193,
+   "name": "FireRingCallback",
+   "num": 20001,
+   "off": 117612,
+   "argc": 2
+  },
+  {
+   "idx": 194,
+   "name": "CreateFire",
+   "num": 0,
+   "off": 118008,
+   "argc": 1
+  },
+  {
+   "idx": 195,
+   "name": "FireRingMotion2",
+   "num": 0,
+   "off": 118292,
+   "argc": 5
+  },
+  {
+   "idx": 196,
+   "name": "FireRingMotion",
+   "num": 0,
+   "off": 118840,
+   "argc": 6
+  },
+  {
+   "idx": 197,
+   "name": "CreateFireRing",
+   "num": 0,
+   "off": 119228,
+   "argc": 7
+  },
+  {
+   "idx": 198,
+   "name": "FireRing",
+   "num": 0,
+   "off": 120244,
+   "argc": 2
+  },
+  {
+   "idx": 199,
+   "name": "IceCallback",
+   "num": 22001,
+   "off": 121708,
+   "argc": 2
+  },
+  {
+   "idx": 200,
+   "name": "CreateIceShatter",
+   "num": 0,
+   "off": 121920,
+   "argc": 4
+  },
+  {
+   "idx": 201,
+   "name": "CreateIceFog",
+   "num": 0,
+   "off": 122292,
+   "argc": 3
+  },
+  {
+   "idx": 202,
+   "name": "CreateIce",
+   "num": 0,
+   "off": 124088,
+   "argc": 6
+  },
+  {
+   "idx": 203,
+   "name": "CreateFogSpeed",
+   "num": 0,
+   "off": 126060,
+   "argc": 5
+  },
+  {
+   "idx": 204,
+   "name": "Ice",
+   "num": 0,
+   "off": 126328,
+   "argc": 1
+  },
+  {
+   "idx": 205,
+   "name": "OnFireCallback",
+   "num": 23001,
+   "off": 129584,
+   "argc": 2
+  },
+  {
+   "idx": 206,
+   "name": "CreateOnFireSmoke",
+   "num": 0,
+   "off": 129980,
+   "argc": 8
+  },
+  {
+   "idx": 207,
+   "name": "CreateOnFireFire",
+   "num": 0,
+   "off": 130360,
+   "argc": 3
+  },
+  {
+   "idx": 208,
+   "name": "CreateOnFire",
+   "num": 0,
+   "off": 130884,
+   "argc": 2
+  },
+  {
+   "idx": 209,
+   "name": "TraceOnFire",
+   "num": 0,
+   "off": 131896,
+   "argc": 1
+  },
+  {
+   "idx": 210,
+   "name": "OnFire",
+   "num": 0,
+   "off": 132000,
+   "argc": 1
+  },
+  {
+   "idx": 211,
+   "name": "ProduceBackSoldier",
+   "num": 0,
+   "off": 133668,
+   "argc": 2
+  },
+  {
+   "idx": 212,
+   "name": "BackSoldier",
+   "num": 0,
+   "off": 134832,
+   "argc": 2
+  },
+  {
+   "idx": 213,
+   "name": "TaiChiCallback",
+   "num": 25001,
+   "off": 135964,
+   "argc": 2
+  },
+  {
+   "idx": 214,
+   "name": "CreateTaiChiBomb",
+   "num": 0,
+   "off": 136176,
+   "argc": 2
+  },
+  {
+   "idx": 215,
+   "name": "CreateTaichi",
+   "num": 0,
+   "off": 138388,
+   "argc": 2
+  },
+  {
+   "idx": 216,
+   "name": "TaiChi",
+   "num": 0,
+   "off": 138928,
+   "argc": 1
+  },
+  {
+   "idx": 217,
+   "name": "SpoutCallback",
+   "num": 26001,
+   "off": 141396,
+   "argc": 1
+  },
+  {
+   "idx": 218,
+   "name": "SpoutKillEdge",
+   "num": 0,
+   "off": 142008,
+   "argc": 2
+  },
+  {
+   "idx": 219,
+   "name": "TraceStoneBomb",
+   "num": 0,
+   "off": 142880,
+   "argc": 1
+  },
+  {
+   "idx": 220,
+   "name": "CreateStoneBomb",
+   "num": 0,
+   "off": 142976,
+   "argc": 2
+  },
+  {
+   "idx": 221,
+   "name": "CreateSpout",
+   "num": 0,
+   "off": 143480,
+   "argc": 3
+  },
+  {
+   "idx": 222,
+   "name": "CreateSpoutAround",
+   "num": 0,
+   "off": 144440,
+   "argc": 3
+  },
+  {
+   "idx": 223,
+   "name": "Spout",
+   "num": 0,
+   "off": 145548,
+   "argc": 1
+  },
+  {
+   "idx": 224,
+   "name": "FireCowCallback",
+   "num": 27001,
+   "off": 146444,
+   "argc": 2
+  },
+  {
+   "idx": 225,
+   "name": "AttachFireToCow",
+   "num": 0,
+   "off": 147048,
+   "argc": 2
+  },
+  {
+   "idx": 226,
+   "name": "CreateFireCow",
+   "num": 0,
+   "off": 147740,
+   "argc": 5
+  },
+  {
+   "idx": 227,
+   "name": "FireCow",
+   "num": 0,
+   "off": 148784,
+   "argc": 1
+  },
+  {
+   "idx": 228,
+   "name": "RollDownCallback",
+   "num": 28001,
+   "off": 151792,
+   "argc": 2
+  },
+  {
+   "idx": 229,
+   "name": "CreateRollStoneBreak",
+   "num": 0,
+   "off": 153928,
+   "argc": 2
+  },
+  {
+   "idx": 230,
+   "name": "CreateRollStone",
+   "num": 0,
+   "off": 154264,
+   "argc": 3
+  },
+  {
+   "idx": 231,
+   "name": "TracingCamera",
+   "num": 0,
+   "off": 155376,
+   "argc": 5
+  },
+  {
+   "idx": 232,
+   "name": "RollDown",
+   "num": 0,
+   "off": 155924,
+   "argc": 1
+  },
+  {
+   "idx": 233,
+   "name": "PaCallback",
+   "num": 29001,
+   "off": 157556,
+   "argc": 2
+  },
+  {
+   "idx": 234,
+   "name": "CreatePaBomb",
+   "num": 0,
+   "off": 157772,
+   "argc": 3
+  },
+  {
+   "idx": 235,
+   "name": "BigBombCircle",
+   "num": 0,
+   "off": 159012,
+   "argc": 2
+  },
+  {
+   "idx": 236,
+   "name": "BigPaBombHurt",
+   "num": 0,
+   "off": 159272,
+   "argc": 1
+  },
+  {
+   "idx": 237,
+   "name": "CreateBigPaBomb",
+   "num": 0,
+   "off": 159680,
+   "argc": 1
+  },
+  {
+   "idx": 238,
+   "name": "CreateRotateLight",
+   "num": 0,
+   "off": 160120,
+   "argc": 4
+  },
+  {
+   "idx": 239,
+   "name": "CreateRotateBomb",
+   "num": 0,
+   "off": 160864,
+   "argc": 3
+  },
+  {
+   "idx": 240,
+   "name": "CreatePaLight",
+   "num": 0,
+   "off": 161204,
+   "argc": 4
+  },
+  {
+   "idx": 241,
+   "name": "CreatePa",
+   "num": 0,
+   "off": 161488,
+   "argc": 2
+  },
+  {
+   "idx": 242,
+   "name": "Pa",
+   "num": 0,
+   "off": 162664,
+   "argc": 1
+  },
+  {
+   "idx": 243,
+   "name": "HalfMoonNewCallback",
+   "num": 30001,
+   "off": 163368,
+   "argc": 2
+  },
+  {
+   "idx": 244,
+   "name": "CheckHalfMoonNew",
+   "num": 0,
+   "off": 163704,
+   "argc": 2
+  },
+  {
+   "idx": 245,
+   "name": "HalfMoonNewMotion",
+   "num": 0,
+   "off": 164036,
+   "argc": 4
+  },
+  {
+   "idx": 246,
+   "name": "GetGeneralWidth",
+   "num": 0,
+   "off": 165436,
+   "argc": 0
+  },
+  {
+   "idx": 247,
+   "name": "CreateHalfMoonNew",
+   "num": 0,
+   "off": 165560,
+   "argc": 6
+  },
+  {
+   "idx": 248,
+   "name": "HalfMoonNew",
+   "num": 0,
+   "off": 166164,
+   "argc": 1
+  },
+  {
+   "idx": 249,
+   "name": "FirePillarCallback",
+   "num": 31001,
+   "off": 167636,
+   "argc": 2
+  },
+  {
+   "idx": 250,
+   "name": "CreateFirePillarSource",
+   "num": 0,
+   "off": 167952,
+   "argc": 3
+  },
+  {
+   "idx": 251,
+   "name": "CreateFirePillarLight",
+   "num": 0,
+   "off": 168332,
+   "argc": 5
+  },
+  {
+   "idx": 252,
+   "name": "CreateFirePillarBomb",
+   "num": 0,
+   "off": 169104,
+   "argc": 4
+  },
+  {
+   "idx": 253,
+   "name": "CreateFirePillar",
+   "num": 0,
+   "off": 169416,
+   "argc": 2
+  },
+  {
+   "idx": 254,
+   "name": "FirePillar",
+   "num": 0,
+   "off": 172204,
+   "argc": 1
+  },
+  {
+   "idx": 255,
+   "name": "SparkCallback",
+   "num": 32001,
+   "off": 172800,
+   "argc": 2
+  },
+  {
+   "idx": 256,
+   "name": "DecreaseHP",
+   "num": 0,
+   "off": 172996,
+   "argc": 0
+  },
+  {
+   "idx": 257,
+   "name": "CreateSparkleCenter",
+   "num": 0,
+   "off": 173132,
+   "argc": 2
+  },
+  {
+   "idx": 258,
+   "name": "CreateSparkle",
+   "num": 0,
+   "off": 173648,
+   "argc": 1
+  },
+  {
+   "idx": 259,
+   "name": "Sparkle",
+   "num": 0,
+   "off": 174972,
+   "argc": 1
+  },
+  {
+   "idx": 260,
+   "name": "FireWorkCallback",
+   "num": 33001,
+   "off": 175504,
+   "argc": 2
+  },
+  {
+   "idx": 261,
+   "name": "TraceFlash",
+   "num": 0,
+   "off": 175820,
+   "argc": 3
+  },
+  {
+   "idx": 262,
+   "name": "CreateCannonFlash",
+   "num": 0,
+   "off": 176360,
+   "argc": 2
+  },
+  {
+   "idx": 263,
+   "name": "CannonExplode",
+   "num": 0,
+   "off": 176844,
+   "argc": 2
+  },
+  {
+   "idx": 264,
+   "name": "TraceCannon",
+   "num": 0,
+   "off": 177112,
+   "argc": 1
+  },
+  {
+   "idx": 265,
+   "name": "ShootCannon",
+   "num": 33002,
+   "off": 177316,
+   "argc": 0
+  },
+  {
+   "idx": 266,
+   "name": "TraceCannonShadow",
+   "num": 0,
+   "off": 177600,
+   "argc": 4
+  },
+  {
+   "idx": 267,
+   "name": "FlyCannonLB1",
+   "num": 0,
+   "off": 177904,
+   "argc": 3
+  },
+  {
+   "idx": 268,
+   "name": "FlyCannonRB1",
+   "num": 0,
+   "off": 178132,
+   "argc": 3
+  },
+  {
+   "idx": 269,
+   "name": "FlyCannonLB2",
+   "num": 0,
+   "off": 178360,
+   "argc": 3
+  },
+  {
+   "idx": 270,
+   "name": "FlyCannonRB2",
+   "num": 0,
+   "off": 178812,
+   "argc": 3
+  },
+  {
+   "idx": 271,
+   "name": "ProduceCannonEmitter",
+   "num": 0,
+   "off": 179268,
+   "argc": 4
+  },
+  {
+   "idx": 272,
+   "name": "FireWork",
+   "num": 0,
+   "off": 179516,
+   "argc": 1
+  },
+  {
+   "idx": 273,
+   "name": "PowderCallback",
+   "num": 34001,
+   "off": 182536,
+   "argc": 2
+  },
+  {
+   "idx": 274,
+   "name": "CreatePowerExplode",
+   "num": 0,
+   "off": 182876,
+   "argc": 6
+  },
+  {
+   "idx": 275,
+   "name": "CreatePowerSmoke",
+   "num": 0,
+   "off": 183144,
+   "argc": 7
+  },
+  {
+   "idx": 276,
+   "name": "CreatePowderBreak",
+   "num": 0,
+   "off": 183560,
+   "argc": 2
+  },
+  {
+   "idx": 277,
+   "name": "CreatePower",
+   "num": 0,
+   "off": 183964,
+   "argc": 3
+  },
+  {
+   "idx": 278,
+   "name": "Powder",
+   "num": 0,
+   "off": 185896,
+   "argc": 1
+  },
+  {
+   "idx": 279,
+   "name": "SpearCallback",
+   "num": 35001,
+   "off": 187376,
+   "argc": 2
+  },
+  {
+   "idx": 280,
+   "name": "CreateSpears",
+   "num": 0,
+   "off": 187636,
+   "argc": 2
+  },
+  {
+   "idx": 281,
+   "name": "CreateSpear",
+   "num": 0,
+   "off": 188004,
+   "argc": 3
+  },
+  {
+   "idx": 282,
+   "name": "Spear",
+   "num": 0,
+   "off": 188300,
+   "argc": 1
+  },
+  {
+   "idx": 283,
+   "name": "SlashCallback",
+   "num": 36001,
+   "off": 189600,
+   "argc": 2
+  },
+  {
+   "idx": 284,
+   "name": "CreateSlashByTarget",
+   "num": 0,
+   "off": 189916,
+   "argc": 4
+  },
+  {
+   "idx": 285,
+   "name": "CreateSlash",
+   "num": 0,
+   "off": 190608,
+   "argc": 6
+  },
+  {
+   "idx": 286,
+   "name": "Slash",
+   "num": 0,
+   "off": 191228,
+   "argc": 1
+  },
+  {
+   "idx": 287,
+   "name": "WallCallback",
+   "num": 37001,
+   "off": 193916,
+   "argc": 2
+  },
+  {
+   "idx": 288,
+   "name": "CreateFireWallAttack",
+   "num": 0,
+   "off": 194176,
+   "argc": 2
+  },
+  {
+   "idx": 289,
+   "name": "CreateFireWall",
+   "num": 0,
+   "off": 194748,
+   "argc": 3
+  },
+  {
+   "idx": 290,
+   "name": "Wall",
+   "num": 0,
+   "off": 195328,
+   "argc": 1
+  },
+  {
+   "idx": 291,
+   "name": "TwisterSwordCallback",
+   "num": 38001,
+   "off": 197488,
+   "argc": 2
+  },
+  {
+   "idx": 292,
+   "name": "CreateTwisterSwordAttack",
+   "num": 0,
+   "off": 197804,
+   "argc": 2
+  },
+  {
+   "idx": 293,
+   "name": "CreateTwisterSword",
+   "num": 0,
+   "off": 198688,
+   "argc": 3
+  },
+  {
+   "idx": 294,
+   "name": "TwisterSword",
+   "num": 0,
+   "off": 200480,
+   "argc": 0
+  },
+  {
+   "idx": 295,
+   "name": "RollTubCallback",
+   "num": 39001,
+   "off": 201112,
+   "argc": 2
+  },
+  {
+   "idx": 296,
+   "name": "CreateRollTubBreak",
+   "num": 0,
+   "off": 201520,
+   "argc": 1
+  },
+  {
+   "idx": 297,
+   "name": "CreateRollTub",
+   "num": 0,
+   "off": 201876,
+   "argc": 3
+  },
+  {
+   "idx": 298,
+   "name": "RollTub",
+   "num": 0,
+   "off": 202404,
+   "argc": 1
+  },
+  {
+   "idx": 299,
+   "name": "EarthquakeCallback",
+   "num": 40001,
+   "off": 203668,
+   "argc": 2
+  },
+  {
+   "idx": 300,
+   "name": "CreateQuakeSmoke",
+   "num": 0,
+   "off": 203676,
+   "argc": 5
+  },
+  {
+   "idx": 301,
+   "name": "CreateQuakeStone",
+   "num": 0,
+   "off": 203892,
+   "argc": 3
+  },
+  {
+   "idx": 302,
+   "name": "ShakeCamera",
+   "num": 0,
+   "off": 204700,
+   "argc": 3
+  },
+  {
+   "idx": 303,
+   "name": "QuakeSound",
+   "num": 0,
+   "off": 204964,
+   "argc": 0
+  },
+  {
+   "idx": 304,
+   "name": "Earthquake",
+   "num": 0,
+   "off": 205164,
+   "argc": 0
+  },
+  {
+   "idx": 305,
+   "name": "InterceptorCallback",
+   "num": 41001,
+   "off": 206500,
+   "argc": 2
+  },
+  {
+   "idx": 306,
+   "name": "CreateInterceptor",
+   "num": 0,
+   "off": 206956,
+   "argc": 4
+  },
+  {
+   "idx": 307,
+   "name": "MakeInterceptorSound",
+   "num": 0,
+   "off": 207296,
+   "argc": 0
+  },
+  {
+   "idx": 308,
+   "name": "Interceptor",
+   "num": 0,
+   "off": 207436,
+   "argc": 1
+  },
+  {
+   "idx": 309,
+   "name": "XCallDragonCallback",
+   "num": 42001,
+   "off": 209684,
+   "argc": 2
+  },
+  {
+   "idx": 310,
+   "name": "Xsc3601",
+   "num": 0,
+   "off": 209920,
+   "argc": 5
+  },
+  {
+   "idx": 311,
+   "name": "Xsc3602",
+   "num": 0,
+   "off": 210560,
+   "argc": 4
+  },
+  {
+   "idx": 312,
+   "name": "Xsc3603",
+   "num": 0,
+   "off": 211068,
+   "argc": 4
+  },
+  {
+   "idx": 313,
+   "name": "Xsc2512",
+   "num": 0,
+   "off": 211488,
+   "argc": 1
+  },
+  {
+   "idx": 314,
+   "name": "Xsc3604",
+   "num": 42002,
+   "off": 211804,
+   "argc": 0
+  },
+  {
+   "idx": 315,
+   "name": "XCallDragon",
+   "num": 0,
+   "off": 212412,
+   "argc": 1
+  },
+  {
+   "idx": 316,
+   "name": "XFireCowCallback",
+   "num": 42003,
+   "off": 214664,
+   "argc": 2
+  },
+  {
+   "idx": 317,
+   "name": "XAttachFireToCow",
+   "num": 0,
+   "off": 215200,
+   "argc": 2
+  },
+  {
+   "idx": 318,
+   "name": "XCreateFireCow",
+   "num": 0,
+   "off": 215892,
+   "argc": 5
+  },
+  {
+   "idx": 319,
+   "name": "XFireCow",
+   "num": 0,
+   "off": 216828,
+   "argc": 1
+  },
+  {
+   "idx": 320,
+   "name": "XSparkCallback",
+   "num": 42004,
+   "off": 219468,
+   "argc": 2
+  },
+  {
+   "idx": 321,
+   "name": "XDecreaseHP",
+   "num": 0,
+   "off": 219664,
+   "argc": 0
+  },
+  {
+   "idx": 322,
+   "name": "XCreateSparkleCenter",
+   "num": 0,
+   "off": 219800,
+   "argc": 2
+  },
+  {
+   "idx": 323,
+   "name": "XCreateSparkle",
+   "num": 0,
+   "off": 220316,
+   "argc": 1
+  },
+  {
+   "idx": 324,
+   "name": "XSparkle",
+   "num": 0,
+   "off": 221640,
+   "argc": 1
+  },
+  {
+   "idx": 325,
+   "name": "MoveEnemyDelay",
+   "num": 0,
+   "off": 221852,
+   "argc": 2
+  },
+  {
+   "idx": 326,
+   "name": "FinalX1",
+   "num": 0,
+   "off": 221968,
+   "argc": 0
+  },
+  {
+   "idx": 327,
+   "name": "XFirePillarCallback",
+   "num": 43001,
+   "off": 222592,
+   "argc": 2
+  },
+  {
+   "idx": 328,
+   "name": "XCreateFirePillarSource",
+   "num": 0,
+   "off": 222908,
+   "argc": 3
+  },
+  {
+   "idx": 329,
+   "name": "XCreateFirePillarLight",
+   "num": 0,
+   "off": 223288,
+   "argc": 5
+  },
+  {
+   "idx": 330,
+   "name": "XCreateFirePillarBomb",
+   "num": 0,
+   "off": 224060,
+   "argc": 4
+  },
+  {
+   "idx": 331,
+   "name": "XCreateFirePillar",
+   "num": 0,
+   "off": 224372,
+   "argc": 2
+  },
+  {
+   "idx": 332,
+   "name": "XFirePillar",
+   "num": 0,
+   "off": 227160,
+   "argc": 1
+  },
+  {
+   "idx": 333,
+   "name": "XTaiChiCallback",
+   "num": 43002,
+   "off": 227480,
+   "argc": 2
+  },
+  {
+   "idx": 334,
+   "name": "XCreateTaiChiBomb",
+   "num": 0,
+   "off": 227692,
+   "argc": 2
+  },
+  {
+   "idx": 335,
+   "name": "XCreateTaichi",
+   "num": 0,
+   "off": 229904,
+   "argc": 2
+  },
+  {
+   "idx": 336,
+   "name": "XTaiChi",
+   "num": 0,
+   "off": 230444,
+   "argc": 1
+  },
+  {
+   "idx": 337,
+   "name": "XDuplicatorCallback",
+   "num": 43003,
+   "off": 233844,
+   "argc": 2
+  },
+  {
+   "idx": 338,
+   "name": "XTraceDuplicator",
+   "num": 0,
+   "off": 234264,
+   "argc": 2
+  },
+  {
+   "idx": 339,
+   "name": "XMoveDuplicator",
+   "num": 0,
+   "off": 234724,
+   "argc": 3
+  },
+  {
+   "idx": 340,
+   "name": "XProduceDuplicator",
+   "num": 0,
+   "off": 235072,
+   "argc": 4
+  },
+  {
+   "idx": 341,
+   "name": "XDuplicatorShadow",
+   "num": 0,
+   "off": 235200,
+   "argc": 5
+  },
+  {
+   "idx": 342,
+   "name": "XDuplicator",
+   "num": 0,
+   "off": 235696,
+   "argc": 1
+  },
+  {
+   "idx": 343,
+   "name": "FinalX2",
+   "num": 0,
+   "off": 236860,
+   "argc": 0
+  },
+  {
+   "idx": 344,
+   "name": "XProduceSoldier",
+   "num": 0,
+   "off": 237452,
+   "argc": 2
+  },
+  {
+   "idx": 345,
+   "name": "XMoreSoldier",
+   "num": 0,
+   "off": 238616,
+   "argc": 1
+  },
+  {
+   "idx": 346,
+   "name": "F103",
+   "num": 103,
+   "off": 239568,
+   "argc": 0
+  },
+  {
+   "idx": 347,
+   "name": "F104",
+   "num": 104,
+   "off": 239680,
+   "argc": 0
+  },
+  {
+   "idx": 348,
+   "name": "F100",
+   "num": 100,
+   "off": 239836,
+   "argc": 0
+  },
+  {
+   "idx": 349,
+   "name": "F200",
+   "num": 200,
+   "off": 239948,
+   "argc": 0
+  },
+  {
+   "idx": 350,
+   "name": "F9999",
+   "num": 9999,
+   "off": 240104,
+   "argc": 2
+  },
+  {
+   "idx": 351,
+   "name": "InitializeBattle",
+   "num": 0,
+   "off": 240144,
+   "argc": 0
+  },
+  {
+   "idx": 352,
+   "name": "Magic1",
+   "num": 501,
+   "off": 240416,
+   "argc": 0
+  },
+  {
+   "idx": 353,
+   "name": "Magic2",
+   "num": 502,
+   "off": 240440,
+   "argc": 0
+  },
+  {
+   "idx": 354,
+   "name": "Magic3",
+   "num": 503,
+   "off": 240472,
+   "argc": 0
+  },
+  {
+   "idx": 355,
+   "name": "Magic4",
+   "num": 504,
+   "off": 240504,
+   "argc": 0
+  },
+  {
+   "idx": 356,
+   "name": "Magic5",
+   "num": 505,
+   "off": 240528,
+   "argc": 0
+  },
+  {
+   "idx": 357,
+   "name": "Magic6",
+   "num": 506,
+   "off": 240552,
+   "argc": 0
+  },
+  {
+   "idx": 358,
+   "name": "Magic7",
+   "num": 507,
+   "off": 240576,
+   "argc": 0
+  },
+  {
+   "idx": 359,
+   "name": "Magic8",
+   "num": 508,
+   "off": 240600,
+   "argc": 0
+  },
+  {
+   "idx": 360,
+   "name": "Magic9",
+   "num": 509,
+   "off": 240640,
+   "argc": 0
+  },
+  {
+   "idx": 361,
+   "name": "Magic10",
+   "num": 510,
+   "off": 240672,
+   "argc": 0
+  },
+  {
+   "idx": 362,
+   "name": "Magic11",
+   "num": 511,
+   "off": 240704,
+   "argc": 0
+  },
+  {
+   "idx": 363,
+   "name": "Magic12",
+   "num": 512,
+   "off": 240736,
+   "argc": 0
+  },
+  {
+   "idx": 364,
+   "name": "Magic13",
+   "num": 513,
+   "off": 240760,
+   "argc": 0
+  },
+  {
+   "idx": 365,
+   "name": "Magic14",
+   "num": 514,
+   "off": 240784,
+   "argc": 0
+  },
+  {
+   "idx": 366,
+   "name": "Magic15",
+   "num": 515,
+   "off": 240816,
+   "argc": 0
+  },
+  {
+   "idx": 367,
+   "name": "Magic16",
+   "num": 516,
+   "off": 240848,
+   "argc": 0
+  },
+  {
+   "idx": 368,
+   "name": "Magic17",
+   "num": 517,
+   "off": 240872,
+   "argc": 0
+  },
+  {
+   "idx": 369,
+   "name": "Magic18",
+   "num": 518,
+   "off": 240896,
+   "argc": 0
+  },
+  {
+   "idx": 370,
+   "name": "Magic19",
+   "num": 519,
+   "off": 240920,
+   "argc": 0
+  },
+  {
+   "idx": 371,
+   "name": "Magic20",
+   "num": 520,
+   "off": 240960,
+   "argc": 0
+  },
+  {
+   "idx": 372,
+   "name": "Magic21",
+   "num": 521,
+   "off": 240984,
+   "argc": 0
+  },
+  {
+   "idx": 373,
+   "name": "Magic22",
+   "num": 522,
+   "off": 241008,
+   "argc": 0
+  },
+  {
+   "idx": 374,
+   "name": "Magic23",
+   "num": 523,
+   "off": 241040,
+   "argc": 0
+  },
+  {
+   "idx": 375,
+   "name": "Magic24",
+   "num": 524,
+   "off": 241072,
+   "argc": 0
+  },
+  {
+   "idx": 376,
+   "name": "Magic25",
+   "num": 525,
+   "off": 241104,
+   "argc": 0
+  },
+  {
+   "idx": 377,
+   "name": "Magic26",
+   "num": 526,
+   "off": 241136,
+   "argc": 0
+  },
+  {
+   "idx": 378,
+   "name": "Magic27",
+   "num": 527,
+   "off": 241160,
+   "argc": 0
+  },
+  {
+   "idx": 379,
+   "name": "Magic28",
+   "num": 528,
+   "off": 241184,
+   "argc": 0
+  },
+  {
+   "idx": 380,
+   "name": "Magic29",
+   "num": 529,
+   "off": 241208,
+   "argc": 0
+  },
+  {
+   "idx": 381,
+   "name": "Magic30",
+   "num": 530,
+   "off": 241232,
+   "argc": 0
+  },
+  {
+   "idx": 382,
+   "name": "Magic31",
+   "num": 531,
+   "off": 241256,
+   "argc": 0
+  },
+  {
+   "idx": 383,
+   "name": "Magic32",
+   "num": 532,
+   "off": 241296,
+   "argc": 0
+  },
+  {
+   "idx": 384,
+   "name": "Magic33",
+   "num": 533,
+   "off": 241320,
+   "argc": 0
+  },
+  {
+   "idx": 385,
+   "name": "Magic34",
+   "num": 534,
+   "off": 241352,
+   "argc": 0
+  },
+  {
+   "idx": 386,
+   "name": "Magic35",
+   "num": 535,
+   "off": 241384,
+   "argc": 0
+  },
+  {
+   "idx": 387,
+   "name": "Magic36",
+   "num": 536,
+   "off": 241408,
+   "argc": 0
+  },
+  {
+   "idx": 388,
+   "name": "Magic37",
+   "num": 537,
+   "off": 241432,
+   "argc": 0
+  },
+  {
+   "idx": 389,
+   "name": "Magic38",
+   "num": 538,
+   "off": 241448,
+   "argc": 0
+  },
+  {
+   "idx": 390,
+   "name": "Magic39",
+   "num": 539,
+   "off": 241480,
+   "argc": 0
+  },
+  {
+   "idx": 391,
+   "name": "Magic40",
+   "num": 540,
+   "off": 241504,
+   "argc": 0
+  },
+  {
+   "idx": 392,
+   "name": "Magic41",
+   "num": 541,
+   "off": 241520,
+   "argc": 0
+  },
+  {
+   "idx": 393,
+   "name": "Magic42",
+   "num": 542,
+   "off": 241552,
+   "argc": 0
+  },
+  {
+   "idx": 394,
+   "name": "Magic43",
+   "num": 543,
+   "off": 241576,
+   "argc": 0
+  },
+  {
+   "idx": 395,
+   "name": "Magic44",
+   "num": 544,
+   "off": 241600,
+   "argc": 0
+  },
+  {
+   "idx": 396,
+   "name": "Magic45",
+   "num": 545,
+   "off": 241616,
+   "argc": 0
+  },
+  {
+   "idx": 397,
+   "name": "Magic46",
+   "num": 546,
+   "off": 241648,
+   "argc": 0
+  },
+  {
+   "idx": 398,
+   "name": "Magic47",
+   "num": 547,
+   "off": 241672,
+   "argc": 0
+  },
+  {
+   "idx": 399,
+   "name": "Magic48",
+   "num": 548,
+   "off": 241712,
+   "argc": 0
+  },
+  {
+   "idx": 400,
+   "name": "Magic49",
+   "num": 549,
+   "off": 241736,
+   "argc": 0
+  },
+  {
+   "idx": 401,
+   "name": "Magic50",
+   "num": 550,
+   "off": 241768,
+   "argc": 0
+  },
+  {
+   "idx": 402,
+   "name": "Magic51",
+   "num": 551,
+   "off": 241792,
+   "argc": 0
+  },
+  {
+   "idx": 403,
+   "name": "Magic52",
+   "num": 552,
+   "off": 241816,
+   "argc": 0
+  },
+  {
+   "idx": 404,
+   "name": "Magic53",
+   "num": 553,
+   "off": 241848,
+   "argc": 0
+  },
+  {
+   "idx": 405,
+   "name": "Magic54",
+   "num": 554,
+   "off": 241872,
+   "argc": 0
+  },
+  {
+   "idx": 406,
+   "name": "Magic55",
+   "num": 555,
+   "off": 241896,
+   "argc": 0
+  },
+  {
+   "idx": 407,
+   "name": "Magic56",
+   "num": 556,
+   "off": 241920,
+   "argc": 0
+  },
+  {
+   "idx": 408,
+   "name": "Magic57",
+   "num": 557,
+   "off": 241960,
+   "argc": 0
+  },
+  {
+   "idx": 409,
+   "name": "Magic58",
+   "num": 558,
+   "off": 241984,
+   "argc": 0
+  },
+  {
+   "idx": 410,
+   "name": "Magic59",
+   "num": 559,
+   "off": 242016,
+   "argc": 0
+  },
+  {
+   "idx": 411,
+   "name": "Magic60",
+   "num": 560,
+   "off": 242040,
+   "argc": 0
+  },
+  {
+   "idx": 412,
+   "name": "Magic61",
+   "num": 561,
+   "off": 242064,
+   "argc": 0
+  },
+  {
+   "idx": 413,
+   "name": "Magic62",
+   "num": 562,
+   "off": 242088,
+   "argc": 0
+  },
+  {
+   "idx": 414,
+   "name": "Magic63",
+   "num": 563,
+   "off": 242112,
+   "argc": 0
+  },
+  {
+   "idx": 415,
+   "name": "Magic64",
+   "num": 564,
+   "off": 242136,
+   "argc": 0
+  },
+  {
+   "idx": 416,
+   "name": "Magic65",
+   "num": 565,
+   "off": 242160,
+   "argc": 0
+  },
+  {
+   "idx": 417,
+   "name": "Magic66",
+   "num": 566,
+   "off": 242192,
+   "argc": 0
+  },
+  {
+   "idx": 418,
+   "name": "Magic67",
+   "num": 567,
+   "off": 242216,
+   "argc": 0
+  },
+  {
+   "idx": 419,
+   "name": "Magic68",
+   "num": 568,
+   "off": 242240,
+   "argc": 0
+  },
+  {
+   "idx": 420,
+   "name": "Magic69",
+   "num": 569,
+   "off": 242280,
+   "argc": 0
+  },
+  {
+   "idx": 421,
+   "name": "Magic70",
+   "num": 570,
+   "off": 242312,
+   "argc": 0
+  },
+  {
+   "idx": 422,
+   "name": "Magic71",
+   "num": 571,
+   "off": 242336,
+   "argc": 0
+  },
+  {
+   "idx": 423,
+   "name": "Magic72",
+   "num": 572,
+   "off": 242368,
+   "argc": 0
+  },
+  {
+   "idx": 424,
+   "name": "Magic73",
+   "num": 573,
+   "off": 242400,
+   "argc": 0
+  },
+  {
+   "idx": 425,
+   "name": "Magic74",
+   "num": 574,
+   "off": 242424,
+   "argc": 0
+  },
+  {
+   "idx": 426,
+   "name": "Magic75",
+   "num": 575,
+   "off": 242448,
+   "argc": 0
+  },
+  {
+   "idx": 427,
+   "name": "Magic76",
+   "num": 576,
+   "off": 242472,
+   "argc": 0
+  },
+  {
+   "idx": 428,
+   "name": "Magic77",
+   "num": 577,
+   "off": 242496,
+   "argc": 0
+  },
+  {
+   "idx": 429,
+   "name": "Magic78",
+   "num": 578,
+   "off": 242520,
+   "argc": 0
+  },
+  {
+   "idx": 430,
+   "name": "Magic79",
+   "num": 579,
+   "off": 242544,
+   "argc": 0
+  },
+  {
+   "idx": 431,
+   "name": "Magic80",
+   "num": 580,
+   "off": 242568,
+   "argc": 0
+  },
+  {
+   "idx": 432,
+   "name": "Magic81",
+   "num": 581,
+   "off": 242592,
+   "argc": 0
+  },
+  {
+   "idx": 433,
+   "name": "Magic82",
+   "num": 582,
+   "off": 242616,
+   "argc": 0
+  },
+  {
+   "idx": 434,
+   "name": "Magic83",
+   "num": 583,
+   "off": 242640,
+   "argc": 0
+  },
+  {
+   "idx": 435,
+   "name": "Magic84",
+   "num": 584,
+   "off": 242680,
+   "argc": 0
+  },
+  {
+   "idx": 436,
+   "name": "Magic85",
+   "num": 585,
+   "off": 242712,
+   "argc": 0
+  },
+  {
+   "idx": 437,
+   "name": "Magic86",
+   "num": 586,
+   "off": 242728,
+   "argc": 0
+  },
+  {
+   "idx": 438,
+   "name": "Magic87",
+   "num": 587,
+   "off": 242752,
+   "argc": 0
+  },
+  {
+   "idx": 439,
+   "name": "Magic88",
+   "num": 588,
+   "off": 242776,
+   "argc": 0
+  },
+  {
+   "idx": 440,
+   "name": "Magic89",
+   "num": 589,
+   "off": 242800,
+   "argc": 0
+  },
+  {
+   "idx": 441,
+   "name": "Magic90",
+   "num": 590,
+   "off": 242824,
+   "argc": 0
+  },
+  {
+   "idx": 442,
+   "name": "Magic91",
+   "num": 591,
+   "off": 242856,
+   "argc": 0
+  },
+  {
+   "idx": 443,
+   "name": "Magic92",
+   "num": 592,
+   "off": 242888,
+   "argc": 0
+  },
+  {
+   "idx": 444,
+   "name": "Magic93",
+   "num": 593,
+   "off": 242912,
+   "argc": 0
+  },
+  {
+   "idx": 445,
+   "name": "Magic94",
+   "num": 594,
+   "off": 242936,
+   "argc": 0
+  },
+  {
+   "idx": 446,
+   "name": "Magic95",
+   "num": 595,
+   "off": 242960,
+   "argc": 0
+  },
+  {
+   "idx": 447,
+   "name": "Magic96",
+   "num": 596,
+   "off": 242984,
+   "argc": 0
+  },
+  {
+   "idx": 448,
+   "name": "Magic97",
+   "num": 597,
+   "off": 243008,
+   "argc": 0
+  },
+  {
+   "idx": 449,
+   "name": "Magic98",
+   "num": 598,
+   "off": 243032,
+   "argc": 0
+  },
+  {
+   "idx": 450,
+   "name": "Magic99",
+   "num": 599,
+   "off": 243056,
+   "argc": 0
+  },
+  {
+   "idx": 451,
+   "name": "Magic100",
+   "num": 600,
+   "off": 243080,
+   "argc": 0
+  },
+  {
+   "idx": 452,
+   "name": "Magic101",
+   "num": 601,
+   "off": 243104,
+   "argc": 0
+  },
+  {
+   "idx": 453,
+   "name": "Magic102",
+   "num": 602,
+   "off": 243128,
+   "argc": 0
+  },
+  {
+   "idx": 454,
+   "name": "Magic103",
+   "num": 603,
+   "off": 243152,
+   "argc": 0
+  },
+  {
+   "idx": 455,
+   "name": "Magic104",
+   "num": 604,
+   "off": 243176,
+   "argc": 0
+  },
+  {
+   "idx": 456,
+   "name": "Magic105",
+   "num": 605,
+   "off": 243216,
+   "argc": 0
+  },
+  {
+   "idx": 457,
+   "name": "Magic106",
+   "num": 606,
+   "off": 243232,
+   "argc": 0
+  },
+  {
+   "idx": 458,
+   "name": "Magic107",
+   "num": 607,
+   "off": 243248,
+   "argc": 0
+  },
+  {
+   "idx": 459,
+   "name": "Magic108",
+   "num": 608,
+   "off": 243272,
+   "argc": 0
+  },
+  {
+   "idx": 460,
+   "name": "Magic109",
+   "num": 609,
+   "off": 243296,
+   "argc": 0
+  },
+  {
+   "idx": 461,
+   "name": "Magic110",
+   "num": 610,
+   "off": 243320,
+   "argc": 0
+  },
+  {
+   "idx": 462,
+   "name": "Magic200",
+   "num": 700,
+   "off": 243336,
+   "argc": 0
+  }
+ ],
+ "strings": [
+  "GetByte_Old",
+  "GetByte_Signed_Old",
+  "GetShort_Old",
+  "GetShort_Signed_Old",
+  "GetInt_Old",
+  "SetInt_Old",
+  "SetShort_Old",
+  "SetByte_Old",
+  "SetString_Old",
+  "DelayAmbientSound",
+  "GetSoldierMaxX2",
+  "GetSoldierMaxX",
+  "HoldAllDelay",
+  "ProduceShadowTime",
+  "MovingShadow",
+  "LockByCenter",
+  "LockTargetXY",
+  "LockTargetTime2",
+  "Hurt",
+  "Hit01",
+  "MoveCamera",
+  "LockCameraSimple",
+  "LockCameraSimple2",
+  "LockCameraLine",
+  "LockCameraLineDelay",
+  "LockCamera",
+  "LockCamera2",
+  "FireMan",
+  "CreateBlood",
+  "Blood",
+  "SmallFireBall",
+  "hit01",
+  "SmallFireBall2",
+  "SmallFireBall3",
+  "SmallFireBall4",
+  "DownBrightness",
+  "RaiseBrightness",
+  "CreateDot",
+  "CreateDots",
+  "CreateLines",
+  "CreateLine",
+  "PowerExplode",
+  "KeepPower",
+  "StepShow",
+  "HitGeneral",
+  "DisableAttack",
+  "NoMoreSoldierCallback",
+  "m000snd01",
+  "CastFail",
+  "HalfMoonAll",
+  "ShowHalfMoonSmoke",
+  "HalfMoonCallback",
+  "CreateHalfMoonSmoke",
+  "HalfMoon",
+  "magic\\000\\*",
+  "magic\\001\\*",
+  "m001snd01",
+  "ProduceSoldier",
+  "MoreSoldier",
+  "magic\\002\\*",
+  "m002snd01",
+  "m002snd03",
+  "BombLight",
+  "ShootObjectCallback",
+  "ZoomFreq",
+  "CosZoomY",
+  "ScaleShadow",
+  "FireTail",
+  "FlyLight",
+  "ShootObject",
+  "magic\\003\\*",
+  "m003snd01",
+  "m003snd02",
+  "m003snd03",
+  "RushcartCallback",
+  "CreateRushCart",
+  "RushCart",
+  "magic\\004\\*",
+  "LockTargetTime3",
+  "LockGeneral",
+  "BigThunderCallback",
+  "ThunderAttachAttack",
+  "ThunderAttach",
+  "ThunderCallback",
+  "LockTargetTime",
+  "CreateThunderSparkle",
+  "CreateThunderSmoke",
+  "LockThunder",
+  "Thunder",
+  "magic\\005\\*",
+  "BigThunder",
+  "m005snd01",
+  "HideArrow",
+  "TraceArrow",
+  "ArrowCallback1",
+  "ArrowCallback2",
+  "FlyArrowLU",
+  "arrow",
+  "FlyArrowRU",
+  "FlyArrowLB2",
+  "FlyArrowRB2",
+  "FlyArrowLB1",
+  "FlyArrowRB1",
+  "ChangeRightFirePos",
+  "ChangeLeftFirePos",
+  "AddSoldierRight",
+  "AddSoldierLeft",
+  "ProduceArrowSoldier",
+  "ArrowSupport",
+  "magic\\006\\*",
+  "StoneEmitterCallback1",
+  "StoneEmitterCallback2",
+  "StoneEmitterCmd3",
+  "StoneExplode",
+  "m007snd03",
+  "FallExplode1",
+  "Func7005",
+  "FireStoneExplode",
+  "m007snd02",
+  "FallExplode2",
+  "Func7006",
+  "ProduceStoneEmitter",
+  "TraceStoneShadow",
+  "FlyStoneLB1",
+  "FlyStoneRB1",
+  "FlyStoneLB2",
+  "FlyStoneRB2",
+  "StoneEmitter",
+  "magic\\007\\*",
+  "ExplodeRoundCallback",
+  "ProduceAirCircle",
+  "ProduceRound",
+  "CreateExplodeRound",
+  "ExplodeRound",
+  "magic\\008\\*",
+  "m008snd01",
+  "EightWayFireCallback",
+  "CreateEightWay",
+  "EightWayFireMotion",
+  "EightWayFire",
+  "magic\\009\\*",
+  "m009snd01",
+  "ConvexStoneCallback",
+  "Func10002",
+  "Func10003",
+  "TraceStone",
+  "BrokenStone",
+  "ProduceSomethingXY",
+  "ConvexStone",
+  "magic\\010\\*",
+  "TornadorCallback",
+  "TornadoMotion",
+  "TornadoStoneMotion",
+  "TornadoStone",
+  "BottomSmoke",
+  "BottomMotion",
+  "ProduceTornado",
+  "DummyMotion",
+  "CreateDummyRef",
+  "WaitTarget",
+  "GetSpeed",
+  "GetDir",
+  "Tornado",
+  "magic\\011\\*",
+  "m011snd01",
+  "DuplicatorCallback",
+  "TraceDuplicator",
+  "MoveDuplicator",
+  "ProduceDuplicator",
+  "DuplicatorShadow",
+  "Duplicator",
+  "magic\\012\\*",
+  "att07",
+  "m012snd01",
+  "StopAllSoldier",
+  "Func13001",
+  "ProduceSomethingXY2",
+  "Frozen",
+  "magic\\013\\*",
+  "m013snd01",
+  "DemonDancingCallback",
+  "CreateLastAttack",
+  "DemonDancing",
+  "magic\\014\\*",
+  "yell01",
+  "FlyingSwordCallback",
+  "Func15010",
+  "Func15009",
+  "TraceSmallSword",
+  "CreateSmallSwords",
+  "att04",
+  "SwordBomb",
+  "m015snd02",
+  "CreateBigSword",
+  "SwordAttack",
+  "ProduceSwordShadow",
+  "LargerSword",
+  "PrepareSword",
+  "FlyingSword",
+  "magic\\015\\*",
+  "m015snd01",
+  "m015snd03",
+  "CreateHolyBall",
+  "RoundHolyBall",
+  "IncreaseHP",
+  "CreateHolyLight",
+  "TraceHolyLight",
+  "Heal",
+  "magic\\016\\*",
+  "m016snd01",
+  "FireDragonCallback",
+  "CreateStart",
+  "sc4501",
+  "m017snd01",
+  "MAGIC\\017\\m017a40001",
+  "MAGIC\\017\\m017a20001",
+  "MAGIC\\017\\m017a10001",
+  "MAGIC\\017\\m017a30001",
+  "MAGIC\\017\\m017a60001",
+  "sc4502",
+  "MAGIC\\017\\m017c50001",
+  "MAGIC\\017\\m017c30001",
+  "MAGIC\\017\\m017c10001",
+  "MAGIC\\017\\m017c20001",
+  "MAGIC\\017\\m017c40001",
+  "MAGIC\\017\\m017c70001",
+  "FireDragon",
+  "magic\\017\\*",
+  "m017snd02",
+  "CallDragonCallback",
+  "sc3601",
+  "sc3602",
+  "m016a",
+  "sc3603",
+  "sc2512",
+  "sc3604",
+  "m018snd03",
+  "CallDragon",
+  "magic\\018\\*",
+  "m018snd01",
+  "m018snd02",
+  "RunningBowCallback",
+  "CreateBowLight",
+  "CreateBow",
+  "TraceBow",
+  "RunningBow",
+  "magic\\019\\*",
+  "m019snd01",
+  "BlackHoleCallback",
+  "KillMan",
+  "Engulf",
+  "CreateBlackHoleBall",
+  "CreateBlackHoleStars",
+  "CreateBlackHoleStar",
+  "CreateBlackHole",
+  "BlackHole",
+  "magic\\020\\*",
+  "m020snd01",
+  "m020snd02",
+  "FireRingCallback",
+  "CreateFire",
+  "FireRingMotion2",
+  "FireRingMotion",
+  "CreateFireRing",
+  "FireRing",
+  "magic\\021\\*",
+  "m021snd01",
+  "IceCallback",
+  "CreateIceShatter",
+  "CreateIceFog",
+  "CreateFogSpeed",
+  "CreateIce",
+  "Ice",
+  "magic\\022\\*",
+  "m022snd01",
+  "OnFireCallback",
+  "CreateOnFireSmoke",
+  "CreateOnFireFire",
+  "m023snd01",
+  "CreateOnFire",
+  "m023snd02",
+  "TraceOnFire",
+  "OnFire",
+  "magic\\023\\*",
+  "ProduceBackSoldier",
+  "BackSoldier",
+  "magic\\024\\*",
+  "TaiChiCallback",
+  "CreateTaiChiBomb",
+  "CreateTaichi",
+  "m025snd01",
+  "TaiChi",
+  "magic\\025\\*",
+  "SpoutCallback",
+  "SpoutKillEdge",
+  "TraceStoneBomb",
+  "CreateStoneBomb",
+  "CreateSpout",
+  "CreateSpoutAround",
+  "m026snd01",
+  "Spout",
+  "magic\\026\\*",
+  "FireCowCallback",
+  "AttachFireToCow",
+  "CreateFireCow",
+  "FireCow",
+  "magic\\027\\*",
+  "m027snd01",
+  "m027snd02",
+  "RollDownCallback",
+  "m028snd02",
+  "CreateRollStoneBreak",
+  "CreateRollStone",
+  "TracingCamera",
+  "RollDown",
+  "magic\\028\\*",
+  "m028snd01",
+  "PaCallback",
+  "CreatePaBomb",
+  "BigBombCircle",
+  "BigPaBombHurt",
+  "CreateBigPaBomb",
+  "m029snd02",
+  "CreateRotateLight",
+  "CreateRotateBomb",
+  "CreatePaLight",
+  "CreatePa",
+  "m029snd01",
+  "m029snd03",
+  "Pa",
+  "magic\\029\\*",
+  "HalfMoonNewCallback",
+  "CheckHalfMoonNew",
+  "HalfMoonNewMotion",
+  "GetGeneralWidth",
+  "CreateHalfMoonNew",
+  "HalfMoonNew",
+  "magic\\030\\*",
+  "FirePillarCallback",
+  "CreateFirePillarSource",
+  "m031snd03",
+  "CreateFirePillarLight",
+  "CreateFirePillarBomb",
+  "CreateFirePillar",
+  "m031snd01",
+  "m031snd02",
+  "FirePillar",
+  "magic\\031\\*",
+  "SparkCallback",
+  "DecreaseHP",
+  "CreateSparkleCenter",
+  "CreateSparkle",
+  "m032snd01",
+  "m032snd02",
+  "Sparkle",
+  "magic\\032\\*",
+  "FireWorkCallback",
+  "TraceFlash",
+  "CreateCannonFlash",
+  "CannonExplode",
+  "TraceCannon",
+  "ShootCannon",
+  "TraceCannonShadow",
+  "FlyCannonLB1",
+  "FlyCannonRB1",
+  "FlyCannonLB2",
+  "FlyCannonRB2",
+  "ProduceCannonEmitter",
+  "FireWork",
+  "magic\\033\\*",
+  "PowderCallback",
+  "CreatePowerExplode",
+  "CreatePowerSmoke",
+  "CreatePowderBreak",
+  "m034snd01",
+  "CreatePower",
+  "Powder",
+  "magic\\034\\*",
+  "SpearCallback",
+  "CreateSpears",
+  "CreateSpear",
+  "Spear",
+  "magic\\035\\*",
+  "m035snd01",
+  "SlashCallback",
+  "CreateSlashByTarget",
+  "m036snd02",
+  "CreateSlash",
+  "Slash",
+  "magic\\036\\*",
+  "m036snd01",
+  "WallCallback",
+  "CreateFireWallAttack",
+  "CreateFireWall",
+  "Wall",
+  "magic\\037\\*",
+  "m037snd01",
+  "TwisterSwordCallback",
+  "CreateTwisterSwordAttack",
+  "CreateTwisterSword",
+  "m038snd01",
+  "TwisterSword",
+  "magic\\038\\*",
+  "m038snd02",
+  "RollTubCallback",
+  "m039snd02",
+  "CreateRollTubBreak",
+  "CreateRollTub",
+  "RollTub",
+  "magic\\039\\*",
+  "m039snd01",
+  "EarthquakeCallback",
+  "CreateQuakeSmoke",
+  "CreateQuakeStone",
+  "ShakeCamera",
+  "QuakeSound",
+  "m040snd01",
+  "Earthquake",
+  "magic\\040\\*",
+  "InterceptorCallback",
+  "CreateInterceptor",
+  "MakeInterceptorSound",
+  "m041snd01",
+  "Interceptor",
+  "magic\\041\\*",
+  "m041snd02",
+  "XCallDragonCallback",
+  "Xsc3601",
+  "Xsc3602",
+  "Xsc3603",
+  "Xsc2512",
+  "Xsc3604",
+  "XCallDragon",
+  "XFireCowCallback",
+  "XAttachFireToCow",
+  "XCreateFireCow",
+  "XFireCow",
+  "XSparkCallback",
+  "XDecreaseHP",
+  "XCreateSparkleCenter",
+  "XCreateSparkle",
+  "XSparkle",
+  "MoveEnemyDelay",
+  "FinalX1",
+  "XFirePillarCallback",
+  "XCreateFirePillarSource",
+  "XCreateFirePillarLight",
+  "XCreateFirePillarBomb",
+  "XCreateFirePillar",
+  "XFirePillar",
+  "XTaiChiCallback",
+  "XCreateTaiChiBomb",
+  "XCreateTaichi",
+  "XTaiChi",
+  "XDuplicatorCallback",
+  "XTraceDuplicator",
+  "XMoveDuplicator",
+  "XProduceDuplicator",
+  "XDuplicatorShadow",
+  "XDuplicator",
+  "FinalX2",
+  "XProduceSoldier",
+  "XMoreSoldier",
+  "F103",
+  "F104",
+  "F100",
+  "F200",
+  "F9999",
+  "InitializeBattle",
+  "Magic1",
+  "Magic2",
+  "Magic3",
+  "Magic4",
+  "Magic5",
+  "Magic6",
+  "Magic7",
+  "Magic8",
+  "Magic9",
+  "Magic10",
+  "Magic11",
+  "Magic12",
+  "Magic13",
+  "Magic14",
+  "Magic15",
+  "Magic16",
+  "Magic17",
+  "Magic18",
+  "Magic19",
+  "Magic20",
+  "Magic21",
+  "Magic22",
+  "Magic23",
+  "Magic24",
+  "Magic25",
+  "Magic26",
+  "Magic27",
+  "Magic28",
+  "Magic29",
+  "Magic30",
+  "Magic31",
+  "Magic32",
+  "Magic33",
+  "Magic34",
+  "Magic35",
+  "Magic36",
+  "Magic37",
+  "Magic38",
+  "Magic39",
+  "Magic40",
+  "Magic41",
+  "Magic42",
+  "Magic43",
+  "Magic44",
+  "Magic45",
+  "Magic46",
+  "Magic47",
+  "Magic48",
+  "Magic49",
+  "Magic50",
+  "Magic51",
+  "Magic52",
+  "Magic53",
+  "Magic54",
+  "Magic55",
+  "Magic56",
+  "Magic57",
+  "Magic58",
+  "Magic59",
+  "Magic60",
+  "Magic61",
+  "Magic62",
+  "Magic63",
+  "Magic64",
+  "Magic65",
+  "Magic66",
+  "Magic67",
+  "Magic68",
+  "Magic69",
+  "Magic70",
+  "Magic71",
+  "Magic72",
+  "Magic73",
+  "Magic74",
+  "Magic75",
+  "Magic76",
+  "Magic77",
+  "Magic78",
+  "Magic79",
+  "Magic80",
+  "Magic81",
+  "Magic82",
+  "Magic83",
+  "Magic84",
+  "Magic85",
+  "Magic86",
+  "Magic87",
+  "Magic88",
+  "Magic89",
+  "Magic90",
+  "Magic91",
+  "Magic92",
+  "Magic93",
+  "Magic94",
+  "Magic95",
+  "Magic96",
+  "Magic97",
+  "Magic98",
+  "Magic99",
+  "Magic100",
+  "Magic101",
+  "Magic102",
+  "Magic103",
+  "Magic104",
+  "Magic105",
+  "Magic106",
+  "Magic107",
+  "Magic108",
+  "Magic109",
+  "Magic110",
+  "Magic200"
+ ],
+ "opcodeHistogram": {
+  "01": 36,
+  "02": 469,
+  "03": 319,
+  "04": 392,
+  "05": 3596,
+  "06": 9307,
+  "07": 894,
+  "08": 6217,
+  "09": 128,
+  "0A": 781,
+  "0B": 1913,
+  "0C": 107,
+  "0D": 2,
+  "0E": 43,
+  "0F": 730,
+  "12": 559,
+  "14": 330,
+  "15": 1,
+  "16": 118,
+  "17": 2,
+  "18": 10,
+  "1A": 240,
+  "1D": 202,
+  "1E": 4,
+  "20": 54,
+  "21": 2,
+  "23": 64,
+  "24": 16,
+  "25": 98,
+  "26": 425,
+  "29": 33,
+  "2A": 1,
+  "2C": 153,
+  "2F": 63,
+  "30": 4,
+  "32": 252,
+  "33": 4,
+  "35": 54,
+  "38": 9,
+  "39": 29,
+  "3A": 25,
+  "3B": 750,
+  "3C": 53,
+  "3D": 1005,
+  "3E": 10,
+  "3F": 24,
+  "40": 71,
+  "42": 588,
+  "45": 62,
+  "47": 329,
+  "48": 6,
+  "4A": 1,
+  "4E": 58,
+  "4F": 14,
+  "50": 8,
+  "51": 22,
+  "52": 26,
+  "53": 7
+ },
+ "syscallHistogram": {
+  "1": 5,
+  "7": 92,
+  "8": 4,
+  "11": 8,
+  "16": 65,
+  "17": 197,
+  "18": 84,
+  "19": 94,
+  "20": 58,
+  "21": 104,
+  "22": 1,
+  "23": 37,
+  "24": 82,
+  "25": 11,
+  "26": 15,
+  "27": 140,
+  "28": 18,
+  "29": 16,
+  "30": 2,
+  "31": 4,
+  "32": 6,
+  "33": 9,
+  "35": 4,
+  "36": 1,
+  "37": 35,
+  "38": 136,
+  "39": 35,
+  "40": 53,
+  "41": 94,
+  "43": 33,
+  "44": 68,
+  "46": 37,
+  "47": 21,
+  "49": 5,
+  "256": 65,
+  "257": 6,
+  "258": 6,
+  "259": 4,
+  "261": 201,
+  "262": 163,
+  "263": 28,
+  "264": 24,
+  "265": 1,
+  "268": 13,
+  "269": 24,
+  "272": 45,
+  "273": 12,
+  "274": 4,
+  "275": 24,
+  "277": 5,
+  "278": 2,
+  "279": 4,
+  "280": 1,
+  "281": 12,
+  "288": 57,
+  "289": 48,
+  "290": 1,
+  "291": 1,
+  "293": 3,
+  "295": 1,
+  "296": 93,
+  "297": 31,
+  "298": 15,
+  "299": 15,
+  "301": 6,
+  "302": 3,
+  "303": 5,
+  "304": 1,
+  "305": 45,
+  "306": 11,
+  "307": 3,
+  "308": 3,
+  "309": 1,
+  "310": 1,
+  "312": 2,
+  "513": 8,
+  "514": 4,
+  "531": 1,
+  "768": 28,
+  "769": 88,
+  "771": 628,
+  "784": 110,
+  "785": 48,
+  "786": 10,
+  "787": 2,
+  "788": 105
+ },
+ "syscallSignatures": {
+  "1": {
+   "argc": 4,
+   "ret": 0
+  },
+  "7": {
+   "argc": 1,
+   "ret": 0
+  },
+  "8": {
+   "argc": 1,
+   "ret": 0
+  },
+  "11": {
+   "argc": 0,
+   "ret": 1
+  },
+  "16": {
+   "argc": 5,
+   "ret": 1
+  },
+  "17": {
+   "argc": 4,
+   "ret": 1
+  },
+  "18": {
+   "argc": 1,
+   "ret": 1
+  },
+  "19": {
+   "argc": 1,
+   "ret": 0
+  },
+  "20": {
+   "argc": 4,
+   "ret": 0
+  },
+  "21": {
+   "argc": 5,
+   "ret": 0
+  },
+  "22": {
+   "argc": 6,
+   "ret": 0
+  },
+  "23": {
+   "argc": 3,
+   "ret": 0
+  },
+  "24": {
+   "argc": 4,
+   "ret": 0
+  },
+  "25": {
+   "argc": 3,
+   "ret": 0
+  },
+  "26": {
+   "argc": 1,
+   "ret": 1
+  },
+  "27": {
+   "argc": 3,
+   "ret": 0
+  },
+  "28": {
+   "argc": 2,
+   "ret": 0
+  },
+  "29": {
+   "argc": 2,
+   "ret": 0
+  },
+  "30": {
+   "argc": 2,
+   "ret": 0
+  },
+  "31": {
+   "argc": 2,
+   "ret": 0
+  },
+  "32": {
+   "argc": 2,
+   "ret": 0
+  },
+  "33": {
+   "argc": 2,
+   "ret": 0
+  },
+  "35": {
+   "argc": 3,
+   "ret": 1
+  },
+  "36": {
+   "argc": 4,
+   "ret": 1
+  },
+  "37": {
+   "argc": 2,
+   "ret": 0
+  },
+  "38": {
+   "argc": 3,
+   "ret": 0
+  },
+  "39": {
+   "argc": 2,
+   "ret": 0
+  },
+  "40": {
+   "argc": 4,
+   "ret": 0
+  },
+  "41": {
+   "argc": 2,
+   "ret": 0
+  },
+  "43": {
+   "argc": 2,
+   "ret": 0
+  },
+  "44": {
+   "argc": 2,
+   "ret": 0
+  },
+  "46": {
+   "argc": 3,
+   "ret": 0
+  },
+  "47": {
+   "argc": 2,
+   "ret": 1
+  },
+  "49": {
+   "argc": 2,
+   "ret": 0
+  },
+  "256": {
+   "argc": 2,
+   "ret": 0
+  },
+  "257": {
+   "argc": 1,
+   "ret": 1
+  },
+  "258": {
+   "argc": 1,
+   "ret": 1
+  },
+  "259": {
+   "argc": 1,
+   "ret": 1
+  },
+  "261": {
+   "argc": 1,
+   "ret": 1
+  },
+  "262": {
+   "argc": 1,
+   "ret": 1
+  },
+  "263": {
+   "argc": 1,
+   "ret": 1
+  },
+  "264": {
+   "argc": 1,
+   "ret": 1
+  },
+  "265": {
+   "argc": 1,
+   "ret": 1
+  },
+  "268": {
+   "argc": 1,
+   "ret": 1
+  },
+  "269": {
+   "argc": 1,
+   "ret": 1
+  },
+  "272": {
+   "argc": 0,
+   "ret": 0
+  },
+  "273": {
+   "argc": 0,
+   "ret": 1
+  },
+  "274": {
+   "argc": 0,
+   "ret": 1
+  },
+  "275": {
+   "argc": 2,
+   "ret": 1
+  },
+  "277": {
+   "argc": 1,
+   "ret": 1
+  },
+  "278": {
+   "argc": 1,
+   "ret": 1
+  },
+  "279": {
+   "argc": 1,
+   "ret": 1
+  },
+  "280": {
+   "argc": 2,
+   "ret": 0
+  },
+  "281": {
+   "argc": 3,
+   "ret": 1
+  },
+  "288": {
+   "argc": 2,
+   "ret": 0
+  },
+  "289": {
+   "argc": 2,
+   "ret": 0
+  },
+  "290": {
+   "argc": 0,
+   "ret": 0
+  },
+  "291": {
+   "argc": 0,
+   "ret": 0
+  },
+  "293": {
+   "argc": 3,
+   "ret": 0
+  },
+  "295": {
+   "argc": 2,
+   "ret": 0
+  },
+  "296": {
+   "argc": 2,
+   "ret": 0
+  },
+  "297": {
+   "argc": 1,
+   "ret": 1
+  },
+  "298": {
+   "argc": 5,
+   "ret": 1
+  },
+  "299": {
+   "argc": 6,
+   "ret": 1
+  },
+  "301": {
+   "argc": 0,
+   "ret": 1
+  },
+  "302": {
+   "argc": 0,
+   "ret": 1
+  },
+  "303": {
+   "argc": 1,
+   "ret": 0
+  },
+  "304": {
+   "argc": 0,
+   "ret": 1
+  },
+  "305": {
+   "argc": 0,
+   "ret": 0
+  },
+  "306": {
+   "argc": 0,
+   "ret": 1
+  },
+  "307": {
+   "argc": 0,
+   "ret": 1
+  },
+  "308": {
+   "argc": 1,
+   "ret": 1
+  },
+  "309": {
+   "argc": 1,
+   "ret": 0
+  },
+  "310": {
+   "argc": 0,
+   "ret": 0
+  },
+  "312": {
+   "argc": 1,
+   "ret": 0
+  },
+  "513": {
+   "argc": 2,
+   "ret": 1
+  },
+  "514": {
+   "argc": 2,
+   "ret": 1
+  },
+  "531": {
+   "argc": 2,
+   "ret": 1
+  },
+  "768": {
+   "argc": 3,
+   "ret": 0
+  },
+  "769": {
+   "argc": 2,
+   "ret": 0
+  },
+  "771": {
+   "argc": 2,
+   "ret": 1
+  },
+  "784": {
+   "argc": 6,
+   "ret": 0
+  },
+  "785": {
+   "argc": 7,
+   "ret": 0
+  },
+  "786": {
+   "argc": 8,
+   "ret": 0
+  },
+  "787": {
+   "argc": 9,
+   "ret": 0
+  },
+  "788": {
+   "argc": 10,
+   "ret": 0
+  }
+ }
+}

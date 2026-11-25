@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>三國群英傳 2 · 豎屏重製 · Canvas2D 預覽</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14171c;
+        --bg-deep: #0e1116;
+        --panel: #1a1f27;
+        --line: #2c3440;
+        --text: #e9e4d8;
+        --dim: #9aa3ae;
+        --gold: #d8b36a;
+        --ours: #4c7df0;
+        --enemy: #e2604a;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 50% 0%, #1b222d 0%, var(--bg) 42%, #0b0d11 100%);
+        color: var(--text);
+        font: 14px/1.4 "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        overflow: hidden;
+      }
+      header {
+        flex: 0 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 16px;
+        padding: 10px 16px;
+        background:
+          linear-gradient(180deg, rgba(10, 13, 18, 0.30), rgba(10, 13, 18, 0.66)),
+          url("assets/bg/hud_bar.png") center center / 100% 100% no-repeat,
+          rgba(14, 17, 22, 0.94);
+        border-bottom: 1px solid var(--line);
+        box-shadow: 0 1px 0 rgba(216, 179, 106, 0.14) inset;
+      }
+      /* 底部控制台底座：宽度跟着画布走，画布贴满屏幕时高度归零自动隐藏，
+         pointer-events:none 所以永远不会挡住画布上的点击 */
+      #hudbot {
+        position: fixed;
+        left: 0;
+        right: 0;
+        top: 100vh;
+        height: 0;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 5;
+        background: url("assets/bg/hud_bar.png") center center / 100% 100% no-repeat;
+        transition: opacity 0.15s linear;
+      }
+      /* [82_battleui] 战斗页底部操作台：原作 MENU 图元叠层。
+         操作台本身是 canvas 画的（视图层冻结），所以不能换元素，只能在画布上
+         叠一层 750×1334 的 pointer-events:none 装饰框：框心透明，canvas 的
+         文字/血条照常从中间透出。图元是 MENU 图集的九宫切片
+         (work/battleui/_make.py → assets/battleui/)，一律 border-image，
+         不给任何元素加尺寸：技能格/按钮的命中矩形（main.js 按坐标算）零位移。 */
+      #battleui {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 750px;
+        height: 1334px;
+        transform-origin: 0 0;
+        pointer-events: none;
+        z-index: 4;
+        opacity: 0;
+        transition: opacity 0.12s linear;
+      }
+      #battleui.on { opacity: 1; }
+      /* 结算时 canvas 会盖一层压暗层，叠层跟着退成背景里的一道暗框 */
+      #battleui[data-mode="settled"] { opacity: 0.16; filter: saturate(0.55); }
+      #battleui > i {
+        position: absolute;
+        display: block;
+        border: 0 solid transparent;
+        border-image-repeat: stretch;
+        border-image-outset: 0;
+        image-rendering: pixelated;
+        pointer-events: none;
+      }
+      /* 条带分隔：WAR05 黑金三线带，原尺寸横向平铺（不拉伸，像素不变形） */
+      #battleui > i.sep {
+        background: url("assets/battleui/sep.png") left center / 111px 12px repeat-x;
+        filter: brightness(2.1) saturate(1.2);
+      }
+      #battleui > i.sep.top { left: 108px; top: 1106px; width: 624px; height: 12px; }
+      #battleui > i.sep.bot { left: 18px; top: 1316px; width: 714px; height: 12px; }
+      /* 头像框 D25 角括号：比立绘外扩 2px，把 canvas 的蓝描边压在框下 */
+      #battleui > i.port {
+        left: 16px; top: 1010px; width: 90px; height: 112px;
+        border-width: 14px;
+        border-image: url("assets/battleui/port.png") 14 / 14px / 0 stretch;
+        filter: brightness(1.7) saturate(1.15);
+      }
+      /* 技能格 D3_2H 角括号窗格（88×88，中心留给 canvas 的技名/氣） */
+      #battleui > i.slot {
+        top: 1122px; width: 92px; height: 92px;
+        border-width: 14px;
+        border-image: url("assets/battleui/slot.png") 14 / 14px / 0 stretch;
+        filter: brightness(1.7) saturate(1.15);
+      }
+      #battleui > i.slot.s1 { left: 114px; }
+      #battleui > i.slot.s2 { left: 212px; }
+      #battleui > i.slot.s3 { left: 310px; }
+      #battleui > i.slot.s4 { left: 408px; }
+      /* 技能格禁用态 D0_B 素金框（灰掉、压暗） */
+      #battleui > i.slot.is-off {
+        border-width: 8px;
+        border-image: url("assets/battleui/slot_off.png") 8 / 8px / 0 stretch;
+        opacity: 0.5;
+        filter: grayscale(0.7) brightness(1.25);
+      }
+      /* 日志框：同源 D3_2H 收窄切片（14px 边会压到 canvas 的提示行） */
+      #battleui > i.msg {
+        left: 114px; top: 1222px; width: 396px; height: 88px;
+        border-width: 10px;
+        border-image: url("assets/battleui/msg.png") 10 / 10px / 0 stretch;
+        filter: brightness(1.3) saturate(1.1);
+      }
+      /* 两个大按钮：r 与 canvas 的 BTN_ASSAULT / BTN_RETREAT 完全重合 */
+      #battleui > i.cmd { left: 526px; width: 208px; height: 88px; }
+      /* 突擊（v2 未接，恒置灰）D3_2G 角括号 */
+      #battleui > i.cmd.aslt {
+        top: 1122px;
+        border-width: 14px;
+        border-image: url("assets/battleui/cmd_off.png") 14 / 14px / 0 stretch;
+        opacity: 0.55;
+        filter: grayscale(0.8) brightness(1.2);
+      }
+      /* 撤退（可用）WAR08 金红高亮框 */
+      #battleui > i.cmd.retr {
+        top: 1218px;
+        border-width: 16px;
+        border-image: url("assets/battleui/cmd_on.png") 16 / 16px / 0 stretch;
+        filter: brightness(1.35) saturate(1.1);
+      }
+      /* ── [151_cmd] 两层战斗指令界面（6 大按钮 + 部队指令子菜单）─────────────────
+         canvas 负责填充 / 文字 / 置灰（`src/view/battleView.ts` 的 drawCmd6Bar /
+         drawArmyMenu），这一层只叠图元框；命中矩形一律以 canvas 的 cmd6Rects() /
+         armyCmdRects() 为准，不在这里重算。 */
+      /* 第一层 6 钮的角括号：位置 = canvas 矩形外扩 2px（524/632 × 1030/1124/1218，100×84） */
+      #battleui > i.cmd6 {
+        width: 104px; height: 88px;
+        border-width: 14px;
+        border-image: url("assets/battleui/cmd_off.png") 14 / 14px / 0 stretch;
+        opacity: 0.9;
+        filter: brightness(1.45) saturate(1.05);
+      }
+      #battleui > i.cmd6.c0 { left: 522px; top: 1028px; }
+      #battleui > i.cmd6.c1 { left: 630px; top: 1028px; }
+      #battleui > i.cmd6.c2 { left: 522px; top: 1122px; }
+      #battleui > i.cmd6.c3 { left: 630px; top: 1122px; }
+      #battleui > i.cmd6.c4 { left: 522px; top: 1216px; }
+      #battleui > i.cmd6.c5 { left: 630px; top: 1216px; }
+      /* 六按钮占掉右列之后：两条分隔带在 x508 收住（别横穿按钮列与子菜单面板），
+         突擊 / 撤退两颗系统键让位到最左列（canvas: CHIP_ASSAULT 18,1128 / CHIP_RETREAT 18,1218） */
+      #battleui[data-cmdbar="6"] > i.sep.top { width: 400px; }
+      #battleui[data-cmdbar="6"] > i.sep.bot { width: 470px; }
+      #battleui[data-cmdbar="6"] > i.cmd.aslt { left: 16px; top: 1126px; width: 92px; height: 88px; }
+      #battleui[data-cmdbar="6"] > i.cmd.retr { left: 16px; top: 1216px; width: 92px; height: 88px; }
+      /* [R82 叠层] 8 格技能栏：canvas 第一行提到 1100（行高 56，第二行 1162），
+         R82 的 4 个 88×88 窗格（top:1122）与 sep.top（1106..1118）必然压在上面 →
+         8 格时整组隐藏，改由 canvas 自己画框（`project/146` §6.3 的修法）。4 格保持原样。 */
+      #battleui[data-slots="8"] > i.slot,
+      #battleui[data-slots="8"] > i.sep.top { display: none; }
+      /* 子菜单展开时，面板（canvas 的 ARMY_MENU_RECT 512,1116,228×216）盖住右列下两行按钮：
+         canvas 上那 4 颗被面板盖掉，这一层的角括号也必须一起藏，否则会在面板里浮出四个金框。 */
+      #battleui[data-menu="1"] > i.cmd6.c2,
+      #battleui[data-menu="1"] > i.cmd6.c3,
+      #battleui[data-menu="1"] > i.cmd6.c4,
+      #battleui[data-menu="1"] > i.cmd6.c5 { display: none; }
+      .brand { font-weight: 700; letter-spacing: 0.06em; white-space: nowrap; }
+      .brand small { color: var(--dim); font-weight: 400; margin-left: 8px; letter-spacing: 0; }
+      label { color: var(--dim); font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+      select, input {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font: inherit;
+        font-size: 13px;
+        outline: none;
+      }
+      select:focus, input:focus { border-color: var(--gold); }
+      input[type="number"] { width: 76px; }
+      button {
+        background: var(--gold);
+        color: #17130a;
+        border: 1px solid #f0d79c;
+        border-radius: 8px;
+        padding: 7px 20px;
+        font: inherit;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { filter: brightness(1.08); }
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+      #stat { margin-left: auto; color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+      }
+      /* [84_solo] 从大地图/编成进来的真战斗（带 sim=/from=/a= 参数）默认收起顶部调试栏，
+         让 750×1334 画布吃满屏幕；右上角小齿轮随时可展开。调试栏元素仍在 DOM 里，
+         main.js 的 #troopA/#formA/... 查询不受影响。 */
+      body.solo header { display: none; }
+      body.solo main { padding: 0; }
+      body.solo canvas { border-radius: 0; border: 0; box-shadow: none; }
+      /* [216_apk] 發佈形態（APK 殼 / ?rel=1）：除錯列與右上角齒輪根本不進畫面，
+         連「先畫出來再藏」的閃一下都不要。body.rel 由下面第一個 script 上。 */
+      body.rel header, body.rel #hdrBtn { display: none; }
+      /* [216_apk] 「開戰」引導卡是開發期畫面（上面寫著 Canvas2D 預覽 / 邏輯核心測試通過），
+         它畫在 canvas 上、改不掉 -> 發佈形態先把畫布藏起來，等戰鬥真的開打（mode != ready）
+         或逾時兜底再放出來。白屏時間 = 加載 data/dist 的時間，跟原本一樣。 */
+      body.rel-boot #stage { visibility: hidden; }
+      #hdrBtn {
+        position: fixed; top: 6px; right: 6px; z-index: 40;
+        width: 30px; height: 30px; padding: 0; line-height: 1;
+        font-size: 15px; color: #d8b36a; background: rgba(14, 17, 22, 0.72);
+        border: 1px solid rgba(216, 179, 106, 0.34); border-radius: 8px;
+        cursor: pointer; opacity: 0.55; transition: opacity 0.15s;
+      }
+      #hdrBtn:hover, #hdrBtn:focus-visible { opacity: 1; }
+      canvas {
+        display: block;
+        background: var(--bg);
+        border-radius: 10px;
+        border: 1px solid #2a313c;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(216, 179, 106, 0.12);
+        touch-action: none;
+        user-select: none;
+      }
+      #error {
+        position: fixed;
+        inset: 0;
+        display: none;
+        place-items: center;
+        padding: 24px;
+        background: rgba(8, 10, 14, 0.92);
+        z-index: 10;
+      }
+      /* [V2 竖版收尾] 640 从来不是页面/画布限宽，只是这张错误对话框的阅读行宽。
+         旧写法在 <640 的窄屏上没问题、在 750 上也不会触发；改成视口相对后
+         两边都留 24px，不会再被误读成「页面被限到 640」。 */
+      #error .box {
+        width: 100%;
+        max-width: min(640px, calc(100vw - 48px));
+        background: var(--panel);
+        border: 1px solid var(--enemy);
+        border-radius: 12px;
+        padding: 24px 28px;
+      }
+      #error h2 { margin: 0 0 8px; color: var(--enemy); font-size: 20px; }
+      #error p { color: var(--dim); margin: 8px 0; }
+      #error code {
+        display: block;
+        background: var(--bg-deep);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 10px 12px;
+        color: var(--gold);
+        font: 13px/1.5 ui-monospace, Consolas, monospace;
+        white-space: pre-wrap;
+      }
+      /* [115_release] 兜底框的"玩家形态"：一句人话 + 重試按钮 + 可展开的技术细节。
+         技术细节默认收起，?dev=1 时才自动展开（见 body 末尾的守卫脚本）。 */
+      #error .lead { color: var(--text); font-size: 15px; margin: 12px 0 4px; }
+      #error button.retry {
+        margin-top: 14px;
+        padding: 9px 22px;
+        border-radius: 8px;
+        border: 1px solid var(--gold);
+        background: var(--gold);
+        color: #1a1408;
+        font-size: 15px;
+        font-family: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #error button.retry:active { transform: translateY(1px); }
+      #error details { margin-top: 14px; color: var(--dim); font-size: 13px; }
+      #error details summary { cursor: pointer; }
+      #error pre {
+        margin: 8px 0 0;
+        padding: 10px 12px;
+        max-height: 34vh;
+        overflow: auto;
+        background: var(--bg-deep);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        color: var(--text);
+        font: 12px/1.5 ui-monospace, Consolas, monospace;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      /* [V2 竖版收尾] 750 竖屏页眉压成两行：品牌 + 4 个选择器 + 种子 + 开战 一行，状态一行。
+         旧断点 720px 把 brand/stat 各占整行，750 上反而变三行（本页最窄的竖屏就是 750）。
+         canvas 的像素尺寸仍由 main.js 按 headerH 计算，缩短页眉 = 画布变大。 */
+      @media (max-width: 750px) {
+        header { gap: 6px 10px; padding: 8px 10px; }
+        .brand { font-size: 13px; }
+        .brand small { display: none; }
+        label { gap: 4px; font-size: 11px; }
+        select, input { padding: 4px 6px; font-size: 12px; }
+        input[type="number"] { width: 64px; }
+        button { padding: 6px 14px; }
+        #stat { font-size: 11px; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- [216_apk] 發佈形態開關：必須排在 devflags.js 之前（後者要讀 __RELEASE__ 才能定 DEV） -->
+    <script src="./release.js"></script>
+    <!-- [115_release] 调试口统一开关：没有 ?dev=1 时，本页与 main.js 的调试参数一律失效 -->
+    <script src="./devflags.js"></script>
+    <script>
+      // [84_solo] 先上 class 再渲染，避免首帧跳动。真战斗（from= / a=）默认 solo。
+      // [115_release] sim= 是调试口，只有 ?dev=1 时才参与判定；否则 ?sim=250 会被误当成真战斗、把页眉藏掉。
+      // [216_apk] 發佈形態：除錯列／齒輪不進畫面，畫布直接吃滿（solo 排版 + rel 隱藏）
+      if (window.__RELEASE__) {
+        document.body.classList.add('solo', 'rel');
+        // 戰鬥頁不是 App 的入口頁（入口是 campaign.html 大地圖）：沒帶出征參數時它是開發期預覽態，
+        // 會出現「開戰」引導卡與 100v100 演示戰 -> 直接回大地圖，免得玩家進到這頁。
+        if (!/[?&](a|from|city|soldiers|bstr)=/.test(location.search)) {
+          location.replace('./campaign.html?rel=1');
+        } else {
+          // 真有出征參數：先藏畫布（body.rel-boot），由下面的自動開戰腳本放出來
+          document.body.classList.add('rel-boot');
+        }
+      } else if (/[?&](from|a)=/.test(location.search)) document.body.classList.add('solo');
+      else if (window.SGDev && window.SGDev.DEV && /[?&]sim=/.test(location.search)) document.body.classList.add('solo');
+    </script>
+    <button id="hdrBtn" type="button" title="顯示／隱藏除錯列" aria-label="顯示或隱藏除錯列">⚙</button>
+    <header>
+      <div class="brand">三國群英傳 2 <small>豎屏重製 · Canvas2D 預覽</small></div>
+      <label>我軍兵種 <select id="troopA"></select></label>
+      <label>我方陣形 <select id="formA"></select></label>
+      <label>敵軍兵種 <select id="troopB"></select></label>
+      <label>敵方陣形 <select id="formB"></select></label>
+      <label>種子 <input id="seed" type="number" min="1" max="999999" value="7" /></label>
+      <button id="start" type="button">開 戰</button>
+      <span id="stat">載入中…</span>
+    </header>
+    <main>
+      <canvas id="stage" width="750" height="1334" aria-label="三國群英傳 2 豎屏戰鬥預覽"></canvas>
+    </main>
+    <div id="hudbot" aria-hidden="true"></div>
+    <!-- [82_battleui] 操作台原作图元叠层：纯装饰，pointer-events:none，不参与命中
+         [151_cmd] data-cmdbar="6" = 右列交给 6 大指令钮；data-slots 由下面的定时器按技能数切 4/8 -->
+    <div id="battleui" aria-hidden="true" data-slots="4" data-cmdbar="6">
+      <i class="sep top"></i><i class="sep bot"></i><i class="port"></i>
+      <i class="slot s1"></i><i class="slot s2"></i><i class="slot s3"></i><i class="slot s4"></i>
+      <i class="cmd aslt"></i><i class="cmd retr"></i><i class="msg"></i>
+      <!-- [151_cmd] 第一层 6 大按钮的角括号（文字/填充在 canvas 上） -->
+      <i class="cmd6 c0"></i><i class="cmd6 c1"></i><i class="cmd6 c2"></i>
+      <i class="cmd6 c3"></i><i class="cmd6 c4"></i><i class="cmd6 c5"></i>
+    </div>
+    <!-- [115_release] 启动兜底框：默认隐藏，出问题时由下面的守卫脚本显示。
+         文案只对玩家说人话（不出现 stack、也不出现本机路径/端口 —— 发布到任何机器都能直接用）；
+         技术细节收在 <details> 里，只有 ?dev=1 才自动展开。 -->
+    <div id="error" role="alert" aria-live="assertive">
+      <div class="box">
+        <h2 id="error-title">遊戲沒能啟動</h2>
+        <p id="error-msg" class="lead">請按下面的「重試」再開一次。</p>
+        <button id="error-retry" class="retry" type="button">重 試</button>
+        <details id="error-dev" hidden>
+          <summary>技術細節（開發者用）</summary>
+          <pre id="error-detail"></pre>
+        </details>
+      </div>
+    </div>
+    <script>
+      // [115_release] 首屏守卫：把「白屏 / 一行 stack」换成玩家看得懂的一句话 + 重試。覆盖四种首屏故障：
+      //   ① <script> 404 —— 含 main.js 里 `../dist/*.js` 的静态 import 失败（浏览器报在 script 元素上）
+      //   ② Canvas2D 建不出来（getContext('2d') 返回 null / 抛错）
+      //   ③ 启动期未捕获的异常 / Promise 拒绝
+      //   ④ 启动逾时（数据没回来、主循环没起来）
+      // 注：本项目没有 window.__SG_BOOT__ 这个握手变量，启动成功的标志是 main.js 末尾置的
+      // window.__sanguo.booted = true（见 project/115_发布卫生.md「兜底行为」）。
+      (function () {
+        var box = document.getElementById('error');
+        var titleEl = document.getElementById('error-title');
+        var msgEl = document.getElementById('error-msg');
+        var btn = document.getElementById('error-retry');
+        var det = document.getElementById('error-dev');
+        var pre = document.getElementById('error-detail');
+        var devOn = !!(window.SGDev && window.SGDev.DEV);
+        var booted = false;   // 启动成功后，运行期异常不再全屏拦人（只进 main.js 的诊断面板）
+        var shown = false;
+
+        // 三样东西：标题 / 一句人话 / 下一步动作。三段都不含 stack、不含本机路径。
+        var TEXT = {
+          script: ['遊戲檔案沒有載入完整', '這次只載入到一部分檔案，可能是更新到一半或快取出錯。', '按「重試」重新載入一次通常就好了。'],
+          canvas: ['這台裝置畫不出遊戲畫面', '瀏覽器沒能建立遊戲用的畫布（Canvas 2D）。', '請換 Edge / Chrome 最新版再開；手機上先關掉省電模式。'],
+          crashed: ['遊戲啟動時出錯了', '遊戲在啟動過程中遇到問題，暫時停住了。', '按「重試」再開一次；一直這樣就換個瀏覽器試試。'],
+          timeout: ['遊戲載入太久，先停下來了', '資料還沒讀完，或畫面沒能開始執行。', '確認網路後按「重試」；離線版請確認檔案是完整的。']
+        };
+
+        function show(kind, tech) {
+          var t = TEXT[kind] || TEXT.crashed;
+          if (titleEl) titleEl.textContent = t[0];
+          if (msgEl) msgEl.textContent = t[1] + ' ' + t[2];
+          if (pre) pre.textContent = String(tech || '');
+          // 发布形态下连"技術細節"这一行都不给玩家看；?dev=1 才显示并展开
+          if (det) { det.hidden = !devOn; det.open = devOn; }
+          if (box) { box.style.display = 'grid'; box.setAttribute('data-kind', kind); }
+          shown = true;
+        }
+
+        // ① 资源加载失败（capture 才收得到 resource error）
+        window.addEventListener('error', function (ev) {
+          var el = ev.target;
+          if (el && el !== window && el.tagName === 'SCRIPT') {
+            show('script', 'script 載入失敗：' + (el.getAttribute('src') || '(inline)'));
+            return;
+          }
+          if (booted || shown) return;   // ③ 只接启动期的未捕获异常，运行期交给 main.js 的面板
+          if (ev.message) show('crashed', ev.message + '\n' + (ev.filename || '') + ':' + (ev.lineno || ''));
+        }, true);
+        window.addEventListener('unhandledrejection', function (ev) {
+          if (booted || shown) return;
+          var r = ev.reason;
+          show('crashed', 'unhandledrejection：' + ((r && (r.stack || r.message)) || String(r)));
+        });
+
+        // ② Canvas2D 不可用（main.js 自己也会判一次；这里先判是为了首帧就有话说）
+        try {
+          var cv = document.getElementById('stage');
+          if (!cv || !cv.getContext || !cv.getContext('2d')) {
+            show('canvas', '#stage 缺失，或 canvas.getContext("2d") 返回 null');
+          }
+        } catch (err) {
+          show('canvas', String((err && (err.stack || err.message)) || err));
+        }
+
+        // ④ 启动逾时：15s 还没 booted 就当起不来（数据/模块卡住）
+        setTimeout(function () {
+          // [216_apk] 發佈形態沒有 window.__sanguo：啟動成功的判據換成 __sgBootOk 置的 booted
+          if (booted) return;
+          var s = window.__sanguo;
+          if (s && s.booted) return;
+          show('timeout', '15s 內未 booted：启动标志未置位');
+        }, 15000);
+
+        // main.js 启动成功时调用：收起兜底框，并让运行期异常不再全屏
+        window.__sgBootOk = function () {
+          booted = true;
+          if (box) box.style.display = 'none';
+          shown = false;
+        };
+        // main.js 主动上报（启动失败 / 画布不可用）；这是"真出事"，任何时候都弹
+        window.__sgBootFail = function (kind, tech) { show(kind, tech); };
+        if (btn) btn.addEventListener('click', function () { location.reload(); });
+      })();
+    </script>
+    <script src="./audio.js"></script>
+    <!-- [face] 原作肖像映射（window.SG.portraitUrl）：战斗 HUD 立绘框 86×108，原作 FACE 100×120 -->
+    <script src="./face_map.js"></script>
+    <script>
+      // 底部控制台底座的定位：只读画布的布局矩形，不碰 main.js（视图层已冻结）
+      (function () {
+        const cv = document.getElementById('stage');
+        const bot = document.getElementById('hudbot');
+        if (!cv || !bot) return;
+        function place() {
+          const r = cv.getBoundingClientRect();
+          const room = window.innerHeight - r.bottom - 4;
+          const h = Math.max(0, Math.min(64, room));
+          bot.style.left = Math.max(0, r.left) + 'px';
+          bot.style.right = Math.max(0, window.innerWidth - r.right) + 'px';
+          bot.style.top = r.bottom + 2 + 'px';
+          bot.style.height = h + 'px';
+          bot.style.opacity = h > 18 ? 0.92 : 0;
+        }
+        place();
+        window.addEventListener('resize', place);
+        window.addEventListener('load', place);
+        if (window.ResizeObserver) {
+          const ro = new ResizeObserver(place);
+          ro.observe(cv);
+          ro.observe(document.body);
+        }
+        // [82_battleui] 操作台图元叠层：只跟画布的 CSS 矩形同步缩放，
+        // 不接管任何指针事件（命中矩形仍由 canvas 按 toDesign 算）
+        const bui = document.getElementById('battleui');
+        if (!bui) return;
+        // 页眉的统计行会随战况从 1 行变 2 行，画布会跟着上下挪而尺寸不变，
+        // 所以除了 resize/RO，还要跟着下面那个 200ms 的定时器补一次位置。
+        let lastT = '';
+        function placeBui() {
+          const r = cv.getBoundingClientRect();
+          const k = Math.max(0, r.width - 2) / 750; // 减去 canvas 的 1px 边框×2
+          const t = 'translate(' + (r.left + 1) + 'px,' + (r.top + 1) + 'px) scale(' + k + ')';
+          if (t !== lastT) {
+            bui.style.transform = t;
+            lastT = t;
+          }
+          bui.classList.add('on');
+        }
+        placeBui();
+        window.addEventListener('resize', placeBui);
+        window.addEventListener('load', placeBui);
+        if (window.ResizeObserver) new ResizeObserver(placeBui).observe(cv);
+        // [151_cmd] 视图层的子菜单开合状态：动态 import 一次，之后每 200ms 只读一个布尔，
+        // 用来决定要不要藏右列下两行的角括号（`data-menu`）。拿不到模块就当收起。
+        let viewMod = null;
+        import('../dist/view/battleView.js')
+          .then(function (m) {
+            viewMod = m;
+          })
+          .catch(function () {
+            viewMod = null;
+          });
+        setInterval(function () {
+          placeBui();
+          // [216_apk] 發佈形態不挂 window.__sanguo：HUD 只讀 main.js 導出的只讀快照 SG_HUD()
+          const hud = (window.SG_HUD && window.SG_HUD()) || null;
+          const s = window.__sanguo && window.__sanguo.state;
+          bui.setAttribute('data-mode', (hud ? hud.mode : s && s.mode) || 'fighting');
+          // [151_cmd] 技能格 4 / 8 两套版式：>4 时收起 R82 的 4 个旧窗格与上分隔带
+          const n = hud ? hud.slots : (s && s.skills ? s.skills.length : 0);
+          bui.setAttribute('data-slots', n > 4 ? '8' : '4');
+          const open = !!(viewMod && viewMod.armyMenuOpen && viewMod.armyMenuOpen());
+          bui.setAttribute('data-menu', open ? '1' : '0');
+        }, 200);
+      })();
+
+      // [151_cmd] 截图 / 联调钩子：?cmdmenu=1 展开子菜单；=2 下第一条可用令并收起；=3 下完留开着。
+      // 不带该参数时这个 IIFE 立刻返回，正式页面一行都不会执行。
+      // 只调视图层导出的 setArmyMenuOpen() / armyMenuItems() 与 main.js 已有的
+      // window.__sanguo.armyCommand()，不直接写 world 的字段（截图里的状态 = 玩家点出来的状态）。
+      (function () {
+        const m = /[?&]cmdmenu=([123])/.exec(location.search || '');
+        if (!m) return;
+        if (window.__RELEASE__) return; // [216_apk] 截圖鉤子不進發佈包
+        const want = m[1];
+        let tries = 0;
+        const timer = setInterval(function () {
+          tries += 1;
+          const sg = window.__sanguo;
+          const st = sg && sg.state;
+          if (!st || !st.world || st.mode !== 'fighting') {
+            if (tries > 200) clearInterval(timer); // 10s 还没开战就放弃，别一直转
+            return;
+          }
+          clearInterval(timer);
+          import('../dist/view/battleView.js').then(function (view) {
+            if (want === '1') {
+              view.setArmyMenuOpen(true);
+              return;
+            }
+            const items = view.armyMenuItems(st.world);
+            const pick = items.filter(function (it) { return it.ok; })[0] || items[0];
+            if (pick && sg.armyCommand) sg.armyCommand(pick.slot);
+            view.setArmyMenuOpen(want === '3');
+          });
+        }, 50);
+      })();
+
+      // [84_solo] 右上角齿轮：切换顶部调试栏。改完要靠 resize 事件让 main.js 重新 fit()，
+      // 因为 resize() 是按 header 的实际高度算可用高度的（main.js:1198-1201）。
+      (function () {
+        var btn = document.getElementById('hdrBtn');
+        if (!btn) return;
+        btn.addEventListener('click', function () {
+          var solo = document.body.classList.toggle('solo');
+          btn.textContent = solo ? '⚙' : '✕';
+          btn.title = solo ? '顯示除錯列' : '隱藏除錯列';
+          window.dispatchEvent(new Event('resize'));
+          // 画布尺寸是异步 fit 的，下一帧再补一次，避免叠层框错位
+          requestAnimationFrame(function () { window.dispatchEvent(new Event('resize')); });
+        });
+      })();
+
+      // [216_apk] 發佈形態的自動開戰：大地圖「出征」後進到這頁時，玩家看到的第一屏本來是
+      // 開發期的「開戰」引導卡（Canvas2D 預覽 / 邏輯核心 15/15 測試通過 / 配置在頁面上方切換），
+      // 那張卡畫在 canvas 上、我們不改 view 層 -> 改成進頁就替玩家點一下卡上的「開戰」按鈕
+      // （START_BUTTON = 750×1334 設計稿中心 375,684 ⇒ 畫布比例 0.5 / 0.5127），
+      // 點下去走的是 main.js 原本的 pointerdown 命中框（hit.type === 'start' -> startBattle()），
+      // 沒有新增任何遊戲 API。畫布在開打前由 body.rel-boot 藏著，不會閃到那張卡。
+      (function () {
+        if (!window.__RELEASE__) return;
+        if (!document.body.classList.contains('rel-boot')) return; // 沒帶出征參數時已回大地圖
+        var tries = 0;
+        var lastClick = -100; // 点过一次就等 2 秒再说，避免 startBattle 还在 await 时被连点
+        var timer = setInterval(function () {
+          tries += 1;
+          var hud = (window.SG_HUD && window.SG_HUD()) || null;
+          if (hud && hud.mode !== 'ready') {
+            // 已經開打（或已經結算）：放開畫布，收工
+            document.body.classList.remove('rel-boot');
+            clearInterval(timer);
+            return;
+          }
+          var stage = document.getElementById('stage');
+          if (hud && stage && tries - lastClick >= 20) {
+            var r = stage.getBoundingClientRect();
+            if (r.width > 10 && r.height > 10) {
+              lastClick = tries;
+              var init = {
+                bubbles: true,
+                cancelable: true,
+                button: 0,
+                pointerId: 1,
+                pointerType: 'touch',
+                isPrimary: true,
+                clientX: r.left + r.width * 0.5,
+                clientY: r.top + r.height * (684 / 1334),
+              };
+              var ev;
+              try {
+                ev = new PointerEvent('pointerdown', init);
+              } catch (e) {
+                // 老 WebView（Chrome < 55）没有 PointerEvent 构造器：MouseEvent 带上同样的坐标，
+                // main.js 只读 clientX/clientY/button，够用。
+                ev = new MouseEvent('pointerdown', init);
+              }
+              stage.dispatchEvent(ev);
+            }
+          }
+          // 6 秒还没开打（数据没加载完/出错）：把画布放出来，至少让玩家能自己点，
+          // 真正的错误提示由 #error 兜底框与 main.js 的 showError 负责。
+          if (tries > 60) {
+            document.body.classList.remove('rel-boot');
+            clearInterval(timer);
+          }
+        }, 100);
+      })();
+    </script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

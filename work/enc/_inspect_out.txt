@@ -1,0 +1,136 @@
+== 14 个 BAD 文件 ==
+docs/02_资源格式规格.md
+  size=16441 lines=306 fffd=2 bom=False mtime=2026-11-24 13:52:41
+work/fidelity/_cmp_regen.json
+  size=932462 lines=61877 fffd=1125 bom=False mtime=2026-11-25 18:16:15
+work/fidelity/fidelity_expect.pre_backfill.json
+  size=932422 lines=61867 fffd=1125 bom=False mtime=2026-11-25 18:21:57
+work/fidelity/fidelity_expect.regen.json
+  size=932462 lines=61877 fffd=1125 bom=False mtime=2026-11-25 18:16:15
+work/fidelity/gen_expect.mjs
+  size=27293 lines=441 fffd=888 bom=False mtime=2026-11-25 18:34:20
+work/fidelity/gen_expect.fixed.mjs
+  size=26921 lines=440 fffd=140 bom=True mtime=2026-11-25 18:02:09
+work/fidelity/gen_expect.fixed.restored.mjs
+  size=31282 lines=440 fffd=3468 bom=False mtime=2026-11-25 18:12:53
+work/fidelity/gen_expect.fixed2.mjs
+  size=25355 lines=440 fffd=981 bom=False mtime=2026-11-25 18:15:53
+work/fidelity/gen_expect.fixed3.mjs
+  size=25668 lines=441 fffd=973 bom=False mtime=2026-11-25 18:20:59
+work/fidelity/gen_expect.recovered.mjs
+  size=26919 lines=440 fffd=180 bom=False mtime=2026-11-25 17:59:12
+work/fidelity/gen_expect.recovered.restored.mjs
+  size=31082 lines=440 fffd=3407 bom=False mtime=2026-11-25 18:12:53
+work/fidelity/gen_expect.repair.mjs
+  size=25359 lines=440 fffd=1004 bom=False mtime=2026-11-25 18:13:43
+work/fidelity/gen_expect.repair2.mjs
+  size=25355 lines=440 fffd=993 bom=False mtime=2026-11-25 18:14:45
+work/fidelity/gen_expect.restored.mjs
+  size=26893 lines=440 fffd=1143 bom=False mtime=2026-11-25 18:12:53
+
+== docs/02 第 283 行全文（前 400 字符）==
+L281 len=20: | 文件 | 正确编码 | 误用后果 |
+L282 len=13: |---|---|---|
+L283 len=128: | PAK 内全部 `.INI` | **cp950（Big5，繁体）** | 用 `gbk` 会在**第一处中文字节**就 `UnicodeDecodeError`；用 `gbk + errors='replace'` 则技能名/武将名全变 `��` |
+
+== work/fidelity 目录里所有 .json/.mjs 的 FFFD 计数 ==
+_backfill_evidence.mjs                       size=    1699 fffd=     0 mtime=2026-11-25 18:27:34
+_cmp_good.json                               size=  966508 fffd=     0 mtime=2026-11-25 18:03:14
+_cmp_regen.json                              size=  932462 fffd=  1125 mtime=2026-11-25 18:16:15
+_probe2.mjs                                  size=    1332 fffd=     0 mtime=2026-11-25 18:19:40
+_probeheal.mjs                               size=    1125 fffd=     0 mtime=2026-11-25 18:16:54
+check.mjs                                    size=   54147 fffd=     0 mtime=2026-11-25 18:21:44
+expect_diff.mjs                              size=    5799 fffd=     0 mtime=2026-11-25 18:32:10
+fidelity_expect.before_r192.json             size=  966304 fffd=     0 mtime=2026-11-25 14:31:44
+fidelity_expect.json                         size=  966507 fffd=     0 mtime=2026-11-25 18:34:21
+fidelity_expect.pre_backfill.json            size=  932422 fffd=  1125 mtime=2026-11-25 18:21:57
+fidelity_expect.regen.json                   size=  932462 fffd=  1125 mtime=2026-11-25 18:16:15
+fidelity_expect.reviewed_r192.json           size=  966507 fffd=     0 mtime=2026-11-25 18:34:21
+gen_expect.corrupt-r192.mjs                  size=   31410 fffd=     0 mtime=2026-11-25 17:58:52
+gen_expect.fixed.mjs                         size=   26921 fffd=   140 mtime=2026-11-25 18:02:09
+gen_expect.fixed.restored.mjs                size=   31282 fffd=  3468 mtime=2026-11-25 18:12:53
+gen_expect.fixed2.mjs                        size=   25355 fffd=   981 mtime=2026-11-25 18:15:53
+gen_expect.fixed3.mjs                        size=   25668 fffd=   973 mtime=2026-11-25 18:20:59
+gen_expect.mjs                               size=   27293 fffd=   888 mtime=2026-11-25 18:34:20
+gen_expect.recovered.mjs                     size=   26919 fffd=   180 mtime=2026-11-25 17:59:12
+gen_expect.recovered.restored.mjs            size=   31082 fffd=  3407 mtime=2026-11-25 18:12:53
+gen_expect.repair.mjs                        size=   25359 fffd=  1004 mtime=2026-11-25 18:13:43
+gen_expect.repair2.mjs                       size=   25355 fffd=   993 mtime=2026-11-25 18:14:45
+gen_expect.restored.mjs                      size=   26893 fffd=  1143 mtime=2026-11-25 18:12:53
+
+== 现役文件对照（应为 0 FFFD）==
+work/fidelity/fidelity_expect.json  size=966507 fffd=0 mtime=2026-11-25 18:34:21
+work/fidelity/gen_expect.src.mjs  MISSING
+work/fidelity/check.mjs  size=54147 fffd=0 mtime=2026-11-25 18:21:44
+
+== 三个 json 的头部（看是不是 expect 数据的坏副本）==
+--- work/fidelity/_cmp_regen.json ---
+{
+ "schema": 1,
+ "generatedBy": "work/fidelity/gen_expect.mjs",
+ "generatedAt": "2026-11-25T10:16:15.811Z",
+ "purpose": "把�和原作�致�变成可重放斨�：期望�只由原作材料生成，运�时实现由 check.mjs / game/tests/fidelity_net.test.ts 比�",
+ "origin": {
+  [json 可解析，替换 FFFD 后]
+--- work/fidelity/fidelity_expect.pre_backfill.json ---
+{
+ "schema": 1,
+ "generatedBy": "work/fidelity/gen_expect.mjs",
+ "generatedAt": "2026-11-25T10:21:57.946Z",
+ "purpose": "把�和原作�致�变成可重放斨�：期望�只由原作材料生成，运�时实现由 check.mjs / game/tests/fidelity_net.test.ts 比�",
+ "origin": {
+  [json 可解析，替换 FFFD 后]
+--- work/fidelity/fidelity_expect.regen.json ---
+{
+ "schema": 1,
+ "generatedBy": "work/fidelity/gen_expect.mjs",
+ "generatedAt": "2026-11-25T10:16:15.811Z",
+ "purpose": "把�和原作�致�变成可重放斨�：期望�只由原作材料生成，运�时实现由 check.mjs / game/tests/fidelity_net.test.ts 比�",
+ "origin": {
+  [json 可解析，替换 FFFD 后]
+
+== gen_expect 家族头部 3 行 ==
+--- gen_expect.corrupt-r192.mjs fffd=0 bom=True ---
+﻿#!/usr/bin/env node
+/**
+ * 淇濈湡鏍￠獙缃?路 鏈熸湜鍊肩敓鎴愬櫒锛堜竴娆℃€х敓鎴愶紝钀界洏缁?check.mjs / fidelity_net.test.ts 姣斿锛? *
+--- gen_expect.fixed.mjs fffd=140 bom=True ---
+﻿#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次性生成，落盘�?check.mjs / fidelity_net.test.ts 比对�? *
+--- gen_expect.fixed.restored.mjs fffd=3468 bom=False ---
+#!/usr/bin/env node
+/**
+ * ����У��?�� ����ֵ��������һ�������ɣ�����?check.mjs / fidelity_net.test.ts �ȶ�? *
+--- gen_expect.fixed2.mjs fffd=981 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *
+--- gen_expect.fixed3.mjs fffd=973 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *
+--- gen_expect.mjs fffd=888 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *
+--- gen_expect.recovered.mjs fffd=180 bom=False ---
+?#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次性生成，落盘�?check.mjs / fidelity_net.test.ts 比对�? *
+--- gen_expect.recovered.restored.mjs fffd=3407 bom=False ---
+?#!/usr/bin/env node
+/**
+ * ����У��?�� ����ֵ��������һ�������ɣ�����?check.mjs / fidelity_net.test.ts �ȶ�? *
+--- gen_expect.repair.mjs fffd=1004 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *
+--- gen_expect.repair2.mjs fffd=993 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *
+--- gen_expect.restored.mjs fffd=1143 bom=False ---
+#!/usr/bin/env node
+/**
+ * 保真校验�?· 期望值生成器（一次�生成，落盘�?check.mjs / fidelity_net.test.ts 比��? *

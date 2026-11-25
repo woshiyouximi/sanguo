@@ -1,0 +1,26 @@
+{
+ "console": [
+  {
+   "type": "timeEnd",
+   "text": "LoadScene db://assets/scene/Boot.scene: 16.705078125 ms"
+  },
+  {
+   "type": "timeEnd",
+   "text": "LoadScene Battle: 10.821044921875 ms"
+  },
+  {
+   "type": "log",
+   "text": "[BattleRoot] 兵種圖集為原作 FORCE 版：按陣營取背視/正視幀（M 藍軍 / N 紅軍）"
+  },
+  {
+   "type": "warning",
+   "text": "[smartscript] 占位 syscall 0x135（视觉表现未复现）"
+  },
+  {
+   "type": "warning",
+   "text": "[smartscript] 占位 syscall 0x136（视觉表现未复现）"
+  }
+ ],
+ "exceptions": [],
+ "netFails": []
+}

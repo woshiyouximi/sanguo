@@ -1,0 +1,11 @@
+﻿import { boot } from './cdp.mjs';
+const c = await boot();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const bs = await c.rect('#btnSave');
+console.log('at', await c.eval(`(()=>{const e=document.elementFromPoint(${bs.x + bs.w / 2},${bs.y + bs.h / 2}); return e?e.tagName+'#'+e.id+'.'+e.className:null;})()`));
+console.log('scrim', await c.eval(`(()=>{const s=document.getElementById('scrim'); return {hidden:s.hidden,cls:s.className,disp:getComputedStyle(s).display};})()`));
+console.log('sheets', await c.eval(`[...document.querySelectorAll('#saveSheet,#pickSheet,#surrenderSheet,#confirmSheet')].map(e=>e.id+':'+(e.hidden?'hidden':'shown'))`));
+await c.mouse(bs.x + bs.w / 2, bs.y + bs.h / 2); await sleep(800);
+console.log('after click', await c.eval(`(()=>{const s=document.getElementById('saveSheet'); return {hidden:s.hidden, rows:document.getElementById('slotRows').children.length, msg:(document.getElementById('saveMsg')||{}).innerText};})()`));
+console.log('errs', JSON.stringify((await c.errs(0)).filter(e=>e.kind==='error').map(e=>e.msg).slice(-4)));
+await c.close();

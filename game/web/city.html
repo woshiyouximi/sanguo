@@ -1,0 +1,1140 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>城池內政 · 三國群英傳2</title>
+<style>
+  :root{
+    --bg:#0E1116; --panel:#161B22; --panel-2:#1D242D;
+    --line:rgba(216,179,106,.26); --line-soft:rgba(216,179,106,.16);
+    --gold:#D8B36A; --gold-2:#F3E0B4;
+    --ink:#E9E4D6; --ink-2:#B6AF9E; --ink-3:#7A7566;
+    --jade:#4F7E6C; --red:#B4543F;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:#07090C;color:var(--ink);font-family:"Noto Serif CJK TC","Source Han Serif TC","Songti TC",serif;overflow:hidden}
+  /* 殿內背景：hall_01..06 由 city_model.hallIndexOf() 按城規模挑，JS 只負責把 --hall 換掉。
+     原作 POLICY 宮殿圖（palais_0N.png，640×480，橫）不當主背景 —— 鋪 750×1334 要放大 2.78×
+     並裁掉 ~58% 寬；改成「結果面板背後淡入」，讓原畫在頁面上真的出現。 */
+  #stage{
+    --hall:url("assets/bg/env/hall_01.jpg");
+    --palais:url("assets/bg/policy/palais_01.png");
+    position:absolute;left:0;top:0;width:750px;height:1334px;display:flex;flex-direction:column;
+    background:var(--hall) center top / cover no-repeat,
+               radial-gradient(120% 70% at 50% 0%,#1B2430 0%,#0E1116 62%), var(--bg);
+    transform-origin:top left;
+  }
+  #stage::before{content:"";position:absolute;inset:0;pointer-events:none;
+    background:linear-gradient(180deg,rgba(8,11,15,.30),rgba(8,11,15,.40) 46%,rgba(8,11,15,.52))}
+  #stage>*{position:relative;z-index:1}
+
+  header{padding:18px 24px 12px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(216,179,106,.10),rgba(10,13,17,.5))}
+  .htop{display:flex;align-items:baseline;gap:12px}
+  h1{font-size:34px;letter-spacing:.12em;color:var(--gold-2);font-weight:600}
+  .sub{font-size:18px;color:var(--ink-2);letter-spacing:.06em}
+  .hud{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .chip{background:rgba(16,20,26,.72);border:1px solid var(--line-soft);border-radius:10px;
+    padding:7px 10px;display:flex;flex-direction:column;gap:2px}
+  .chip .k{font-size:14px;color:var(--ink-3);letter-spacing:.08em}
+  .chip .v{font-size:22px;color:var(--ink);font-variant-numeric:tabular-nums}
+  .chip .v.gold{color:var(--gold-2)}
+  .chip .v.hot{color:#E2914E}
+  .chip .v.cold{color:#E25B4A}
+
+  .body{flex:1;display:flex;flex-direction:column;gap:10px;padding:12px 22px 0;min-height:0}
+  /* 面板：外包裝用 ui_panel_bamboo（竹簡板）壓到 8% 當紋理，底色仍是深色 —— 文字對比不掉 */
+  .sec{position:relative;border:1px solid var(--line-soft);border-radius:14px;padding:10px 12px;
+    background:linear-gradient(180deg,rgba(18,23,30,.90),rgba(11,15,20,.93)),
+               url("assets/bg/env/ui_panel_bamboo.png") center/cover no-repeat}
+  /* 面板下緣：ui_divider_orn（雲紋分隔） */
+  .sec::after{content:"";position:absolute;left:14px;right:14px;bottom:-6px;height:12px;pointer-events:none;
+    background:url("assets/bg/env/ui_divider_orn.png") center/contain no-repeat;opacity:.45}
+  .sec h2{font-size:18px;color:var(--gold);letter-spacing:.1em;font-weight:600;display:flex;justify-content:space-between}
+  .sec h2 .hint{font-size:14px;color:var(--ink-3);letter-spacing:.04em;font-weight:400}
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
+  /* 命令鍵：原作木牌（ui_btn_wood_normal 384×107）走 border-image 九宮，按下/停用換圖 */
+  .cmd{height:88px;border:13px solid transparent;border-radius:14px;color:var(--ink);
+    border-image:url("assets/bg/env/ui_btn_wood_normal.png") 28 fill / 13px / 0 stretch;
+    background:transparent;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    font-family:inherit;cursor:pointer;transition:transform .06s,filter .12s}
+  .cmd:active{transform:scale(.975);border-image-source:url("assets/bg/env/ui_btn_wood_pressed.png")}
+  .cmd b{font-size:26px;letter-spacing:.12em;color:var(--gold-2);font-weight:600}
+  .cmd small{font-size:13px;color:var(--ink-3);letter-spacing:.02em}
+  .cmd.hot{box-shadow:inset 0 0 0 2px rgba(216,179,106,.35),0 0 14px rgba(226,145,78,.16)}
+  .cmd.hot small{color:#C9B48A}
+  .cmd[disabled]{border-image-source:url("assets/bg/env/ui_btn_wood_disabled.png");opacity:.75;cursor:default}
+  .cmd .note{font-size:12px;color:#E2914E;letter-spacing:.02em}
+
+  .log{flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;margin-top:8px;overflow:hidden;
+    background:linear-gradient(180deg,rgba(8,11,15,.66) 0,rgba(8,11,15,.34) 40%,rgba(8,11,15,0) 100%);
+    border-radius:0 0 12px 12px}
+  /* 結果面板：原作 POLICY 宮殿圖淡入（--palais 跟 hall 同檔次換），保留 04c §2.3 的朝堂氛圍 */
+  .logsec::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:14px;
+    background:var(--palais) center 34% / cover no-repeat;opacity:.12;filter:saturate(.5) brightness(.85)}
+  .logsec>*{position:relative;z-index:1}
+  .row{display:flex;gap:8px;align-items:baseline;font-size:16px;line-height:1.55;
+    border-bottom:1px dashed rgba(216,179,106,.10);padding:5px 2px}
+  .row:last-child{border-bottom:0}
+  .row .t{flex:none;width:104px;color:var(--ink-3);font-size:14px;font-variant-numeric:tabular-nums}
+  .row .c{flex:none;color:var(--gold);width:64px;font-size:15px}
+  .row .x{flex:1;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row.k-talent .x{color:#8FCBAE}
+  .row.k-treasure .x,.row.k-talisman .x{color:var(--gold-2)}
+  .row.k-none .x{color:var(--ink-3)}
+  .row.k-warn .x{color:#D08A72}
+  .empty{color:var(--ink-3);font-size:16px;padding:8px 2px}
+
+  footer{display:flex;gap:12px;padding:10px 22px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);background:linear-gradient(180deg,rgba(10,13,17,.86),rgba(8,10,14,.95))}
+  .btn{flex:1;height:72px;border:13px solid transparent;border-radius:14px;color:var(--ink);
+    border-image:url("assets/bg/env/ui_btn_wood_normal.png") 28 fill / 13px / 0 stretch;
+    background:transparent;
+    font-family:inherit;font-size:23px;letter-spacing:.1em;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .btn:active{border-image-source:url("assets/bg/env/ui_btn_wood_pressed.png")}
+  .btn small{font-size:13px;line-height:1.05;color:var(--ink-3);letter-spacing:.04em}
+  .btn.primary{color:var(--gold-2);box-shadow:inset 0 0 0 2px rgba(216,179,106,.30)}
+
+  /* 底部抽屜：移動 / 任命 / 情報 / 出征 */
+  .mask{position:absolute;inset:0;background:rgba(4,6,9,.62);display:none;z-index:5}
+  .mask.on{display:block}
+  .sheet{position:absolute;left:0;right:0;bottom:0;z-index:6;max-height:1010px;
+    display:none;flex-direction:column;border-top:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(22,27,34,.99),rgba(12,15,20,.99));
+    border-radius:18px 18px 0 0;box-shadow:0 -18px 44px rgba(0,0,0,.5)}
+  .sheet.on{display:flex}
+  .sheet header{background:none;border-bottom:1px solid var(--line-soft);padding:16px 22px 12px}
+  .sheet h3{font-size:26px;color:var(--gold-2);letter-spacing:.12em;font-weight:600}
+  .sheet .bd{flex:1;overflow:auto;padding:12px 20px;display:flex;flex-direction:column;gap:9px;min-height:0}
+  .sheet .ft{display:flex;gap:10px;padding:10px 20px calc(14px + env(safe-area-inset-bottom));border-top:1px solid var(--line-soft)}
+  .pick{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:12px;
+    border:1px solid var(--line-soft);background:rgba(20,25,32,.9);cursor:pointer;font-family:inherit;color:var(--ink);text-align:left}
+  .pick.on{border-color:rgba(216,179,106,.72);background:linear-gradient(165deg,#3B311C,#241E12)}
+  .pick img{width:52px;height:52px;border-radius:8px;object-fit:cover;background:#101418}
+  .pick .nm{font-size:20px;color:var(--gold-2);letter-spacing:.06em}
+  .pick .st{font-size:14px;color:var(--ink-3)}
+  .pick .rt{margin-left:auto;font-size:14px;color:var(--ink-2);text-align:right;line-height:1.35}
+  .pick[disabled]{opacity:.45;cursor:default}
+  .field{display:flex;align-items:center;gap:12px;font-size:18px;color:var(--ink-2)}
+  .field input[type=number]{width:150px;height:52px;border-radius:10px;border:1px solid var(--line);
+    background:#10151B;color:var(--gold-2);font-family:inherit;font-size:22px;text-align:center}
+  .field input[type=range]{flex:1;accent-color:#D8B36A}
+  table.info{width:100%;border-collapse:collapse;font-size:16px}
+  table.info th{color:var(--ink-3);font-weight:400;font-size:14px;text-align:right;padding:6px 4px;border-bottom:1px solid var(--line-soft)}
+  table.info th:first-child,table.info td:first-child{text-align:left}
+  table.info td{padding:7px 4px;border-bottom:1px dashed rgba(216,179,106,.10);color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
+  table.info td:first-child{color:var(--ink);font-size:18px}
+  table.info tr.mine td:first-child{color:var(--gold-2)}
+  .tag{display:inline-block;font-size:13px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--ink-3)}
+  #dump{position:absolute;left:0;top:0;z-index:99;display:none;white-space:pre-wrap;
+    max-width:750px;max-height:1334px;overflow:auto;font:12px/1.4 monospace;color:#9FB3C8;background:rgba(6,8,11,.96);padding:8px}
+
+  /* ==========================================================================
+     R64 · 內政頁美術：原作宮殿圖當主背景 ＋ SHAPE\MENU 圖元九宮格
+     —— 素材全部由 export\png\SHAPE\MENU 原樣拷貝到 assets/cityart/（0 像素改動，
+        尺寸/四邊 alpha 見 work\cityart\alpha_check.txt）
+        frame_panel.png  ← D3_2G 225×40  slice 12
+        plate_chip.png   ← D25   183×40  slice 8
+        rail_gold.png    ← WAR06 111×12  橫向拉伸 12px 高
+        orn_corner.png   ← WAR08 100×120 slice 12（鏤空角飾，蓋在木牌上當原作按鈕框）
+        bar_gauge.png    ← C4_A  121×9   原作量條，當小節標題下的刻度／拉桿軌道
+        gem_seal.png     ← D3_1D 22×22   金玉飾，當空結果浮水印／拉桿把手
+        sb_track/knob/up/down ← SB_V1 / SB_V4 / SB_V6 / SB_V7（SB_V2 實測不可用，見下）
+     原則：框一律畫在 position:absolute;inset:0;pointer-events:none 的偽元素上，
+        不給元素本體加真 border —— f-ui 踩過的坑：真 border 會把內容寬擠掉 12~24px。
+     ========================================================================== */
+
+  /* ---- 0. 原作畫層 ---------------------------------------------------------
+     b1 放棄 PALAIS 的理由是「640×480 鋪 750×1334 要放大 2.78×、裁掉 58% 寬」。
+     這裡改成：寬 750（1.17×，只放 17%）＋ 高 562 的上半屏「朝堂遠景」，
+     下緣用同一張圖**底邊那 24 列縱向拉伸**成柔焦地面（每列像素與上方連續，
+     所以 562 這條接縫沒有硬邊），再壓一道暖色漸層接回 hall_0N 的殿內底圖。 */
+  .art{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+  #stage > .art{position:absolute;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+  /* 朝堂遠景：750×562 ＝ 原圖 640×480 的 1.17×，零裁切（b1 的 2.78×／裁 58% 問題消失）。
+     上緣用遮罩壓暗，讓天花板/垂帳退成氛圍，不和匾額、城池資訊卡搶注意力。 */
+  .art-hall{position:absolute;left:0;top:0;right:0;height:562px;
+    background:var(--palais) center top / 100% 100% no-repeat;
+    filter:brightness(.84) saturate(.94) contrast(1.03);
+    -webkit-mask-image:linear-gradient(180deg,rgba(0,0,0,.50) 0,rgba(0,0,0,.74) 8%,
+      rgba(0,0,0,.94) 19%,#000 32%);
+    mask-image:linear-gradient(180deg,rgba(0,0,0,.50) 0,rgba(0,0,0,.74) 8%,
+      rgba(0,0,0,.94) 19%,#000 32%)}
+  /* 地面延伸：把原圖底邊 24 列縱向拉成 318px 的柔焦地面（左中右逐列對齊，
+     所以 562 這條接縫沒有硬邊），下半再讓 hall_0N 慢慢透回來。 */
+  .art-floor{position:absolute;left:0;top:562px;right:0;height:318px;
+    background:var(--palais) center bottom / 100% 2000% no-repeat;
+    filter:blur(9px) brightness(.56) saturate(.92);
+    -webkit-mask-image:linear-gradient(180deg,#000 0,rgba(0,0,0,.88) 34%,
+      rgba(0,0,0,.50) 64%,rgba(0,0,0,0) 100%);
+    mask-image:linear-gradient(180deg,#000 0,rgba(0,0,0,.88) 34%,
+      rgba(0,0,0,.50) 64%,rgba(0,0,0,0) 100%)}
+  .art-seam{position:absolute;left:0;top:470px;right:0;height:300px;
+    background:linear-gradient(180deg,rgba(9,8,7,0) 0,rgba(10,9,7,.20) 30%,
+      rgba(8,8,7,.50) 54%,rgba(8,8,7,.22) 76%,rgba(8,8,7,0) 100%)}
+  .art-warm{position:absolute;left:0;top:600px;right:0;bottom:0;
+    background:linear-gradient(180deg,rgba(132,78,34,.30) 0,rgba(92,54,26,.17) 32%,
+      rgba(58,34,18,.07) 62%,rgba(0,0,0,0) 100%)}
+
+  /* ---- 1. 標題：城名當「匾額」＋匾下金線 -------------------------------- */
+  header{position:relative;border-bottom-color:transparent;
+    background:linear-gradient(180deg,rgba(8,11,15,.14),rgba(8,11,15,.46) 58%,rgba(10,13,17,.80))}
+  header::after{content:"";position:absolute;left:0;right:0;bottom:-6px;height:12px;pointer-events:none;
+    background:url("assets/cityart/rail_gold.png") center / 100% 12px no-repeat;opacity:.55}
+  .htop{position:relative;align-items:flex-end}
+  h1{position:relative;padding:2px 14px 3px;
+    background:linear-gradient(178deg,#FFF7E0 0%,#F4E1B2 38%,#D8B36A 66%,#A87C36 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    -webkit-text-stroke:1px rgba(30,18,6,.55);
+    filter:drop-shadow(0 1px 0 rgba(24,14,4,.92)) drop-shadow(0 3px 4px rgba(0,0,0,.55))
+           drop-shadow(0 0 14px rgba(216,179,106,.30))}
+  /* 匾額：plate_chip 九宮格（D25 183×40 slice 8），膠片壓在字後 */
+  h1::before{content:"";position:absolute;left:0;top:-4px;right:-2px;bottom:-3px;z-index:-1;
+    border:8px solid transparent;border-image:url("assets/cityart/plate_chip.png") 8 / 8px / 0 stretch;
+    background:rgba(7,10,14,.52);border-radius:4px;pointer-events:none;
+    image-rendering:pixelated}
+  .sub{text-shadow:0 1px 0 rgba(0,0,0,.85),0 0 10px rgba(0,0,0,.55)}
+
+  /* ---- 2. 城池資訊卡：整塊木牌（plate_chip 九宮格），12 格用 1px 金格線 ----- */
+  .hud{position:relative;gap:1px;background:rgba(216,179,106,.22);border-radius:4px}
+  .hud::before{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;border-radius:4px;
+    border:8px solid transparent;border-image:url("assets/cityart/plate_chip.png") 8 / 8px / 0 stretch;
+    image-rendering:pixelated}
+  .chip{background:linear-gradient(180deg,rgba(15,19,26,.90),rgba(8,11,16,.92));
+    border-color:transparent;border-radius:0}
+  .chip .k{text-shadow:0 1px 1px rgba(0,0,0,.9)}
+  .chip .v{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+    text-shadow:0 1px 0 rgba(0,0,0,.92),0 2px 3px rgba(0,0,0,.5)}
+  .chip .v.gold{color:#F8E8C0;
+    text-shadow:0 1px 0 #2A1B08,0 2px 4px rgba(0,0,0,.55),0 0 12px rgba(216,179,106,.26)}
+  .chip .v.hot{color:#F0A05C;text-shadow:0 1px 0 #2A1508,0 0 12px rgba(226,145,78,.30)}
+  .chip .v.cold{color:#F07A66;text-shadow:0 1px 0 #2A0E08,0 0 12px rgba(226,91,74,.30)}
+
+  /* ---- 3. 面板：frame_panel 九宮格（D3_2G 225×40 slice 12），板身改成半透玻璃 ---- */
+  .sec{--frame:url("assets/cityart/frame_panel.png");
+    background:linear-gradient(180deg,rgba(18,15,12,.72),rgba(10,9,8,.86))}
+  .sec::before{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;border-radius:4px;
+    border:12px solid transparent;border-image:var(--frame) 12 / 12px / 0 stretch;
+    image-rendering:pixelated}
+  /* 小節標題：原作量條（C4_A 121×9）當刻度下線 */
+  .sec h2{position:relative}
+  .sec h2::before{content:"";position:absolute;left:0;bottom:-5px;width:72px;height:3px;pointer-events:none;
+    background:url("assets/cityart/bar_gauge.png") center / 100% 3px no-repeat;opacity:.55}
+  .sec h2{text-shadow:0 1px 0 rgba(0,0,0,.9),0 0 10px rgba(216,179,106,.16)}
+
+  /* ---- 4. 命令木牌：原作細金雙線（D3_2G slice 12）壓在木框上 reinforce 金邊 ------- */
+  .cmd{position:relative}
+  .cmd::before{content:"";position:absolute;inset:-13px;z-index:2;pointer-events:none;
+    border:13px solid transparent;border-radius:14px;
+    border-image:url("assets/cityart/frame_panel.png") 12 / 13px / 0 stretch;
+    opacity:.40;image-rendering:pixelated}
+  .cmd b{text-shadow:0 2px 0 rgba(0,0,0,.72),0 0 14px rgba(0,0,0,.55),0 1px 0 rgba(255,240,210,.18)}
+  .cmd small{text-shadow:0 1px 0 rgba(0,0,0,.8)}
+  .cmd .note{text-shadow:0 1px 0 rgba(0,0,0,.8),0 0 10px rgba(226,145,78,.22)}
+
+  /* ---- 5. 結果面板：原作畫淡入改成「玻璃窗」，下半透出殿內地面 ---- */
+  .logsec::before{content:none}
+  .logsec{background:linear-gradient(180deg,rgba(12,16,22,.84) 0,rgba(9,12,17,.80) 34%,rgba(8,11,15,.30) 78%,rgba(8,11,15,.10) 100%)}
+  .log{background:linear-gradient(180deg,rgba(7,10,14,.52) 0,rgba(7,10,14,.22) 46%,rgba(7,10,14,0) 100%)}
+  /* 空結果的留白：原作玉飾（D3_1D）壓成 9% 浮水印，撐住 42% 的空白區 */
+  .log{position:relative}
+  .log::after{content:"";position:absolute;left:50%;top:46%;width:112px;height:112px;
+    margin:-56px 0 0 -56px;pointer-events:none;z-index:-1;
+    background:url("assets/cityart/gem_seal.png") center / contain no-repeat;
+    opacity:.07;filter:drop-shadow(0 0 14px rgba(216,179,106,.45))}
+  .row,.empty{text-shadow:0 1px 0 rgba(0,0,0,.85)}
+  .row .t,.row .c{font-variant-numeric:tabular-nums}
+  .row .c{text-shadow:0 1px 0 rgba(0,0,0,.85),0 0 10px rgba(216,179,106,.20)}
+
+  /* ---- 6. 底部木牌 ---- */
+  footer{position:relative;border-top-color:transparent;
+    background:linear-gradient(180deg,rgba(10,13,17,.72),rgba(8,10,14,.95))}
+  footer::before{content:"";position:absolute;left:0;right:0;top:-6px;height:12px;pointer-events:none;
+    background:url("assets/cityart/rail_gold.png") center / 100% 12px no-repeat;opacity:.45}
+  .btn{position:relative}
+  .btn::before{content:"";position:absolute;inset:-13px;z-index:2;pointer-events:none;
+    border:13px solid transparent;border-radius:14px;
+    border-image:url("assets/cityart/frame_panel.png") 12 / 13px / 0 stretch;
+    opacity:.36;image-rendering:pixelated}
+  .btn{text-shadow:0 2px 0 rgba(0,0,0,.7),0 0 12px rgba(0,0,0,.5)}
+  .btn small{text-shadow:0 1px 0 rgba(0,0,0,.8)}
+
+  /* ---- 7. 抽屜：外框 ＋ 原作滾動條（SB_V*）-------------------------------- */
+  /* 註：`#stage>*{position:relative;z-index:1}` 的 id 特異性壓過 .sheet/.mask 的
+     position:absolute，抽屜其實一直是「在流內」的 —— 一打開就把 .body 擠成 0 高。
+     這裡用同特異性的選擇器補回來，抽屜才真的浮在頁面上。 */
+  #stage > .mask{position:absolute;inset:0;z-index:5}
+  #stage > .sheet{position:absolute;left:0;right:0;bottom:0;z-index:6}
+  .sheet{--frame:url("assets/cityart/frame_panel.png")}
+  .sheet::before{content:"";position:absolute;inset:0;z-index:2;pointer-events:none;
+    border:14px solid transparent;border-image:var(--frame) 12 / 14px / 0 stretch;
+    border-radius:18px 18px 0 0;image-rendering:pixelated}
+  .sheet header{background:linear-gradient(180deg,rgba(216,179,106,.10),rgba(0,0,0,0))}
+  .sheet h3{text-shadow:0 1px 0 rgba(0,0,0,.9),0 2px 5px rgba(0,0,0,.6)}
+  .sheet .bd{scrollbar-gutter:stable}
+  .sheet .bd::-webkit-scrollbar{width:19px}
+  .sheet .bd::-webkit-scrollbar-track{background:url("assets/cityart/sb_track.png") center / 11px 100% no-repeat}
+  .sheet .bd::-webkit-scrollbar-button:vertical:start:decrement{display:block;height:25px;
+    background:url("assets/cityart/sb_up.png") center / 19px 25px no-repeat}
+  .sheet .bd::-webkit-scrollbar-button:vertical:end:increment{display:block;height:25px;
+    background:url("assets/cityart/sb_down.png") center / 19px 25px no-repeat}
+  /* thumb 用 SB_V4（18×14 實心金塊）縱向拉伸 —— 用 SB_V2 的 border-image 只會畫出上下面
+     兩片紅邊（左右 slice 為 0，中段沒有東西可填），實測不可用。 */
+  .sheet .bd::-webkit-scrollbar-thumb{min-height:44px;
+    background:url("assets/cityart/sb_knob.png") center / 100% 100% no-repeat;
+    border-radius:2px}
+  .pick{position:relative;border-color:rgba(216,179,106,.22)}
+  .pick.on{border-color:rgba(216,179,106,.70)}
+  .pick.on::after{content:"";position:absolute;inset:-2px;pointer-events:none;
+    border:12px solid transparent;border-image:url("assets/cityart/orn_corner.png") 12 / 12px / 0 stretch;
+    opacity:.85;image-rendering:pixelated}
+  .pick .nm{text-shadow:0 1px 0 rgba(0,0,0,.85)}
+  table.info th{letter-spacing:.02em}
+  /* 抽屜裡的數量拉桿：換成原作的量條（C4_A）＋金玉把手（D3_1D），
+     只畫 track/thumb，不動 input 本身的 52px 高度（不會擠動版式）。 */
+  .field input[type=range]{-webkit-appearance:none;appearance:none;background:none;padding:0 11px}
+  .field input[type=range]::-webkit-slider-runnable-track{height:9px;border-radius:0;
+    background:url("assets/cityart/bar_gauge.png") center / 100% 9px no-repeat;
+    image-rendering:pixelated;box-shadow:0 1px 0 rgba(0,0,0,.7)}
+  .field input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:22px;height:22px;margin-top:-7px;border:0;border-radius:0;
+    background:url("assets/cityart/gem_seal.png") center / 22px 22px no-repeat;
+    image-rendering:pixelated;filter:drop-shadow(0 1px 2px rgba(0,0,0,.8))}
+
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- [R64 美術] 原作畫層：PALAIS 上半屏「朝堂遠景」＋鏡像地面接縫（純裝飾，不進 JS 語義） -->
+  <div class="art" aria-hidden="true">
+    <div class="art-hall"></div>
+    <div class="art-floor"></div>
+    <div class="art-seam"></div>
+    <div class="art-warm"></div>
+  </div>
+  <header>
+    <div class="htop">
+      <h1 id="cityName">—</h1>
+      <div class="sub" id="headSub">城池內政</div>
+    </div>
+    <div class="hud">
+      <div class="chip"><span class="k">人口</span><span class="v" id="vPop">—</span></div>
+      <div class="chip"><span class="k">金</span><span class="v gold" id="vGold">—</span></div>
+      <div class="chip"><span class="k">兵</span><span class="v" id="vTroops">—</span></div>
+      <div class="chip"><span class="k">預備兵</span><span class="v" id="vPrep">—</span></div>
+      <div class="chip"><span class="k">防禦</span><span class="v" id="vDef">—</span></div>
+      <div class="chip"><span class="k">太守</span><span class="v" id="vMajor" style="font-size:19px">—</span></div>
+      <div class="chip"><span class="k">軍師</span><span class="v" id="vWise" style="font-size:19px">—</span></div>
+      <div class="chip"><span class="k">內政效率</span><span class="v" id="vEff">—</span></div>
+      <div class="chip"><span class="k">武將</span><span class="v" id="vGens">—</span></div>
+      <div class="chip"><span class="k">疲勞</span><span class="v" id="vTire">—</span></div>
+      <div class="chip"><span class="k">士氣</span><span class="v" id="vMorale">—</span></div>
+      <div class="chip"><span class="k">月令</span><span class="v" id="vLock">—</span></div>
+    </div>
+  </header>
+
+  <div class="body">
+    <!-- 原作「內政」頁右側的數值面板（work/video_ui/A_city_t0030.png）：
+         時間／君主／城數／關數／武將數／總兵數／金錢／人口 —— 8 欄一字不差地補齊。
+         原作是一小塊 8 行縱列、貼在「內政指令」清單右邊；本頁沿用既有的 .hud/.chip 木牌樣式
+         排成 4×2（不改 .body 的骨架：命令宮格與結果兩段仍在下面），數字一律不帶千分位，
+         「人」只加在武將數／總兵數／人口三欄（原作實拍如此）。 -->
+    <section class="sec">
+      <h2>內政 <span class="hint" id="civicHint">時間·君主·城關·兵民金</span></h2>
+      <div class="hud civic" id="civicHud" style="grid-template-columns:repeat(4,1fr)">
+        <div class="chip"><span class="k">時間</span><span class="v" id="fvTime">—</span></div>
+        <div class="chip"><span class="k">君主</span><span class="v" id="fvKing" style="font-size:19px">—</span></div>
+        <div class="chip"><span class="k">城數</span><span class="v" id="fvCity">—</span></div>
+        <div class="chip"><span class="k">關數</span><span class="v" id="fvGate">—</span></div>
+        <div class="chip"><span class="k">武將數</span><span class="v" id="fvGens">—</span></div>
+        <div class="chip"><span class="k">總兵數</span><span class="v" id="fvTroops">—</span></div>
+        <div class="chip"><span class="k">金錢</span><span class="v gold" id="fvGold">—</span></div>
+        <div class="chip"><span class="k">人口</span><span class="v" id="fvPop">—</span></div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <h2>內政命令 <span class="hint" id="cmdHint">九條</span></h2>
+      <div class="grid" id="grid"></div>
+    </section>
+
+    <section class="sec logsec" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <h2>結果 <span class="hint" id="logHint">最近 6 條</span></h2>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <footer>
+    <button class="btn" id="btnBack" title="回大地圖（campaign.html）">返回大地圖</button>
+    <button class="btn primary" id="btnRefresh" title="重讀存檔">重整</button>
+  </footer>
+
+  <div class="mask" id="mask"></div>
+  <div class="sheet" id="sheet">
+    <header><h3 id="sheetTitle">—</h3></header>
+    <div class="bd" id="sheetBody"></div>
+    <div class="ft">
+      <button class="btn" id="sheetCancel"><span>取消</span></button>
+      <button class="btn primary" id="sheetOk"><span>確定</span></button>
+    </div>
+  </div>
+  <pre id="dump"></pre>
+</div>
+
+<!-- [audio] 音效总线（window.SG.audio）：本页原来完全静音 -->
+<script src="./release.js"></script>
+<script src="./audio.js"></script>
+<script type="module">
+import * as Saves from './saves.js';
+import * as M from './city_model.js';
+// 紀元顯示（純函式）：原作是「西元 209年 3月」/「209年」，不是「第N年M月」。
+// 內部存檔欄位一個都沒動（save.month 仍是絕對月序），這一層只管換算與文案。
+import * as era from './era.js';
+
+// [audio] 统一入口：audio.js 没加载/被拦也不影响内政流程
+const audio = () => window.SG?.audio;
+const sfx = (name, opts) => audio()?.sfx(name, opts);
+
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+// 调试口收敛（`project/115_发布卫生.md` §6）：`?city=` 是页面间真协议，保留；
+// 其余参数（unlimited/fresh/lv/force/hall/gold/do/dump/sheet）只在 `?dev=1` 时生效，
+// 避免发布版被人加个参数就改出非原作行为。
+const DEV = !window.__RELEASE__ && /[?&]dev=1(?:&|$)/.test(location.search);
+const dbg = (key) => (DEV ? qs.get(key) : null);
+// R8 调试开关：?unlimited=1 关掉「一月一令」，只给截图/自测/批量数据用，默认关闭。
+const UNLIMITED = dbg('unlimited') === '1';
+const storage = window.localStorage;
+
+/* ---------------- 佈局：750×1334 等比縮放（與 deploy.html 同款） ---------------- */
+function fit() {
+  const stage = $('stage');
+  const s = Math.min(window.innerWidth / 750, window.innerHeight / 1334);
+  const w = Math.round(750 * s);
+  const h = Math.round(1334 * s);
+  stage.style.transformOrigin = 'top left';
+  stage.style.transform = `scale(${s})`;
+  stage.style.left = `${Math.max(0, Math.round((window.innerWidth - w) / 2))}px`;
+  stage.style.top = `${Math.max(0, Math.round((window.innerHeight - h) / 2))}px`;
+  document.body.style.width = `${w}px`;
+  document.body.style.height = `${h}px`;
+}
+window.addEventListener('resize', fit);
+
+/* ---------------- 資料 ---------------- */
+const [scenRaw, genRaw, itemRaw, sysRaw, wisesRaw] = await Promise.all([
+  fetch('../data/scenarios.json').then((r) => r.json()).catch(() => []),
+  fetch('../data/generals.json').then((r) => r.json()).catch(() => []),
+  fetch('../data/items.json').then((r) => r.json()).catch(() => []),
+  fetch('../data/sango_system.json').then((r) => r.json()).catch(() => ({})),
+  fetch('../data/wises.json').then((r) => r.json()).catch(() => []),
+]);
+const SCEN = Array.isArray(scenRaw) ? scenRaw : [];
+const GENS = Array.isArray(genRaw) ? genRaw : [];
+const ITEMS = Array.isArray(itemRaw) ? itemRaw : [];
+const WISES = Array.isArray(wisesRaw) ? wisesRaw : [];
+function systemName(sys, i) {
+  const row = sys && sys['Times0' + (i + 1)];
+  const s = typeof row === 'string' ? row : '';
+  const cut = s.indexOf(',');
+  return (cut >= 0 ? s.slice(cut + 1) : s).trim();
+}
+
+/* ---------------- 存檔：照 campaign.html 的啟動協議（只調 saves.js，不改它） ---------------- */
+const store = Saves.loadStore(storage);
+const legacy = Saves.readLegacy(storage);
+const legacyOk = !!(legacy && (Array.isArray(legacy.owned) || legacy.seeded === true));
+
+let save = null;
+let activeSlot = 1;
+let scenario = SCEN[0] || null;
+let scenIdx = 0;
+
+function snapOf(i) {
+  const s = Saves.getSnapshot(store, i);
+  return s && typeof s === 'object' && !Array.isArray(s) ? s : null;
+}
+let bootSlot = Saves.lastUsed(store) + 1;
+if (!snapOf(bootSlot - 1) && Saves.hasAny(store)) bootSlot = Saves.newestSlot(store) + 1;
+const bootSnap = snapOf(bootSlot - 1);
+if (bootSnap) {
+  const legacyNewer = legacyOk && Saves.num(legacy.scenario) === Saves.num(bootSnap.scenario)
+    && Saves.num(legacy.ts) > Saves.num(bootSnap.ts);
+  save = Saves.deepClone(legacyNewer ? legacy : bootSnap);
+  activeSlot = bootSlot;
+} else if (legacyOk) {
+  const slot = bootSlot;
+  save = Saves.migrateLegacy({ storage, now: Date.now(), scenarioNameOf: (id) => systemName(sysRaw, Saves.num(id) - 1) });
+  activeSlot = slot;
+} else {
+  save = Saves.newCampaign(SCEN[0] || {});
+  activeSlot = Math.min(Saves.SLOT_COUNT, Math.max(1, Saves.lastUsed(store) + 1));
+}
+
+function scenarioIndexOf(id) {
+  const n = Saves.num(id);
+  for (let i = 0; i < SCEN.length; i += 1) if (Saves.num(SCEN[i]?.id) === n) return i;
+  return Math.max(0, Math.min(SCEN.length - 1, n - 1));
+}
+scenIdx = scenarioIndexOf(save?.scenario);
+scenario = SCEN[scenIdx] || null;
+
+/* 截圖/驗收用：?fresh=1 不讀存檔、直接開新局（除錯口子；只有下命令才會寫回槽位） */
+const FRESH = dbg('fresh') === '1';
+if (FRESH) save = Saves.newCampaign(scenario || {});
+save = Saves.deepClone(save || Saves.newCampaign(scenario || {}));
+M.ensureExtras(save);
+if (scenario) for (const c of scenario.cities || []) M.ensureCityState(save, c);
+if (!Array.isArray(save.owned) || !save.owned.length) {
+  save.owned = (scenario?.cities || []).slice(0, 3).map((c) => c.NAME);
+}
+const ctx = { generals: GENS, scenario, scenIdx, items: ITEMS, wises: WISES };
+// R18：掉落池要看「已擁有」清單，而背包在 items.html 自己的鍵（sanguo_items_v1）。
+// 每次搜索後都要重讀，否則同一件唯一物品會被搜出第二次。
+ctx.bag = readBagSeqs();
+// 除錯：?lv=30 給「等級不明」的武將一個等級（generals.json 沒有等級欄位，見 city_model.levelOf）
+{
+  const lv = Number(dbg('lv'));
+  if (Number.isFinite(lv) && lv > 0) ctx.level = Math.max(1, Math.min(99, Math.trunc(lv)));
+}
+const myCities = () => (scenario?.cities || []).filter((c) => save.owned.includes(c.NAME));
+
+/* 進來的城：?city= 指定，但只認我方城；?force=1 讓截圖/驗收能看非我方城（除錯口子，不改所有權） */
+let cityDef = null;
+const FORCE_CITY = dbg('force') === '1';
+function pickCity(name) {
+  if (FORCE_CITY && name) {
+    const hit = (scenario?.cities || []).find((c) => c.NAME === name);
+    if (hit) return hit;
+  }
+  const list = myCities();
+  return list.find((c) => c.NAME === name) || list[0] || null;
+}
+cityDef = pickCity(qs.get('city'));
+
+/* ---------------- 殿內背景（hall_0N）＋ 原作宮殿圖（palais_0N） ---------------- */
+/* 挑選規則在 city_model.hallIndexOf()（RATE 1..5，人口≥300000 升到 6），這樣才測得到；
+ * 這裡只把它翻成 CSS 變數。除錯口子 ?hall=1..6 直接指定（截圖對比用）。 */
+const HALL_DEBUG = Number(dbg('hall'));
+function applyHall() {
+  if (!cityDef) return;
+  const n = Number.isFinite(HALL_DEBUG) && HALL_DEBUG >= 1 && HALL_DEBUG <= 6
+    ? Math.trunc(HALL_DEBUG) : M.hallIndexOf(cityDef);
+  const palais = Math.max(1, Math.min(5, n === 6 ? 1 : n));
+  const stage = $('stage');
+  stage.style.setProperty('--hall', `url("assets/bg/env/hall_0${n}.jpg")`);
+  stage.style.setProperty('--palais', `url("assets/bg/policy/palais_0${palais}.png")`);
+  stage.dataset.hall = String(n);
+  stage.dataset.hallSrc = M.hallIndexOf(cityDef) === n ? 'city' : 'debug';
+}
+applyHall();
+
+/* ---------------- R10 自治 + R12 預備兵：每月 lazy tick ---------------- */
+/* 這兩件事原作都掛在「換月」上，但換月跑在 campaign.html（不歸本頁改）。
+ * 這裡在進頁時補結算一次：只補到當前月、不會漏月也不會重複跑（save.autoMonth 記帳）。 */
+const autoTick = M.autonomyTick(save, scenario?.cities || [], ctx);
+if (autoTick.refilled.length || autoTick.auto) persist();
+
+/* 除錯口子：?gold=3000 直接改金（只為驗收/自測，UI 上沒有這個入口） */
+if (qs.has('gold')) {
+  const g = Number(dbg('gold'));
+  if (Number.isFinite(g) && g >= 0) save.gold = Math.trunc(g);
+}
+
+/* ---------------- 持久化 ---------------- */
+function persist() {
+  save.ts = Date.now();
+  const name = systemName(sysRaw, scenIdx) || scenario?.system?.TIME || `劇本${scenIdx + 1}`;
+  try {
+    Saves.writeSlot(store, activeSlot - 1, save, { scenarioName: name, ts: save.ts });
+    Saves.saveStore(store, storage);
+    Saves.writeLegacy(save, storage);
+  } catch (err) {
+    console.warn('存檔失敗', err);
+  }
+}
+
+/* ---------------- 物品背包（items.html 自己的鍵） ---------------- */
+/** 背包序號（R18：唯一物品已擁有 ⇒ 不再進掉落池）。讀不到就回空，交給 M.parseItemsSave 的預設處理。 */
+function readBagSeqs() {
+  try {
+    const raw = storage.getItem(M.BAG_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const bag = M.parseItemsSave(parsed)?.bag;
+    return Array.isArray(bag) ? bag.map((n) => Math.trunc(Number(n))).filter((n) => n > 0) : [];
+  } catch (err) {
+    console.warn('背包讀取失敗', err);
+    return [];
+  }
+}
+function bagAdd(seq) {
+  try {
+    const raw = storage.getItem(M.BAG_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    storage.setItem(M.BAG_KEY, JSON.stringify(M.withBagItem(parsed, seq)));
+    return true;
+  } catch (err) {
+    console.warn('背包寫入失敗', err);
+    return false;
+  }
+}
+
+/* ---------------- 頂部 HUD ---------------- */
+// 數字格式：原作**沒有千分位**（`A_city_t0030.png` 的「金錢 3198」「人口 126500人」都是裸數字），
+// 所以直接轉成整數字串。以前是 `Saves.num(n).toLocaleString('en-US')`，會顯示成 126,500 —— 與原作差一層。
+const fmt = (n) => String(Math.trunc(Saves.num(n)));
+// 疲勞容錯：老檔沒有 save.tire、或值是字串/越界，都按 0..100 整數讀；只影響顯示。
+function tireOfName(name) {
+  const raw = save && save.tire && typeof save.tire === 'object' ? save.tire[name] : 0;
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, Math.trunc(v))) : 0;
+}
+// 士氣容錯（原作 general+0x38，武將級）：沒存過按缺省 60 讀；只影響顯示。
+function moraleOfName(name) {
+  const raw = save && save.morale && typeof save.morale === 'object' ? save.morale[name] : 60;
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, Math.trunc(v))) : 60;
+}
+function renderHud() {
+  const st = cityDef ? M.ensureCityState(save, cityDef) : null;
+  $('cityName').textContent = cityDef ? cityDef.NAME : '（無城）';
+  $('headSub').textContent = `${systemName(sysRaw, scenIdx) || scenario?.system?.TIME || '劇本'} · ${era.eraTextOfMonth(save.month)}`;
+  $('vPop').textContent = st ? fmt(st.pop) : '—';
+  $('vGold').textContent = fmt(save.gold);
+  $('vTroops').textContent = st ? `${fmt(st.troops)}/${fmt(M.RECRUIT.CAP)}` : '—';
+  $('vTroops').title = st ? `步兵 ${fmt(st.inf)} · 騎兵 ${fmt(st.cav)}` : '';
+  // R12 預備兵池：原作面板 0x48B2B8「預備兵 %d/%d」（+0x86 現有 / +0x82 上限）
+  if (st) {
+    const cap = M.prepCapOf(st.pop);
+    $('vPrep').textContent = `${fmt(st.prep)}/${fmt(cap)}`;
+    $('vPrep').classList.toggle('hot', st.prep >= cap && cap > 0);
+  } else {
+    $('vPrep').textContent = '—';
+  }
+  $('vDef').textContent = st ? fmt(st.def) : '—';
+  $('vMajor').textContent = cityDef ? (M.majorOf(save, cityDef) || '—') : '—';
+  $('vWise').textContent = cityDef ? (M.wiseOf(save, cityDef) || '—') : '—';
+  $('vEff').textContent = cityDef ? `×${M.efficiencyOf(save, cityDef, ctx).toFixed(2)}` : '—';
+  $('vGens').textContent = cityDef ? String(M.rosterOf(save, cityDef.NAME, ctx).length) : '—';
+  // 主將疲勞（原作 general+0x3A）：只在這一頁顯示一次；≥60 轉橙，和 monthly 的士氣懲罰同門檻。
+  const major = cityDef ? M.majorOf(save, cityDef) : '';
+  const majorTire = major ? tireOfName(major) : null;
+  $('vTire').textContent = majorTire === null ? '—' : `${majorTire}/100`;
+  $('vTire').classList.toggle('hot', majorTire !== null && majorTire >= 60);
+  // 主將士氣（原作 general+0x38，武將級）：<30 標紅（低迷），與 deploy.html 同一口徑。
+  const majorMorale = major ? moraleOfName(major) : null;
+  $('vMorale').textContent = majorMorale === null ? '—' : `${majorMorale}/100`;
+  $('vMorale').classList.toggle('cold', majorMorale !== null && majorMorale < 30);
+  // R8 月令：本月下过令就显示"已用"（推进一月才复位）
+  const locked = M.monthLocked(save, UNLIMITED);
+  $('vLock').textContent = UNLIMITED ? '不限' : (locked ? '已用' : '可下');
+  $('vLock').classList.toggle('hot', !UNLIMITED && locked);
+  $('cmdHint').textContent = UNLIMITED
+    ? M.UNLIMITED_HINT
+    : (locked ? `${M.LOCK_HINT} · 回大地圖推進一月` : '每月一條 · 推進一月再下達');
+  renderCivic();
+}
+
+/* ---------------- 原作內政 8 欄 ----------------
+ * `A_city_t0030.png` 右側那塊面板：時間 / 君主 / 城數 / 關數 / 武將數 / 總兵數 / 金錢 / 人口。
+ * 口徑全部在 `M.civicFields()` 裡（唯讀、不建城態）；這裡只負責貼字：
+ *   ・時間只到年（`209年`），不帶「西元」、不帶月；
+ *   ・數字不帶千分位；
+ *   ・「人」只加在武將數 / 總兵數 / 人口（原作實拍：城數 1、關數 0、金錢 3198 都不帶）。
+ */
+function renderCivic() {
+  const cv = M.civicFields(save, scenario?.cities || [], ctx);
+  $('fvTime').textContent = cv.timeText;
+  $('fvKing').textContent = cv.monarch || '—';
+  $('fvCity').textContent = String(cv.cityCount);
+  $('fvGate').textContent = String(cv.gateCount);
+  $('fvGens').textContent = `${cv.generalCount}人`;
+  $('fvTroops').textContent = `${cv.troopCount}人`;
+  $('fvGold').textContent = String(cv.gold);
+  $('fvPop').textContent = `${cv.pop}人`;
+  return cv;
+}
+
+/* ---------------- 8 條命令宮格（＋R10 自治 = 9 鍵） ---------------- */
+const CMD_SUB = {
+  開發: (st) => `不耗金 · 民防共增`,
+  徵兵: (st) => `預備 ${st ? st.prep : '—'} · 步／騎`,
+  搜索: (st) => `金 ${M.SEARCH.COST} · 人才/寶物`,
+  移動: () => '調將 · 調兵',
+  任命: () => '太守 · 軍師',
+  物品: () => '裝備 · 背包',
+  情報: () => '本城 · 鄰城',
+  出征: () => '打相鄰敵城',
+  自治: () => {
+    const n = M.autoCities(save).length;
+    return n ? `已設 ${n} 城 · 施行` : '設定代行開發';
+  },
+};
+function renderGrid() {
+  const grid = $('grid');
+  // R8 一月一令：本月已下过令 → 九条全置灰（原作 0x4A64BC，推进一月才复位）
+  const locked = M.monthLocked(save, UNLIMITED);
+  const st = cityDef ? M.cityStateOf(save, cityDef.NAME) : null;
+  grid.innerHTML = '';
+  for (const cmd of [...M.CMD_ORDER, ...(M.CMD_EXTRA || [])]) {
+    const b = document.createElement('button');
+    b.className = 'cmd' + (cmd === '開發' || cmd === '徵兵' ? ' hot' : '');
+    b.dataset.cmd = cmd;
+    b.disabled = locked;
+    const cost = M.CMD_META?.[cmd]?.cost;
+    b.innerHTML = `<b>${cmd}</b><small>${CMD_SUB[cmd]?.(st) || ''}</small>`
+      + (locked ? `<span class="note">${M.LOCK_HINT}</span>` : '');
+    void cost;
+    grid.appendChild(b);
+  }
+}
+
+/* ---------------- 結果日誌（最近 6 條） ---------------- */
+function renderLog() {
+  const box = $('log');
+  const rows = M.recentLog(save, 6);
+  if (!rows.length) {
+    box.innerHTML = '<div class="empty">尚無紀錄。點上面任一命令。</div>';
+    return;
+  }
+  box.innerHTML = rows.map((e) => {
+    const k = e.kind && e.kind !== 'info' ? `k-${e.kind}` : '';
+    // 日期欄一律走紀元：`logAdd()` 寫入時把 `t` 記成「第1年1月」的老格式，
+    // 那是內部口徑；畫面上要和上面年月匾一致，所以只認 `m`（絕對月序）現算。
+    const when = Number.isFinite(Number(e.m)) ? era.eraTextOfMonth(e.m) : (e.t || '');
+    return `<div class="row ${k}"><span class="t">${when}</span>`
+      + `<span class="c">${e.cmd || ''}</span><span class="x">${escapeHtml(e.text)}</span></div>`;
+  }).join('');
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function say(cmd, kind, text) {
+  M.logAdd(save, { city: cityDef?.NAME || '', cmd, kind, text, m: save.month });
+}
+
+/* ---------------- 八條命令的執行 ---------------- */
+/**
+ * 每条命令收尾。acted=false 用在"没真的执行成功"的分支上（例如没有相邻城可调兵）：
+ * 失败不该吃掉这个月。成功一条即置「本月已行動」，八条按钮随即置灰。
+ */
+function afterCommand(acted = true) {
+  if (acted) M.markMonthActed(save, UNLIMITED);
+  persist();
+  renderHud();
+  renderGrid();
+  renderLog();
+}
+
+function doDevelop() {
+  const r = M.develop(save, cityDef, ctx);
+  if (!r.ok) {
+    // R9：原作 0x427A84 起有「關城前置」（0x405499 判 FLAGS==2 的 12 座关城），
+    // 关城不能開發，要给专门的文案，不能笼统说「人口飽和」。
+    const why = r.reason === 'gate' ? '關城不能開發（原作 0x405499）。'
+      : r.reason === 'gold' ? `金不足（需 ${r.cost}）。` : '人口飽和、防禦力最高了。';
+    say('開發', 'warn', why);
+  } else {
+    say('開發', 'info', `人口增加 ${r.pop} 人，防禦力增加 ${r.def}。（${r.cost > 0 ? `金 -${r.cost}` : '不耗金'}）`);
+  }
+  afterCommand(r.ok);
+}
+
+/* 部隊徵兵（R12）：原作面板四行「步兵數 %d/%d」「騎兵數 %d/%d」「預備兵 %d」「總兵數 %d」
+ * （04c §2.3，位址 0x489138..0x489170）。消耗的是**預備兵**，不花金。
+ * 上限：步／騎各自固定（armCaps），兩欄相加 = 部隊兵硬上限 600；騎兵上限來自武將等級。 */
+function doRecruit() {
+  const st = M.ensureCityState(save, cityDef);
+  const caps = M.armCaps(save, cityDef, ctx);
+  const maxOf = (arm) => {
+    const room = Math.max(0, (arm === 'cav' ? caps.cav : caps.inf) - (arm === 'cav' ? st.cav : st.inf));
+    return Math.max(0, Math.min(room, caps.total - st.troops, st.prep));
+  };
+  let inf = 0;
+  let cav = 0;
+  openSheet('部隊徵兵 · 預備兵 → 步／騎', (body) => {
+    body.innerHTML = `
+      <table class="info">
+        <tbody>
+          <tr><td>步兵數</td><td><b id="rcInf">${fmt(st.inf)}</b> / ${fmt(caps.inf)}</td></tr>
+          <tr><td>騎兵數</td><td><b id="rcCav">${fmt(st.cav)}</b> / ${fmt(caps.cav)}</td></tr>
+          <tr><td>預備兵</td><td><b id="rcPrep">${fmt(st.prep)}</b></td></tr>
+          <tr><td>總兵數</td><td><b id="rcTroops">${fmt(st.troops)}</b> / ${fmt(caps.total)}</td></tr>
+        </tbody>
+      </table>
+      <div class="field"><span style="width:64px">步兵＋</span>
+        <input type="range" id="rcInfR" min="0" max="${maxOf('inf')}" value="0">
+        <input type="number" id="rcInfN" min="0" max="${maxOf('inf')}" value="0" style="width:104px"></div>
+      <div class="field"><span style="width:64px">騎兵＋</span>
+        <input type="range" id="rcCavR" min="0" max="${maxOf('cav')}" value="0">
+        <input type="number" id="rcCavN" min="0" max="${maxOf('cav')}" value="0" style="width:104px"></div>
+      <div style="font-size:15px;color:var(--ink-3);line-height:1.5;padding-right:12px">
+        1 預備兵 → 1 兵。騎兵上限 = Σ clamp((等級−20)×5, 0, 100)，
+        現在 ${caps.cav}${caps.cav ? '。' : '；武將等級不明（≤20）⇒ 徵不到騎兵。'}
+      </div>`;
+    const q = (id) => body.querySelector(id);
+    const paint = () => {
+      const leftPrep = Math.max(0, st.prep - inf - cav);
+      q('#rcInf').textContent = fmt(st.inf + inf);
+      q('#rcCav').textContent = fmt(st.cav + cav);
+      q('#rcPrep').textContent = fmt(leftPrep);
+      q('#rcTroops').textContent = fmt(st.troops + inf + cav);
+    };
+    const setInf = (v) => {
+      inf = Math.max(0, Math.min(maxOf('inf'), Math.min(st.prep - cav, Math.trunc(Number(v) || 0))));
+      q('#rcInfR').value = inf; q('#rcInfN').value = inf; paint();
+    };
+    const setCav = (v) => {
+      cav = Math.max(0, Math.min(maxOf('cav'), Math.min(st.prep - inf, Math.trunc(Number(v) || 0))));
+      q('#rcCavR').value = cav; q('#rcCavN').value = cav; paint();
+    };
+    q('#rcInfR').oninput = () => setInf(q('#rcInfR').value);
+    q('#rcInfN').oninput = () => setInf(q('#rcInfN').value);
+    q('#rcCavR').oninput = () => setCav(q('#rcCavR').value);
+    q('#rcCavN').oninput = () => setCav(q('#rcCavN').value);
+    if (maxOf('cav') === 0) {
+      q('#rcCavR').disabled = true;
+      q('#rcCavN').disabled = true;
+    }
+    body.__ok = () => {
+      if (!inf && !cav) {
+        closeSheet();
+        say('徵兵', 'warn', '沒有選擇要徵的兵。');
+        afterCommand(false);
+        return;
+      }
+      const bits = [];
+      let okAny = false;
+      for (const [arm, n] of [['inf', inf], ['cav', cav]]) {
+        if (!n) continue;
+        const r = M.enlist(save, cityDef, { arm, n }, ctx);
+        if (r.ok) { okAny = true; bits.push(`${M.ARM_NAMES[arm]} +${r.n}（預備兵 -${r.taken}）`); }
+        else bits.push(`${M.ARM_NAMES[arm]} 徵不到（${r.reason}）`);
+      }
+      const now = M.cityStateOf(save, cityDef.NAME);
+      sfx(okAny ? 'success' : 'failure2');
+      say('徵兵', okAny ? 'info' : 'warn', `${bits.join('、')}。步 ${fmt(now.inf)}／騎 ${fmt(now.cav)}，共 ${fmt(now.troops)}/${fmt(M.RECRUIT.CAP)}。`);
+      closeSheet();
+      afterCommand(okAny);
+    };
+  });
+}
+
+/* 自治（R10）：原作「自治施行」—— 對已設定自治的城批量代行開發（04c §2.3 三條字串）。
+ * 每按一次就要花掉這個月的令（和開發同一個 0x4A64BC），所以放進 onCmd 的月令閘門後面。 */
+function openAuto() {
+  const cities = myCities();
+  if (!cities.length) {
+    say('自治', 'warn', '沒有我方城池。');
+    afterCommand(false);
+    return;
+  }
+  const chosen = new Set(M.autoCities(save).filter((n) => cities.some((c) => c.NAME === n)));
+  openSheet('自治施行 · 設定代行開發的城', (body) => {
+    body.innerHTML = `<div style="font-size:15px;color:var(--ink-3);line-height:1.5;padding-right:12px">
+        把城「設定自治」，之後按「每月結算自動代行」或「現在立刻施行一次」批量開發，
+        完成時印「執行城市自治完畢!!」。</div>`
+      + cities.map((c) => {
+        const st = M.cityStateOf(save, c.NAME) || {};
+        const on = chosen.has(c.NAME);
+        return `<button class="pick ${on ? 'on' : ''}" data-city="${escapeHtml(c.NAME)}">
+          <div><div class="nm">${escapeHtml(c.NAME)}${c.NAME === cityDef?.NAME ? '（本城）' : ''}</div>
+            <div class="st">人口 ${fmt(st.pop)} · 防 ${fmt(st.def)} · 預備兵 ${fmt(st.prep)}</div></div>
+          <div class="rt">${on ? '自治' : '手動'}</div></button>`;
+      }).join('');
+    body.querySelectorAll('.pick').forEach((el) => {
+      el.onclick = () => {
+        const n = el.dataset.city;
+        if (chosen.has(n)) { chosen.delete(n); el.classList.remove('on'); el.querySelector('.rt').textContent = '手動'; }
+        else { chosen.add(n); el.classList.add('on'); el.querySelector('.rt').textContent = '自治'; }
+        // 旗標即時寫回存檔，這樣關掉抽屜也不會丟
+        M.setAuto(save, n, chosen.has(n));
+        persist();
+      };
+    });
+    body.__ok = () => {
+      for (const c of cities) M.setAuto(save, c.NAME, chosen.has(c.NAME));
+      const r = M.runAutonomy(save, scenario?.cities || [], ctx, { from: cityDef?.NAME });
+      closeSheet();
+      if (!r.ok) {
+        say('自治', 'warn', r.reason === 'none' ? M.AUTONOMY.NO_CITY : '沒有可以代行開發的城（金不足或已飽和）。');
+      } else {
+        say('自治', 'info', `${r.text}  ${r.ran.map((x) => `${x.city}+${x.pop}人`).join('、')}`);
+      }
+      sfx(r.ok ? 'success' : 'failure2');
+      afterCommand(true);
+    };
+  });
+}
+
+function doSearch() {
+  const before = M.searchCount(save, cityDef.NAME);
+  const r = M.search(save, cityDef, ctx);
+  if (!r.ok) {
+    say('搜索', 'warn', r.reason === 'gold' ? `金不足（需 ${r.cost}）。` : '這裡不能搜索。');
+    sfx('failure2');   // [audio] 搜索失败 = 原作 FAILURE2（37c §4）
+    afterCommand(false);
+    return;
+  }
+  // search() 自己寫日誌（種子需要 count 遞增），這裡只補背包
+  if ((r.kind === 'treasure' || r.kind === 'talisman') && r.seq) bagAdd(r.seq);
+  // R18：背包變了就重讀，同一件唯一物品不會被搜出第二次
+  ctx.bag = readBagSeqs();
+  // [audio] 搜索成功 = 原作 SUCCESS；「一無所獲」按失败处理（原作没有"空手"专用音）
+  sfx(r.kind === 'none' ? 'failure2' : 'success');
+  void before;
+  afterCommand(true);
+}
+
+/* 移動抽屜 */
+function openMove() {
+  const dests = M.neighboursOf(cityDef.NAME, scenario)
+    .filter((n) => save.owned.includes(n));
+  const st = M.ensureCityState(save, cityDef);
+  const gens = M.rosterOf(save, cityDef.NAME, ctx);
+  if (!dests.length) {
+    say('移動', 'warn', '沒有相鄰的我方城池可調動。');
+    afterCommand(false);
+    return;
+  }
+  let to = dests[0];
+  let troops = 0;
+  let general = '';
+  openSheet('移動', (body) => {
+    body.innerHTML = `
+      <div class="field"><span style="width:74px">目標城</span><select id="mvTo" class="pick" style="flex:1;height:56px;font-size:20px">
+        ${dests.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('')}
+      </select></div>
+      <div class="field"><span style="width:74px">兵力</span>
+        <input type="range" id="mvTroops" min="0" max="${st.troops}" value="0">
+        <input type="number" id="mvTroopsN" min="0" max="${st.troops}" value="0" style="width:110px"></div>
+      <div class="stxt" style="font-size:15px;color:var(--ink-3)">本城可用兵力 ${fmt(st.troops)}；目標城上限 ${M.RECRUIT.CAP}（依据：docs/04c §2.2）。</div>
+      <div class="field"><span style="width:74px">武將</span><select id="mvGen" class="pick" style="flex:1;height:56px;font-size:20px">
+        <option value="">（不調將）</option>
+        ${gens.map((g) => `<option value="${escapeHtml(g.NAME)}">${escapeHtml(g.NAME)} 武${g.STR} 智${g.INT}</option>`).join('')}
+      </select></div>
+      <div style="font-size:15px;color:var(--ink-3)">本城武將 ${gens.length} 人。調走太守/軍師會自動卸任。</div>`;
+    const toSel = body.querySelector('#mvTo');
+    const rng = body.querySelector('#mvTroops');
+    const numIn = body.querySelector('#mvTroopsN');
+    const genSel = body.querySelector('#mvGen');
+    const sync = (v) => { troops = Math.max(0, Math.min(st.troops, Math.trunc(Number(v) || 0))); rng.value = troops; numIn.value = troops; };
+    toSel.onchange = () => { to = toSel.value; };
+    rng.oninput = () => sync(rng.value);
+    numIn.oninput = () => sync(numIn.value);
+    genSel.onchange = () => { general = genSel.value; };
+    body.__ok = () => {
+      const r = M.move(save, cityDef, { to, troops, general }, ctx);
+      if (!r.ok) {
+        say('移動', 'warn', r.reason === 'empty' ? '沒有選擇兵力或武將。'
+          : r.reason === 'target' ? '目標城不合法。'
+            : r.reason === 'not-owned' ? '目標不是我方城池。'
+              : r.reason === 'not-adjacent' ? '目標不相鄰（只能調往相鄰我方城）。' : '移動失敗。');
+      } else {
+        const bits = [];
+        if (r.troops) bits.push(`兵 ${r.troops}`);
+        if (r.general) bits.push(`將 ${r.general.NAME}`);
+        say('移動', 'info', `→ ${to}：${bits.join('、') || '無'}。`);
+      }
+      closeSheet();
+      afterCommand(r.ok);
+    };
+  });
+}
+
+/* 任命抽屜 */
+function openAppoint() {
+  const gens = M.rosterOf(save, cityDef.NAME, ctx);
+  if (!gens.length) {
+    say('任命', 'warn', '本城沒有武將可任命。');
+    afterCommand(false);
+    return;
+  }
+  let major = M.majorOf(save, cityDef);
+  let wise = M.wiseOf(save, cityDef);
+  openSheet('任命 · 太守 / 軍師', (body) => {
+    const mk = (role, cur) => `
+      <div class="sec" style="padding:10px 12px">
+        <h2 style="font-size:17px">${role === 'major' ? '太守（影響內政效率）' : '軍師（決定軍師技可用）'}</h2>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+          ${gens.map((g) => `<button class="pick ${cur === g.NAME ? 'on' : ''}" data-role="${role}" data-name="${escapeHtml(g.NAME)}">
+            <div><div class="nm">${escapeHtml(g.NAME)}</div><div class="st">武 ${g.STR} · 智 ${g.INT} · 忠 ${g.Loyal}</div></div>
+            <div class="rt">${(M.wiseSkillsOf(g, WISES).slice(0, 2).map((w) => w.name).join(' / ')) || '—'}</div>
+          </button>`).join('')}
+        </div>
+      </div>`;
+    body.innerHTML = mk('major', major) + mk('wise', wise);
+    body.querySelectorAll('.pick').forEach((el) => {
+      el.onclick = () => {
+        const role = el.dataset.role;
+        if (role === 'major') { major = el.dataset.name; } else { wise = el.dataset.name; }
+        body.querySelectorAll('.pick').forEach((x) => { if (x.dataset.role === role) x.classList.toggle('on', x === el); });
+      };
+    });
+    body.__ok = () => {
+      const rm = M.appoint(save, cityDef, 'major', major, ctx);
+      const rw = M.appoint(save, cityDef, 'wise', wise, ctx);
+      say('任命', 'info', `太守 ${rm.ok ? major : (major || '—')}、軍師 ${rw.ok ? wise : (wise || '—')}。`);
+      closeSheet();
+      afterCommand(true);
+    };
+  });
+}
+
+/* 情報抽屜（只讀） */
+function openIntel() {
+  const info = M.intel(save, cityDef, ctx);
+  openSheet('情報 · 本城與鄰城', (body) => {
+    const row = (r) => `<tr class="${r.mine ? 'mine' : ''}">
+      <td>${escapeHtml(r.name)}${r.gate ? ' <span class="tag">關</span>' : ''}</td>
+      <td>${escapeHtml(r.owner)}</td>
+      <td>${fmt(r.troops)}${r.mine ? `<br><small style="color:var(--ink-3)">步${fmt(r.inf)}/騎${fmt(r.cav)}</small>` : ''}</td>
+      <td>${fmt(r.prep)}/${fmt(r.prepCap)}</td><td>${fmt(r.def)}</td><td>${r.generals}</td>
+      <td>${escapeHtml(r.major || '—')}${r.auto ? ' <span class="tag">自治</span>' : ''}</td></tr>`;
+    body.innerHTML = `<table class="info">
+      <thead><tr><th>城</th><th>勢力</th><th>兵</th><th>預備兵</th><th>防</th><th>將</th><th>太守</th></tr></thead>
+      <tbody>${[info.self, ...info.rows].filter(Boolean).map(row).join('')}</tbody></table>
+      <div style="font-size:14px;color:var(--ink-3);margin-top:6px">只讀面板：相鄰城含關卡（RATE=0）。預備兵 = 原作 +0x86/+0x82。</div>`;
+    body.__noOk = true;
+  });
+  // 情報在原作也是一条内政命令：看一眼就算这个月的令用掉了（?unlimited=1 除外）
+  afterCommand(true);
+}
+
+/* 出征抽屜 */
+function openDeploy() {
+  const targets = M.deployTargets(save, cityDef, ctx);
+  if (!targets.length) {
+    say('出征', 'warn', '相鄰沒有可出征的敵城（或只有關卡）。');
+    afterCommand(false);
+    return;
+  }
+  let pick = targets[0].name;
+  openSheet('出征 · 選目標', (body) => {
+    body.innerHTML = targets.map((t) => `<button class="pick ${t.name === pick ? 'on' : ''}" data-name="${escapeHtml(t.name)}">
+      <div><div class="nm">${escapeHtml(t.name)}</div>
+        <div class="st">${t.owner ? '勢力 ' + escapeHtml(t.owner) : '無主空城'}</div></div>
+      <div class="rt">兵 ${fmt(t.troops)}<br>防 ${fmt(t.def)}<br>將 ${t.generals}</div></button>`).join('')
+      + `<div style="font-size:14px;color:var(--ink-3)">出征會交給 deploy.html 編隊；本頁只負責帶目標城過去。</div>`;
+    body.querySelectorAll('.pick').forEach((el) => {
+      el.onclick = () => { pick = el.dataset.name; body.querySelectorAll('.pick').forEach((x) => x.classList.toggle('on', x === el)); };
+    });
+    body.__ok = () => {
+      // 出征也吃月令：先记位再跳转（deploy.html 本身不改）
+      if (M.markMonthActed(save, UNLIMITED)) persist();
+      location.href = M.deployUrl(pick) + (UNLIMITED ? '&unlimited=1' : '');
+    };
+  });
+}
+
+/* ---------------- 抽屜基礎 ---------------- */
+/**
+ * 開底部抽屜。build(body) 負責畫內容；要處理「確定」時在 build 裡設 body.__ok = fn，
+ * 追劇本時設 body.__noOk = true 隱藏確定鍵。
+ */
+function openSheet(title, build) {
+  $('sheetTitle').textContent = title;
+  const body = $('sheetBody');
+  body.innerHTML = '';
+  body.__ok = null;
+  body.__noOk = false;
+  build(body);
+  const ok = $('sheetOk');
+  ok.style.display = body.__noOk ? 'none' : '';
+  ok.onclick = () => { if (typeof body.__ok === 'function') body.__ok(); };
+  $('mask').classList.add('on');
+  $('sheet').classList.add('on');
+}
+function closeSheet() {
+  $('mask').classList.remove('on');
+  $('sheet').classList.remove('on');
+  $('sheetBody').innerHTML = '';
+}
+
+/* ---------------- 綁定 ---------------- */
+$('mask').onclick = closeSheet;
+$('sheetCancel').onclick = closeSheet;
+$('btnBack').onclick = () => { location.href = './campaign.html'; };
+$('btnRefresh').onclick = () => location.reload();
+
+function onCmd(cmd, bypassLock = false) {
+  if (!cityDef) { say(cmd, 'warn', '沒有我方城池。'); renderLog(); return; }
+  // R8 一月一令：本月已经下过令 → 直接拒绝（按钮本来就是 disabled，这里兜住键盘/调试路径）
+  if (!bypassLock && M.monthLocked(save, UNLIMITED)) {
+    say(cmd, 'warn', `${M.LOCK_HINT}：一個月只能下一條命令，回大地圖「推進一月」再下達。`);
+    renderHud();
+    renderGrid();
+    renderLog();
+    return;
+  }
+  if (cmd === '開發') doDevelop();
+  else if (cmd === '徵兵') doRecruit();
+  else if (cmd === '搜索') doSearch();
+  else if (cmd === '移動') openMove();
+  else if (cmd === '任命') openAppoint();
+  else if (cmd === '物品') {
+    if (M.markMonthActed(save, UNLIMITED)) persist();
+    location.href = M.itemsUrl(cityDef.NAME) + (UNLIMITED ? '&unlimited=1' : '');
+  } else if (cmd === '情報') openIntel();
+  else if (cmd === '出征') openDeploy();
+  else if (cmd === '自治') openAuto();
+}
+$('grid').onclick = (e) => {
+  const b = e.target.closest('.cmd');
+  if (b) onCmd(b.dataset.cmd);
+};
+
+/* ---------------- 啟動 ---------------- */
+fit();
+renderGrid();
+renderHud();
+renderLog();
+// [audio] 内政 BGM（10–14 五档）：按我方城数取档，阈值 9/18/26/37 见 project/41 与 37c
+audio()?.bgm(`domestic:${(save.owned || []).length}`);
+
+/* 除錯口子：?do=develop,search,search；?dump=1 把存檔前後差異塞進 <pre id="dump">
+ * 這是除錯入口（UI 上沒有），所以它繞過「一月一令」——正式按鈕仍受 lastActionMonth 限制。 */
+const plan = String(dbg('do') || '').split(',').map((s) => s.trim()).filter(Boolean);
+const MAP = { develop: '開發', recruit: '徵兵', search: '搜索', move: '移動', appoint: '任命', item: '物品', intel: '情報', deploy: '出征', auto: '自治' };
+const snapshot = plan.length ? JSON.stringify({ gold: save.gold, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed }) : '';
+for (const step of plan) {
+  const cmd = MAP[step] || step;
+  if (cmd === '出征' || cmd === '移動' || cmd === '任命' || cmd === '情報' || cmd === '物品' || cmd === '自治') continue;
+  onCmd(cmd, true);
+}
+if (DEV && qs.has('dump') && qs.get('dump') !== '0') {
+  // 不顯示：只把 JSON 塞進 <pre id="dump">，用 Edge --dump-dom 取。要肉眼看時加 ?dump=show。
+  const d = $('dump');
+  d.style.display = dbg('dump') === 'show' ? 'block' : 'none';
+  d.textContent = '<<<DUMP\n' + JSON.stringify({
+    city: cityDef?.NAME,
+    slot: activeSlot,
+    before: snapshot ? JSON.parse(snapshot) : null,
+    after: { gold: save.gold, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed, searchLog: (save.searchLog || []).slice(-6) },
+  }, null, 1) + '\nDUMP>>>';
+}
+/* 截圖/驗收用：?sheet=recruit|auto|intel 進頁就打開對應抽屜（除錯參數，不算玩法） */
+const dbgSheet = dbg('sheet');
+if (dbgSheet) {
+  const sheetMap = { recruit: doRecruit, auto: openAuto, intel: openIntel, move: openMove, appoint: openAppoint, deploy: openDeploy };
+  try { sheetMap[dbgSheet]?.(); } catch (err) { console.error(err); }
+}
+
+window.__city = {
+  save, cityDef, ctx, M, Saves, era, unlimited: UNLIMITED, locked: M.monthLocked(save, UNLIMITED),
+  // 驗收用：R12 的四個數字、R10 的自治清單、殿內背景挑了哪張
+  prep: cityDef ? M.prepStateOf(save, cityDef) : null,
+  caps: cityDef ? M.armCaps(save, cityDef, ctx) : null,
+  auto: M.autoCities(save),
+  // 原作內政 8 欄的原始數字（截圖驗收時直接讀，不必 OCR）
+  civic: M.civicFields(save, scenario?.cities || [], ctx),
+  hall: $('stage').dataset.hall,
+  tick: autoTick,
+};
+</script>
+</body>
+</html>

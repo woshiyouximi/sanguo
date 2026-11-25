@@ -1,0 +1,24 @@
+28 | tickHz60: 'project/190_主将与士兵�度裁决.md（p5�?0x34 单位 = 引擎 tick；录像实�?66�?9 Hz�? project/192_引擎节拍60Hz.md + game/src/core/battle.ts TICK_HZ=60（R192 取最保守�档，不是原作真�）',
+33 | magicIni: 'extract/json/magic.json entries[kind=magic]（MAGIC.INI cp950 逐字段）�?extract/json/xls_武将�.json 110 行数值（序号/��?能量/攻击�?调用代码�? 巼�',
+34 | magicCategory: 'extract/json/magic.json entries[].category / category_rule（��?Attribute+攻击力判定）',
+37 | sfx: 'work/sfx84/map6.json �?seq {dir,dirs,snd,grade,via,deep,A,C,B,all}；work/dis_magicmap_skills.txt 75 段�音效字符串:」直证；docs/05c_MAGIC特效映射.md:66-67�?18058 PUSHS "m016snd01" 
+38 | troopMatrix: 'extract/json/xls_兵�.json 13×13（header 首列为空列）�?game/data/troops.json.matrix 0 巼�',
+39 | terrain: 'extract/json/sango.json terrain[12]（SANGO.INI [TERRAIN]，字�?Sequence/Name/SoundTrack/Floor/Foreground/Midground/Background）；资源�?extract/pak/SHAPE/BG/',
+40 | generalTimes: 'extract/json/times1..5.json GENERAL 段各 401 条（name/face/str/int/max_hp/max_mp/base_exp/loyal/spirit/constancy/type/skills/wise_skills/pos…）；与 extract/json/x
+43 | cities: 'extract/json/times1..5.json cities[60] �?extract/json/xls_城池.json 60 行（序号/名称/坐标/等级/旗帜�? 巼�',
+44 | paths: 'extract/json/times1..5.json paths[116] �?extract/json/xls_跾�.json 116 行（�?�?长度/跂��? 巼�',
+50 | formationNote: '阵营阵形不在�校验范围（game/data/formations.json names 9 / matrix 11，含 2 丝�玩�阵）',
+59 | const xlsMagic = J('extract/json/xls_武将�.json');
+60 | const xlsWise = J('extract/json/xls_军师�.json');
+61 | const xlsTroop = J('extract/json/xls_兵�.json');
+63 | const xlsPath = J('extract/json/xls_跾�.json');
+172 | matrixSource: 'extract/json/xls_兵�.json rows[i][1..13]',
+255 | shapeOfTypeGrade: '项目/48 §1 �?[推测-强�觉证据]',
+337 | what: '战场�纵深 12.6 �?/ 71 列（FIELD_H=900），原作 480/72�?.67 �?�?朽��?×1.9 视野',
+358 | { id: 'spec.sfxCurated', what: '没有 dis 直证�?35 条技能音效取 map6 策展值（证级 A2/X，R148 �?C 已清零）', why: EVID.sfx },
+363 | 'extract/json/magic.json', 'extract/json/sango.json', 'extract/json/xls_武将�.json',
+364 | 'extract/json/xls_军师�.json', 'extract/json/xls_兵�.json', 'extract/json/xls_城池.json',
+365 | 'extract/json/xls_跾�.json', 'extract/json/xls_群英2.json', 'extract/json/stats_paths.json',
+381 | purpose: '把�和原作�致�变成可重放斨�：期望�只由原作材料生成，运�时实现由 check.mjs / game/tests/fidelity_net.test.ts 比�',
+411 | xlsNote: 'XLS 宝典为简体（118 �?PATH，��?2 条），TIMES �?cp950 繁体 116 条，按序号�齐后长度/跂��?0 巼�',
+total 23

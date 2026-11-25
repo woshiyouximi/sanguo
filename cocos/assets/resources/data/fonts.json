@@ -1,0 +1,77 @@
+[
+ {
+  "FontNum": 1,
+  "ChineseFont": "Sango.20",
+  "ChineseIndex": "Sango.idx",
+  "ChineseWidth": 20,
+  "ChineseHeight": 20,
+  "ChineseBytes": 60,
+  "ChinesePerLineBytes": 3,
+  "EnglishType": "BITMASK",
+  "EnglishFont": "Mingasc.20",
+  "EnglishWidth": 10,
+  "EnglishHeight": 20,
+  "EnglishBytes": 40,
+  "EnglishPerLineBytes": 2
+ },
+ {
+  "FontNum": 2,
+  "ChineseFont": "",
+  "ChineseIndex": "",
+  "EnglishType": "SHAPE",
+  "EnglishFont": "WP",
+  "EnglishWidth": 8,
+  "EnglishHeight": 10
+ },
+ {
+  "FontNum": 3,
+  "ChineseFont": "",
+  "ChineseIndex": "",
+  "EnglishType": "SHAPE",
+  "EnglishFont": "MNUM",
+  "EnglishWidth": 10,
+  "EnglishHeight": 15
+ },
+ {
+  "FontNum": 4,
+  "ChineseFont": "Sango.15",
+  "ChineseIndex": "Sango.idx",
+  "ChineseWidth": 16,
+  "ChineseHeight": 15,
+  "ChineseBytes": 30,
+  "ChinesePerLineBytes": 2,
+  "EnglishType": "BITMASK",
+  "EnglishFont": "OldAsc.15",
+  "EnglishWidth": 8,
+  "EnglishHeight": 15,
+  "EnglishBytes": 15,
+  "EnglishPerLineBytes": 1
+ },
+ {
+  "FontNum": 5,
+  "ChineseFont": "",
+  "ChineseIndex": "",
+  "EnglishType": "SHAPE",
+  "EnglishFont": "TNUM",
+  "EnglishWidth": 19,
+  "EnglishHeight": 19
+ },
+ {
+  "FontNum": 6,
+  "ChineseFont": "",
+  "ChineseIndex": "",
+  "EnglishType": "SHAPE",
+  "EnglishFont": "WS",
+  "EnglishWidth": 5,
+  "EnglishHeight": 7
+ },
+ {
+  "FontNum": 7,
+  "ChineseFont": "",
+  "ChineseIndex": "",
+  "EnglishType": "SHAPE",
+  "EnglishFont": "WB",
+  "EnglishWidth": 6,
+  "EnglishHeight": 9
+ }
+]

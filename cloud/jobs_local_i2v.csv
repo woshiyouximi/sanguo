@@ -1,0 +1,3 @@
+﻿id,kind,prompt,negative,width,height,seed,steps,cfg,length,image
+loc_M1_back_walk,i2v,"士兵背视向前走，步伐沉稳，甲胄随步伐轻微摆动，镜头固定，动作连贯循环，纯灰背景","文字，水印，多人，镜头晃动，形变，脸部",512,768,7001,30,5.0,33,sg_M1_back.png
+loc_M1_front_attack,i2v,"士兵正面持枪向前突刺又收回，动作干脆，镜头固定，动作连贯，纯灰背景","文字，水印，多人，镜头晃动，形变",512,768,7002,30,5.0,33,sg_M1_front.png

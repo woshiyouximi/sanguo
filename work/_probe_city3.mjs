@@ -1,0 +1,11 @@
+﻿import { readFileSync } from "node:fs";
+const sys = JSON.parse(readFileSync("game/data/sango_system.json","utf8"));
+console.log("system keys", Object.keys(sys), JSON.stringify(sys).slice(0,300));
+const gens = JSON.parse(readFileSync("game/data/generals.json","utf8"));
+const g = gens.find(x=>x.NAME==="閻圃") || gens[0];
+console.log("sample general:", JSON.stringify(g).slice(0,900));
+const wises = JSON.parse(readFileSync("game/data/wises.json","utf8"));
+console.log("wises type", Array.isArray(wises)?"array "+wises.length:Object.keys(wises).slice(0,8));
+console.log(JSON.stringify(Array.isArray(wises)?wises.slice(0,3):wises).slice(0,400));
+const meta = JSON.parse(readFileSync("game/data/meta.json","utf8"));
+console.log("meta", JSON.stringify(meta).slice(0,300));

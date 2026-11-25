@@ -1,0 +1,2049 @@
+{
+ "sizes": {
+  "full": [
+   100,
+   120
+  ],
+  "thumb": [
+   30,
+   40
+  ]
+ },
+ "faces": {
+  "丁奉": {
+   "n": 1,
+   "face": "FACE\\FACE001",
+   "sex_hint": "?"
+  },
+  "丁原": {
+   "n": 2,
+   "face": "FACE\\FACE002",
+   "sex_hint": "?"
+  },
+  "于吉": {
+   "n": 3,
+   "face": "FACE\\FACE003",
+   "sex_hint": "?"
+  },
+  "于禁": {
+   "n": 4,
+   "face": "FACE\\FACE004",
+   "sex_hint": "?"
+  },
+  "兀突骨": {
+   "n": 5,
+   "face": "FACE\\FACE005",
+   "sex_hint": "?"
+  },
+  "土安": {
+   "n": 6,
+   "face": "FACE\\FACE006",
+   "sex_hint": "?"
+  },
+  "大喬": {
+   "n": 7,
+   "face": "FACE\\FACE007",
+   "sex_hint": "F"
+  },
+  "小喬": {
+   "n": 8,
+   "face": "FACE\\FACE008",
+   "sex_hint": "F"
+  },
+  "公孫度": {
+   "n": 9,
+   "face": "FACE\\FACE009",
+   "sex_hint": "?"
+  },
+  "公孫恭": {
+   "n": 10,
+   "face": "FACE\\FACE010",
+   "sex_hint": "?"
+  },
+  "公孫康": {
+   "n": 11,
+   "face": "FACE\\FACE011",
+   "sex_hint": "?"
+  },
+  "公孫淵": {
+   "n": 12,
+   "face": "FACE\\FACE012",
+   "sex_hint": "?"
+  },
+  "公孫越": {
+   "n": 13,
+   "face": "FACE\\FACE013",
+   "sex_hint": "?"
+  },
+  "公孫瓚": {
+   "n": 14,
+   "face": "FACE\\FACE014",
+   "sex_hint": "?"
+  },
+  "卞喜": {
+   "n": 15,
+   "face": "FACE\\FACE015",
+   "sex_hint": "?"
+  },
+  "太史慈": {
+   "n": 16,
+   "face": "FACE\\FACE016",
+   "sex_hint": "?"
+  },
+  "孔岫": {
+   "n": 17,
+   "face": "FACE\\FACE017",
+   "sex_hint": "?"
+  },
+  "孔融": {
+   "n": 18,
+   "face": "FACE\\FACE018",
+   "sex_hint": "?"
+  },
+  "文欽": {
+   "n": 19,
+   "face": "FACE\\FACE019",
+   "sex_hint": "?"
+  },
+  "文聘": {
+   "n": 20,
+   "face": "FACE\\FACE020",
+   "sex_hint": "?"
+  },
+  "文鴦": {
+   "n": 21,
+   "face": "FACE\\FACE021",
+   "sex_hint": "?"
+  },
+  "文醜": {
+   "n": 22,
+   "face": "FACE\\FACE022",
+   "sex_hint": "?"
+  },
+  "木鹿大王": {
+   "n": 23,
+   "face": "FACE\\FACE023",
+   "sex_hint": "?"
+  },
+  "毋丘儉": {
+   "n": 24,
+   "face": "FACE\\FACE024",
+   "sex_hint": "?"
+  },
+  "毛玠": {
+   "n": 25,
+   "face": "FACE\\FACE025",
+   "sex_hint": "?"
+  },
+  "牛金": {
+   "n": 26,
+   "face": "FACE\\FACE026",
+   "sex_hint": "?"
+  },
+  "王子服": {
+   "n": 27,
+   "face": "FACE\\FACE027",
+   "sex_hint": "?"
+  },
+  "王允": {
+   "n": 28,
+   "face": "FACE\\FACE028",
+   "sex_hint": "?"
+  },
+  "王平": {
+   "n": 29,
+   "face": "FACE\\FACE029",
+   "sex_hint": "?"
+  },
+  "王甫": {
+   "n": 30,
+   "face": "FACE\\FACE030",
+   "sex_hint": "?"
+  },
+  "王朗": {
+   "n": 31,
+   "face": "FACE\\FACE031",
+   "sex_hint": "?"
+  },
+  "王真": {
+   "n": 32,
+   "face": "FACE\\FACE032",
+   "sex_hint": "?"
+  },
+  "王基": {
+   "n": 33,
+   "face": "FACE\\FACE033",
+   "sex_hint": "?"
+  },
+  "王累": {
+   "n": 34,
+   "face": "FACE\\FACE034",
+   "sex_hint": "?"
+  },
+  "王渾": {
+   "n": 35,
+   "face": "FACE\\FACE035",
+   "sex_hint": "?"
+  },
+  "王粲": {
+   "n": 36,
+   "face": "FACE\\FACE036",
+   "sex_hint": "?"
+  },
+  "王頎": {
+   "n": 37,
+   "face": "FACE\\FACE037",
+   "sex_hint": "?"
+  },
+  "王濬": {
+   "n": 38,
+   "face": "FACE\\FACE038",
+   "sex_hint": "?"
+  },
+  "王雙": {
+   "n": 39,
+   "face": "FACE\\FACE039",
+   "sex_hint": "?"
+  },
+  "司馬孚": {
+   "n": 40,
+   "face": "FACE\\FACE040",
+   "sex_hint": "?"
+  },
+  "司馬炎": {
+   "n": 41,
+   "face": "FACE\\FACE041",
+   "sex_hint": "?"
+  },
+  "司馬昭": {
+   "n": 42,
+   "face": "FACE\\FACE042",
+   "sex_hint": "?"
+  },
+  "司馬師": {
+   "n": 43,
+   "face": "FACE\\FACE043",
+   "sex_hint": "?"
+  },
+  "司馬徽": {
+   "n": 44,
+   "face": "FACE\\FACE044",
+   "sex_hint": "?"
+  },
+  "司馬懿": {
+   "n": 45,
+   "face": "FACE\\FACE045",
+   "sex_hint": "?"
+  },
+  "左慈": {
+   "n": 46,
+   "face": "FACE\\FACE046",
+   "sex_hint": "?"
+  },
+  "左賢王": {
+   "n": 47,
+   "face": "FACE\\FACE047",
+   "sex_hint": "?"
+  },
+  "甘寧": {
+   "n": 48,
+   "face": "FACE\\FACE048",
+   "sex_hint": "?"
+  },
+  "田豐": {
+   "n": 49,
+   "face": "FACE\\FACE049",
+   "sex_hint": "?"
+  },
+  "田疇": {
+   "n": 50,
+   "face": "FACE\\FACE050",
+   "sex_hint": "?"
+  },
+  "申耽": {
+   "n": 51,
+   "face": "FACE\\FACE051",
+   "sex_hint": "?"
+  },
+  "伊籍": {
+   "n": 52,
+   "face": "FACE\\FACE052",
+   "sex_hint": "?"
+  },
+  "全琮": {
+   "n": 53,
+   "face": "FACE\\FACE053",
+   "sex_hint": "?"
+  },
+  "全端": {
+   "n": 54,
+   "face": "FACE\\FACE054",
+   "sex_hint": "?"
+  },
+  "向朗": {
+   "n": 55,
+   "face": "FACE\\FACE055",
+   "sex_hint": "?"
+  },
+  "向寵": {
+   "n": 56,
+   "face": "FACE\\FACE056",
+   "sex_hint": "?"
+  },
+  "忙牙長": {
+   "n": 57,
+   "face": "FACE\\FACE057",
+   "sex_hint": "?"
+  },
+  "朱治": {
+   "n": 58,
+   "face": "FACE\\FACE058",
+   "sex_hint": "?"
+  },
+  "朱桓": {
+   "n": 59,
+   "face": "FACE\\FACE059",
+   "sex_hint": "?"
+  },
+  "朱異": {
+   "n": 60,
+   "face": "FACE\\FACE060",
+   "sex_hint": "?"
+  },
+  "朱然": {
+   "n": 61,
+   "face": "FACE\\FACE061",
+   "sex_hint": "?"
+  },
+  "朱雋": {
+   "n": 62,
+   "face": "FACE\\FACE062",
+   "sex_hint": "?"
+  },
+  "朱靈": {
+   "n": 63,
+   "face": "FACE\\FACE063",
+   "sex_hint": "?"
+  },
+  "朵思大王": {
+   "n": 64,
+   "face": "FACE\\FACE064",
+   "sex_hint": "?"
+  },
+  "何進": {
+   "n": 65,
+   "face": "FACE\\FACE065",
+   "sex_hint": "?"
+  },
+  "何儀": {
+   "n": 66,
+   "face": "FACE\\FACE066",
+   "sex_hint": "?"
+  },
+  "吳班": {
+   "n": 67,
+   "face": "FACE\\FACE067",
+   "sex_hint": "?"
+  },
+  "吳綱": {
+   "n": 68,
+   "face": "FACE\\FACE068",
+   "sex_hint": "?"
+  },
+  "吳質": {
+   "n": 69,
+   "face": "FACE\\FACE069",
+   "sex_hint": "?"
+  },
+  "吳蘭": {
+   "n": 70,
+   "face": "FACE\\FACE070",
+   "sex_hint": "?"
+  },
+  "吳懿": {
+   "n": 71,
+   "face": "FACE\\FACE071",
+   "sex_hint": "?"
+  },
+  "呂布": {
+   "n": 72,
+   "face": "FACE\\FACE072",
+   "sex_hint": "?"
+  },
+  "呂虔": {
+   "n": 73,
+   "face": "FACE\\FACE073",
+   "sex_hint": "?"
+  },
+  "呂翔": {
+   "n": 74,
+   "face": "FACE\\FACE074",
+   "sex_hint": "?"
+  },
+  "呂義": {
+   "n": 75,
+   "face": "FACE\\FACE075",
+   "sex_hint": "?"
+  },
+  "呂蒙": {
+   "n": 76,
+   "face": "FACE\\FACE076",
+   "sex_hint": "?"
+  },
+  "呂範": {
+   "n": 77,
+   "face": "FACE\\FACE077",
+   "sex_hint": "?"
+  },
+  "呂曠": {
+   "n": 78,
+   "face": "FACE\\FACE078",
+   "sex_hint": "?"
+  },
+  "宋憲": {
+   "n": 79,
+   "face": "FACE\\FACE079",
+   "sex_hint": "?"
+  },
+  "李典": {
+   "n": 80,
+   "face": "FACE\\FACE080",
+   "sex_hint": "?"
+  },
+  "李恢": {
+   "n": 81,
+   "face": "FACE\\FACE081",
+   "sex_hint": "?"
+  },
+  "李異": {
+   "n": 82,
+   "face": "FACE\\FACE082",
+   "sex_hint": "?"
+  },
+  "李肅": {
+   "n": 83,
+   "face": "FACE\\FACE083",
+   "sex_hint": "?"
+  },
+  "李傕": {
+   "n": 84,
+   "face": "FACE\\FACE084",
+   "sex_hint": "?"
+  },
+  "李儒": {
+   "n": 85,
+   "face": "FACE\\FACE085",
+   "sex_hint": "?"
+  },
+  "李鵬": {
+   "n": 86,
+   "face": "FACE\\FACE086",
+   "sex_hint": "?"
+  },
+  "李嚴": {
+   "n": 87,
+   "face": "FACE\\FACE087",
+   "sex_hint": "?"
+  },
+  "杜遠": {
+   "n": 88,
+   "face": "FACE\\FACE088",
+   "sex_hint": "?"
+  },
+  "步鷺": {
+   "n": 89,
+   "face": "FACE\\FACE089",
+   "sex_hint": "?"
+  },
+  "沙摩訶": {
+   "n": 90,
+   "face": "FACE\\FACE090",
+   "sex_hint": "?"
+  },
+  "車胄": {
+   "n": 91,
+   "face": "FACE\\FACE091",
+   "sex_hint": "?"
+  },
+  "辛毗": {
+   "n": 92,
+   "face": "FACE\\FACE092",
+   "sex_hint": "?"
+  },
+  "辛評": {
+   "n": 93,
+   "face": "FACE\\FACE093",
+   "sex_hint": "?"
+  },
+  "邢道榮": {
+   "n": 94,
+   "face": "FACE\\FACE094",
+   "sex_hint": "?"
+  },
+  "典韋": {
+   "n": 95,
+   "face": "FACE\\FACE095",
+   "sex_hint": "?"
+  },
+  "卓膺": {
+   "n": 96,
+   "face": "FACE\\FACE096",
+   "sex_hint": "?"
+  },
+  "周昕": {
+   "n": 97,
+   "face": "FACE\\FACE097",
+   "sex_hint": "?"
+  },
+  "周倉": {
+   "n": 98,
+   "face": "FACE\\FACE098",
+   "sex_hint": "?"
+  },
+  "周泰": {
+   "n": 99,
+   "face": "FACE\\FACE099",
+   "sex_hint": "?"
+  },
+  "周瑜": {
+   "n": 100,
+   "face": "FACE\\FACE100",
+   "sex_hint": "?"
+  },
+  "周魴": {
+   "n": 101,
+   "face": "FACE\\FACE101",
+   "sex_hint": "?"
+  },
+  "孟達": {
+   "n": 102,
+   "face": "FACE\\FACE102",
+   "sex_hint": "?"
+  },
+  "孟優": {
+   "n": 103,
+   "face": "FACE\\FACE103",
+   "sex_hint": "?"
+  },
+  "孟獲": {
+   "n": 104,
+   "face": "FACE\\FACE104",
+   "sex_hint": "?"
+  },
+  "武安國": {
+   "n": 105,
+   "face": "FACE\\FACE105",
+   "sex_hint": "?"
+  },
+  "法正": {
+   "n": 106,
+   "face": "FACE\\FACE106",
+   "sex_hint": "?"
+  },
+  "沮授": {
+   "n": 107,
+   "face": "FACE\\FACE107",
+   "sex_hint": "?"
+  },
+  "沮鵠": {
+   "n": 108,
+   "face": "FACE\\FACE108",
+   "sex_hint": "?"
+  },
+  "金旋": {
+   "n": 109,
+   "face": "FACE\\FACE109",
+   "sex_hint": "?"
+  },
+  "金環三結": {
+   "n": 110,
+   "face": "FACE\\FACE110",
+   "sex_hint": "?"
+  },
+  "阿會喃": {
+   "n": 111,
+   "face": "FACE\\FACE111",
+   "sex_hint": "?"
+  },
+  "侯成": {
+   "n": 112,
+   "face": "FACE\\FACE112",
+   "sex_hint": "?"
+  },
+  "姜維": {
+   "n": 113,
+   "face": "FACE\\FACE113",
+   "sex_hint": "?"
+  },
+  "皇甫嵩": {
+   "n": 114,
+   "face": "FACE\\FACE114",
+   "sex_hint": "?"
+  },
+  "紀靈": {
+   "n": 115,
+   "face": "FACE\\FACE115",
+   "sex_hint": "?"
+  },
+  "胡車兒": {
+   "n": 116,
+   "face": "FACE\\FACE116",
+   "sex_hint": "?"
+  },
+  "胡班": {
+   "n": 117,
+   "face": "FACE\\FACE117",
+   "sex_hint": "?"
+  },
+  "范疆": {
+   "n": 118,
+   "face": "FACE\\FACE118",
+   "sex_hint": "?"
+  },
+  "凌統": {
+   "n": 119,
+   "face": "FACE\\FACE119",
+   "sex_hint": "?"
+  },
+  "凌操": {
+   "n": 120,
+   "face": "FACE\\FACE120",
+   "sex_hint": "?"
+  },
+  "夏侯玄": {
+   "n": 121,
+   "face": "FACE\\FACE121",
+   "sex_hint": "?"
+  },
+  "夏侯和": {
+   "n": 122,
+   "face": "FACE\\FACE122",
+   "sex_hint": "?"
+  },
+  "夏侯尚": {
+   "n": 123,
+   "face": "FACE\\FACE123",
+   "sex_hint": "?"
+  },
+  "夏侯威": {
+   "n": 124,
+   "face": "FACE\\FACE124",
+   "sex_hint": "?"
+  },
+  "夏侯恩": {
+   "n": 125,
+   "face": "FACE\\FACE125",
+   "sex_hint": "?"
+  },
+  "夏侯惇": {
+   "n": 126,
+   "face": "FACE\\FACE126",
+   "sex_hint": "?"
+  },
+  "夏侯淵": {
+   "n": 127,
+   "face": "FACE\\FACE127",
+   "sex_hint": "?"
+  },
+  "夏侯楙": {
+   "n": 128,
+   "face": "FACE\\FACE128",
+   "sex_hint": "?"
+  },
+  "夏侯德": {
+   "n": 129,
+   "face": "FACE\\FACE129",
+   "sex_hint": "?"
+  },
+  "夏侯霸": {
+   "n": 130,
+   "face": "FACE\\FACE130",
+   "sex_hint": "?"
+  },
+  "孫尚香": {
+   "n": 131,
+   "face": "FACE\\FACE131",
+   "sex_hint": "F"
+  },
+  "孫朗": {
+   "n": 132,
+   "face": "FACE\\FACE132",
+   "sex_hint": "?"
+  },
+  "孫桓": {
+   "n": 133,
+   "face": "FACE\\FACE133",
+   "sex_hint": "?"
+  },
+  "孫乾": {
+   "n": 134,
+   "face": "FACE\\FACE134",
+   "sex_hint": "?"
+  },
+  "孫堅": {
+   "n": 135,
+   "face": "FACE\\FACE135",
+   "sex_hint": "?"
+  },
+  "孫翊": {
+   "n": 136,
+   "face": "FACE\\FACE136",
+   "sex_hint": "?"
+  },
+  "孫登": {
+   "n": 137,
+   "face": "FACE\\FACE137",
+   "sex_hint": "?"
+  },
+  "孫皓": {
+   "n": 138,
+   "face": "FACE\\FACE138",
+   "sex_hint": "?"
+  },
+  "孫策": {
+   "n": 139,
+   "face": "FACE\\FACE139",
+   "sex_hint": "?"
+  },
+  "孫韶": {
+   "n": 140,
+   "face": "FACE\\FACE140",
+   "sex_hint": "?"
+  },
+  "孫靜": {
+   "n": 141,
+   "face": "FACE\\FACE141",
+   "sex_hint": "?"
+  },
+  "孫禮": {
+   "n": 142,
+   "face": "FACE\\FACE142",
+   "sex_hint": "?"
+  },
+  "孫權": {
+   "n": 143,
+   "face": "FACE\\FACE143",
+   "sex_hint": "?"
+  },
+  "徐晃": {
+   "n": 144,
+   "face": "FACE\\FACE144",
+   "sex_hint": "?"
+  },
+  "徐庶": {
+   "n": 145,
+   "face": "FACE\\FACE145",
+   "sex_hint": "?"
+  },
+  "徐盛": {
+   "n": 146,
+   "face": "FACE\\FACE146",
+   "sex_hint": "?"
+  },
+  "徐榮": {
+   "n": 147,
+   "face": "FACE\\FACE147",
+   "sex_hint": "?"
+  },
+  "徐質": {
+   "n": 148,
+   "face": "FACE\\FACE148",
+   "sex_hint": "?"
+  },
+  "桓範": {
+   "n": 149,
+   "face": "FACE\\FACE149",
+   "sex_hint": "?"
+  },
+  "祖茂": {
+   "n": 150,
+   "face": "FACE\\FACE150",
+   "sex_hint": "?"
+  },
+  "祝融夫人": {
+   "n": 151,
+   "face": "FACE\\FACE151",
+   "sex_hint": "F"
+  },
+  "秦宓": {
+   "n": 152,
+   "face": "FACE\\FACE152",
+   "sex_hint": "?"
+  },
+  "耿紀": {
+   "n": 153,
+   "face": "FACE\\FACE153",
+   "sex_hint": "?"
+  },
+  "荀攸": {
+   "n": 154,
+   "face": "FACE\\FACE154",
+   "sex_hint": "?"
+  },
+  "荀彧": {
+   "n": 155,
+   "face": "FACE\\FACE155",
+   "sex_hint": "?"
+  },
+  "袁尚": {
+   "n": 156,
+   "face": "FACE\\FACE156",
+   "sex_hint": "?"
+  },
+  "袁胤": {
+   "n": 157,
+   "face": "FACE\\FACE157",
+   "sex_hint": "?"
+  },
+  "袁紹": {
+   "n": 158,
+   "face": "FACE\\FACE158",
+   "sex_hint": "?"
+  },
+  "袁術": {
+   "n": 159,
+   "face": "FACE\\FACE159",
+   "sex_hint": "?"
+  },
+  "袁熙": {
+   "n": 160,
+   "face": "FACE\\FACE160",
+   "sex_hint": "?"
+  },
+  "袁譚": {
+   "n": 161,
+   "face": "FACE\\FACE161",
+   "sex_hint": "?"
+  },
+  "迷當大王": {
+   "n": 162,
+   "face": "FACE\\FACE162",
+   "sex_hint": "?"
+  },
+  "郝昭": {
+   "n": 163,
+   "face": "FACE\\FACE163",
+   "sex_hint": "?"
+  },
+  "馬休": {
+   "n": 164,
+   "face": "FACE\\FACE164",
+   "sex_hint": "?"
+  },
+  "馬良": {
+   "n": 165,
+   "face": "FACE\\FACE165",
+   "sex_hint": "?"
+  },
+  "馬岱": {
+   "n": 166,
+   "face": "FACE\\FACE166",
+   "sex_hint": "?"
+  },
+  "馬忠": {
+   "n": 167,
+   "face": "FACE\\FACE167",
+   "sex_hint": "?"
+  },
+  "馬玩": {
+   "n": 168,
+   "face": "FACE\\FACE168",
+   "sex_hint": "?"
+  },
+  "馬超": {
+   "n": 169,
+   "face": "FACE\\FACE169",
+   "sex_hint": "?"
+  },
+  "馬謖": {
+   "n": 170,
+   "face": "FACE\\FACE170",
+   "sex_hint": "?"
+  },
+  "馬騰": {
+   "n": 171,
+   "face": "FACE\\FACE171",
+   "sex_hint": "?"
+  },
+  "馬鐵": {
+   "n": 172,
+   "face": "FACE\\FACE172",
+   "sex_hint": "?"
+  },
+  "高沛": {
+   "n": 173,
+   "face": "FACE\\FACE173",
+   "sex_hint": "?"
+  },
+  "高定": {
+   "n": 174,
+   "face": "FACE\\FACE174",
+   "sex_hint": "?"
+  },
+  "高順": {
+   "n": 175,
+   "face": "FACE\\FACE175",
+   "sex_hint": "?"
+  },
+  "高幹": {
+   "n": 176,
+   "face": "FACE\\FACE176",
+   "sex_hint": "?"
+  },
+  "高覽": {
+   "n": 177,
+   "face": "FACE\\FACE177",
+   "sex_hint": "?"
+  },
+  "帶來洞主": {
+   "n": 178,
+   "face": "FACE\\FACE178",
+   "sex_hint": "?"
+  },
+  "張允": {
+   "n": 179,
+   "face": "FACE\\FACE179",
+   "sex_hint": "?"
+  },
+  "張任": {
+   "n": 180,
+   "face": "FACE\\FACE180",
+   "sex_hint": "?"
+  },
+  "張角": {
+   "n": 181,
+   "face": "FACE\\FACE181",
+   "sex_hint": "?"
+  },
+  "張松": {
+   "n": 182,
+   "face": "FACE\\FACE182",
+   "sex_hint": "?"
+  },
+  "張虎": {
+   "n": 183,
+   "face": "FACE\\FACE183",
+   "sex_hint": "?"
+  },
+  "張昭": {
+   "n": 184,
+   "face": "FACE\\FACE184",
+   "sex_hint": "?"
+  },
+  "張英": {
+   "n": 185,
+   "face": "FACE\\FACE185",
+   "sex_hint": "?"
+  },
+  "張苞": {
+   "n": 186,
+   "face": "FACE\\FACE186",
+   "sex_hint": "?"
+  },
+  "張郃": {
+   "n": 187,
+   "face": "FACE\\FACE187",
+   "sex_hint": "?"
+  },
+  "張飛": {
+   "n": 188,
+   "face": "FACE\\FACE188",
+   "sex_hint": "?"
+  },
+  "張紘": {
+   "n": 189,
+   "face": "FACE\\FACE189",
+   "sex_hint": "?"
+  },
+  "張梁": {
+   "n": 190,
+   "face": "FACE\\FACE190",
+   "sex_hint": "?"
+  },
+  "張紹": {
+   "n": 191,
+   "face": "FACE\\FACE191",
+   "sex_hint": "?"
+  },
+  "張溫": {
+   "n": 192,
+   "face": "FACE\\FACE192",
+   "sex_hint": "?"
+  },
+  "張達": {
+   "n": 193,
+   "face": "FACE\\FACE193",
+   "sex_hint": "?"
+  },
+  "張衛": {
+   "n": 194,
+   "face": "FACE\\FACE194",
+   "sex_hint": "?"
+  },
+  "張魯": {
+   "n": 195,
+   "face": "FACE\\FACE195",
+   "sex_hint": "?"
+  },
+  "張勳": {
+   "n": 196,
+   "face": "FACE\\FACE196",
+   "sex_hint": "?"
+  },
+  "張橫": {
+   "n": 197,
+   "face": "FACE\\FACE197",
+   "sex_hint": "?"
+  },
+  "張燕": {
+   "n": 198,
+   "face": "FACE\\FACE198",
+   "sex_hint": "?"
+  },
+  "張遼": {
+   "n": 199,
+   "face": "FACE\\FACE199",
+   "sex_hint": "?"
+  },
+  "張濟": {
+   "n": 200,
+   "face": "FACE\\FACE200",
+   "sex_hint": "?"
+  },
+  "張翼": {
+   "n": 201,
+   "face": "FACE\\FACE201",
+   "sex_hint": "?"
+  },
+  "張嶷": {
+   "n": 202,
+   "face": "FACE\\FACE202",
+   "sex_hint": "?"
+  },
+  "張繡": {
+   "n": 203,
+   "face": "FACE\\FACE203",
+   "sex_hint": "?"
+  },
+  "張邈": {
+   "n": 204,
+   "face": "FACE\\FACE204",
+   "sex_hint": "?"
+  },
+  "張闓": {
+   "n": 205,
+   "face": "FACE\\FACE205",
+   "sex_hint": "?"
+  },
+  "張寶": {
+   "n": 206,
+   "face": "FACE\\FACE206",
+   "sex_hint": "?"
+  },
+  "曹仁": {
+   "n": 207,
+   "face": "FACE\\FACE207",
+   "sex_hint": "?"
+  },
+  "曹丕": {
+   "n": 208,
+   "face": "FACE\\FACE208",
+   "sex_hint": "?"
+  },
+  "曹休": {
+   "n": 209,
+   "face": "FACE\\FACE209",
+   "sex_hint": "?"
+  },
+  "曹性": {
+   "n": 210,
+   "face": "FACE\\FACE210",
+   "sex_hint": "?"
+  },
+  "曹昂": {
+   "n": 211,
+   "face": "FACE\\FACE211",
+   "sex_hint": "?"
+  },
+  "曹芳": {
+   "n": 212,
+   "face": "FACE\\FACE212",
+   "sex_hint": "?"
+  },
+  "曹洪": {
+   "n": 213,
+   "face": "FACE\\FACE213",
+   "sex_hint": "?"
+  },
+  "曹真": {
+   "n": 214,
+   "face": "FACE\\FACE214",
+   "sex_hint": "?"
+  },
+  "曹純": {
+   "n": 215,
+   "face": "FACE\\FACE215",
+   "sex_hint": "?"
+  },
+  "曹豹": {
+   "n": 216,
+   "face": "FACE\\FACE216",
+   "sex_hint": "?"
+  },
+  "曹爽": {
+   "n": 217,
+   "face": "FACE\\FACE217",
+   "sex_hint": "?"
+  },
+  "曹植": {
+   "n": 218,
+   "face": "FACE\\FACE218",
+   "sex_hint": "?"
+  },
+  "曹彰": {
+   "n": 219,
+   "face": "FACE\\FACE219",
+   "sex_hint": "?"
+  },
+  "曹操": {
+   "n": 220,
+   "face": "FACE\\FACE220",
+   "sex_hint": "?"
+  },
+  "曹羲": {
+   "n": 221,
+   "face": "FACE\\FACE221",
+   "sex_hint": "?"
+  },
+  "曹叡": {
+   "n": 222,
+   "face": "FACE\\FACE222",
+   "sex_hint": "?"
+  },
+  "梁興": {
+   "n": 223,
+   "face": "FACE\\FACE223",
+   "sex_hint": "?"
+  },
+  "淳于瓊": {
+   "n": 224,
+   "face": "FACE\\FACE224",
+   "sex_hint": "?"
+  },
+  "笮融": {
+   "n": 225,
+   "face": "FACE\\FACE225",
+   "sex_hint": "?"
+  },
+  "許子將": {
+   "n": 226,
+   "face": "FACE\\FACE226",
+   "sex_hint": "?"
+  },
+  "許攸": {
+   "n": 227,
+   "face": "FACE\\FACE227",
+   "sex_hint": "?"
+  },
+  "許靖": {
+   "n": 228,
+   "face": "FACE\\FACE228",
+   "sex_hint": "?"
+  },
+  "許褚": {
+   "n": 229,
+   "face": "FACE\\FACE229",
+   "sex_hint": "?"
+  },
+  "逢紀": {
+   "n": 230,
+   "face": "FACE\\FACE230",
+   "sex_hint": "?"
+  },
+  "郭汜": {
+   "n": 231,
+   "face": "FACE\\FACE231",
+   "sex_hint": "?"
+  },
+  "郭奕": {
+   "n": 232,
+   "face": "FACE\\FACE232",
+   "sex_hint": "?"
+  },
+  "郭嘉": {
+   "n": 233,
+   "face": "FACE\\FACE233",
+   "sex_hint": "?"
+  },
+  "郭圖": {
+   "n": 234,
+   "face": "FACE\\FACE234",
+   "sex_hint": "?"
+  },
+  "陳式": {
+   "n": 235,
+   "face": "FACE\\FACE235",
+   "sex_hint": "?"
+  },
+  "陳武": {
+   "n": 236,
+   "face": "FACE\\FACE236",
+   "sex_hint": "?"
+  },
+  "陳宮": {
+   "n": 237,
+   "face": "FACE\\FACE237",
+   "sex_hint": "?"
+  },
+  "陳泰": {
+   "n": 238,
+   "face": "FACE\\FACE238",
+   "sex_hint": "?"
+  },
+  "陳琳": {
+   "n": 239,
+   "face": "FACE\\FACE239",
+   "sex_hint": "?"
+  },
+  "陳登": {
+   "n": 240,
+   "face": "FACE\\FACE240",
+   "sex_hint": "?"
+  },
+  "陳群": {
+   "n": 241,
+   "face": "FACE\\FACE241",
+   "sex_hint": "?"
+  },
+  "陳震": {
+   "n": 242,
+   "face": "FACE\\FACE242",
+   "sex_hint": "?"
+  },
+  "陳橫": {
+   "n": 243,
+   "face": "FACE\\FACE243",
+   "sex_hint": "?"
+  },
+  "陳矯": {
+   "n": 244,
+   "face": "FACE\\FACE244",
+   "sex_hint": "?"
+  },
+  "陸抗": {
+   "n": 245,
+   "face": "FACE\\FACE245",
+   "sex_hint": "?"
+  },
+  "陸凱": {
+   "n": 246,
+   "face": "FACE\\FACE246",
+   "sex_hint": "?"
+  },
+  "陸遜": {
+   "n": 247,
+   "face": "FACE\\FACE247",
+   "sex_hint": "?"
+  },
+  "陸績": {
+   "n": 248,
+   "face": "FACE\\FACE248",
+   "sex_hint": "?"
+  },
+  "陶謙": {
+   "n": 249,
+   "face": "FACE\\FACE249",
+   "sex_hint": "?"
+  },
+  "傅士仁": {
+   "n": 250,
+   "face": "FACE\\FACE250",
+   "sex_hint": "?"
+  },
+  "傅彤": {
+   "n": 251,
+   "face": "FACE\\FACE251",
+   "sex_hint": "?"
+  },
+  "傅巽": {
+   "n": 252,
+   "face": "FACE\\FACE252",
+   "sex_hint": "?"
+  },
+  "傅幹": {
+   "n": 253,
+   "face": "FACE\\FACE253",
+   "sex_hint": "?"
+  },
+  "傅嬰": {
+   "n": 254,
+   "face": "FACE\\FACE254",
+   "sex_hint": "?"
+  },
+  "喬玄": {
+   "n": 255,
+   "face": "FACE\\FACE255",
+   "sex_hint": "?"
+  },
+  "喬瑁": {
+   "n": 256,
+   "face": "FACE\\FACE256",
+   "sex_hint": "?"
+  },
+  "程武": {
+   "n": 257,
+   "face": "FACE\\FACE257",
+   "sex_hint": "?"
+  },
+  "程秉": {
+   "n": 258,
+   "face": "FACE\\FACE258",
+   "sex_hint": "?"
+  },
+  "程昱": {
+   "n": 259,
+   "face": "FACE\\FACE259",
+   "sex_hint": "?"
+  },
+  "程普": {
+   "n": 260,
+   "face": "FACE\\FACE260",
+   "sex_hint": "?"
+  },
+  "程遠志": {
+   "n": 261,
+   "face": "FACE\\FACE261",
+   "sex_hint": "?"
+  },
+  "程銀": {
+   "n": 262,
+   "face": "FACE\\FACE262",
+   "sex_hint": "?"
+  },
+  "華佗": {
+   "n": 263,
+   "face": "FACE\\FACE263",
+   "sex_hint": "?"
+  },
+  "華雄": {
+   "n": 264,
+   "face": "FACE\\FACE264",
+   "sex_hint": "?"
+  },
+  "華歆": {
+   "n": 265,
+   "face": "FACE\\FACE265",
+   "sex_hint": "?"
+  },
+  "貂蟬": {
+   "n": 266,
+   "face": "FACE\\FACE266",
+   "sex_hint": "F"
+  },
+  "費褘": {
+   "n": 267,
+   "face": "FACE\\FACE267",
+   "sex_hint": "?"
+  },
+  "軻比能": {
+   "n": 268,
+   "face": "FACE\\FACE268",
+   "sex_hint": "?"
+  },
+  "雅丹": {
+   "n": 269,
+   "face": "FACE\\FACE269",
+   "sex_hint": "?"
+  },
+  "馮習": {
+   "n": 270,
+   "face": "FACE\\FACE270",
+   "sex_hint": "?"
+  },
+  "黃忠": {
+   "n": 271,
+   "face": "FACE\\FACE271",
+   "sex_hint": "?"
+  },
+  "黃祖": {
+   "n": 272,
+   "face": "FACE\\FACE272",
+   "sex_hint": "?"
+  },
+  "黃蓋": {
+   "n": 273,
+   "face": "FACE\\FACE273",
+   "sex_hint": "?"
+  },
+  "黃權": {
+   "n": 274,
+   "face": "FACE\\FACE274",
+   "sex_hint": "?"
+  },
+  "楊松": {
+   "n": 275,
+   "face": "FACE\\FACE275",
+   "sex_hint": "?"
+  },
+  "楊秋": {
+   "n": 276,
+   "face": "FACE\\FACE276",
+   "sex_hint": "?"
+  },
+  "楊修": {
+   "n": 277,
+   "face": "FACE\\FACE277",
+   "sex_hint": "?"
+  },
+  "楊祚": {
+   "n": 278,
+   "face": "FACE\\FACE278",
+   "sex_hint": "?"
+  },
+  "楊彪": {
+   "n": 279,
+   "face": "FACE\\FACE279",
+   "sex_hint": "?"
+  },
+  "楊儀": {
+   "n": 280,
+   "face": "FACE\\FACE280",
+   "sex_hint": "?"
+  },
+  "楊鋒": {
+   "n": 281,
+   "face": "FACE\\FACE281",
+   "sex_hint": "?"
+  },
+  "楊懷": {
+   "n": 282,
+   "face": "FACE\\FACE282",
+   "sex_hint": "?"
+  },
+  "董允": {
+   "n": 283,
+   "face": "FACE\\FACE283",
+   "sex_hint": "?"
+  },
+  "董卓": {
+   "n": 284,
+   "face": "FACE\\FACE284",
+   "sex_hint": "?"
+  },
+  "董和": {
+   "n": 285,
+   "face": "FACE\\FACE285",
+   "sex_hint": "?"
+  },
+  "董承": {
+   "n": 286,
+   "face": "FACE\\FACE286",
+   "sex_hint": "?"
+  },
+  "董旻": {
+   "n": 287,
+   "face": "FACE\\FACE287",
+   "sex_hint": "?"
+  },
+  "董昭": {
+   "n": 288,
+   "face": "FACE\\FACE288",
+   "sex_hint": "?"
+  },
+  "董荼那": {
+   "n": 289,
+   "face": "FACE\\FACE289",
+   "sex_hint": "?"
+  },
+  "董衡": {
+   "n": 290,
+   "face": "FACE\\FACE290",
+   "sex_hint": "?"
+  },
+  "董襲": {
+   "n": 291,
+   "face": "FACE\\FACE291",
+   "sex_hint": "?"
+  },
+  "虞翻": {
+   "n": 292,
+   "face": "FACE\\FACE292",
+   "sex_hint": "?"
+  },
+  "賈充": {
+   "n": 293,
+   "face": "FACE\\FACE293",
+   "sex_hint": "?"
+  },
+  "賈逵": {
+   "n": 294,
+   "face": "FACE\\FACE294",
+   "sex_hint": "?"
+  },
+  "賈詡": {
+   "n": 295,
+   "face": "FACE\\FACE295",
+   "sex_hint": "?"
+  },
+  "賈範": {
+   "n": 296,
+   "face": "FACE\\FACE296",
+   "sex_hint": "?"
+  },
+  "鄒靖": {
+   "n": 297,
+   "face": "FACE\\FACE297",
+   "sex_hint": "?"
+  },
+  "雍闓": {
+   "n": 298,
+   "face": "FACE\\FACE298",
+   "sex_hint": "?"
+  },
+  "雷銅": {
+   "n": 299,
+   "face": "FACE\\FACE299",
+   "sex_hint": "?"
+  },
+  "雷薄": {
+   "n": 300,
+   "face": "FACE\\FACE300",
+   "sex_hint": "?"
+  },
+  "廖化": {
+   "n": 301,
+   "face": "FACE\\FACE301",
+   "sex_hint": "?"
+  },
+  "徹里吉": {
+   "n": 302,
+   "face": "FACE\\FACE302",
+   "sex_hint": "?"
+  },
+  "滿寵": {
+   "n": 303,
+   "face": "FACE\\FACE303",
+   "sex_hint": "?"
+  },
+  "管亥": {
+   "n": 304,
+   "face": "FACE\\FACE304",
+   "sex_hint": "?"
+  },
+  "管輅": {
+   "n": 305,
+   "face": "FACE\\FACE305",
+   "sex_hint": "?"
+  },
+  "臧霸": {
+   "n": 306,
+   "face": "FACE\\FACE306",
+   "sex_hint": "?"
+  },
+  "裴元紹": {
+   "n": 307,
+   "face": "FACE\\FACE307",
+   "sex_hint": "?"
+  },
+  "趙弘": {
+   "n": 308,
+   "face": "FACE\\FACE308",
+   "sex_hint": "?"
+  },
+  "趙統": {
+   "n": 309,
+   "face": "FACE\\FACE309",
+   "sex_hint": "?"
+  },
+  "趙雲": {
+   "n": 310,
+   "face": "FACE\\FACE310",
+   "sex_hint": "?"
+  },
+  "趙廣": {
+   "n": 311,
+   "face": "FACE\\FACE311",
+   "sex_hint": "?"
+  },
+  "趙範": {
+   "n": 312,
+   "face": "FACE\\FACE312",
+   "sex_hint": "?"
+  },
+  "蒯良": {
+   "n": 313,
+   "face": "FACE\\FACE313",
+   "sex_hint": "?"
+  },
+  "蒯越": {
+   "n": 314,
+   "face": "FACE\\FACE314",
+   "sex_hint": "?"
+  },
+  "劉巴": {
+   "n": 315,
+   "face": "FACE\\FACE315",
+   "sex_hint": "?"
+  },
+  "劉岱": {
+   "n": 316,
+   "face": "FACE\\FACE316",
+   "sex_hint": "?"
+  },
+  "劉表": {
+   "n": 317,
+   "face": "FACE\\FACE317",
+   "sex_hint": "?"
+  },
+  "劉封": {
+   "n": 318,
+   "face": "FACE\\FACE318",
+   "sex_hint": "?"
+  },
+  "劉度": {
+   "n": 319,
+   "face": "FACE\\FACE319",
+   "sex_hint": "?"
+  },
+  "劉焉": {
+   "n": 320,
+   "face": "FACE\\FACE320",
+   "sex_hint": "?"
+  },
+  "劉備": {
+   "n": 321,
+   "face": "FACE\\FACE321",
+   "sex_hint": "?"
+  },
+  "劉循": {
+   "n": 322,
+   "face": "FACE\\FACE322",
+   "sex_hint": "?"
+  },
+  "劉琦": {
+   "n": 323,
+   "face": "FACE\\FACE323",
+   "sex_hint": "?"
+  },
+  "劉琮": {
+   "n": 324,
+   "face": "FACE\\FACE324",
+   "sex_hint": "?"
+  },
+  "劉辟": {
+   "n": 325,
+   "face": "FACE\\FACE325",
+   "sex_hint": "?"
+  },
+  "劉璋": {
+   "n": 326,
+   "face": "FACE\\FACE326",
+   "sex_hint": "?"
+  },
+  "劉賢": {
+   "n": 327,
+   "face": "FACE\\FACE327",
+   "sex_hint": "?"
+  },
+  "劉曄": {
+   "n": 328,
+   "face": "FACE\\FACE328",
+   "sex_hint": "?"
+  },
+  "劉禪": {
+   "n": 329,
+   "face": "FACE\\FACE329",
+   "sex_hint": "?"
+  },
+  "劉繇": {
+   "n": 330,
+   "face": "FACE\\FACE330",
+   "sex_hint": "?"
+  },
+  "審配": {
+   "n": 331,
+   "face": "FACE\\FACE331",
+   "sex_hint": "?"
+  },
+  "樊稠": {
+   "n": 332,
+   "face": "FACE\\FACE332",
+   "sex_hint": "?"
+  },
+  "樂進": {
+   "n": 333,
+   "face": "FACE\\FACE333",
+   "sex_hint": "?"
+  },
+  "潘鳳": {
+   "n": 334,
+   "face": "FACE\\FACE334",
+   "sex_hint": "?"
+  },
+  "潘璋": {
+   "n": 335,
+   "face": "FACE\\FACE335",
+   "sex_hint": "?"
+  },
+  "潘濬": {
+   "n": 336,
+   "face": "FACE\\FACE336",
+   "sex_hint": "?"
+  },
+  "蔣欽": {
+   "n": 337,
+   "face": "FACE\\FACE337",
+   "sex_hint": "?"
+  },
+  "蔣琬": {
+   "n": 338,
+   "face": "FACE\\FACE338",
+   "sex_hint": "?"
+  },
+  "蔣幹": {
+   "n": 339,
+   "face": "FACE\\FACE339",
+   "sex_hint": "?"
+  },
+  "蔣義渠": {
+   "n": 340,
+   "face": "FACE\\FACE340",
+   "sex_hint": "?"
+  },
+  "蔣濟": {
+   "n": 341,
+   "face": "FACE\\FACE341",
+   "sex_hint": "?"
+  },
+  "蔡中": {
+   "n": 342,
+   "face": "FACE\\FACE342",
+   "sex_hint": "?"
+  },
+  "蔡和": {
+   "n": 343,
+   "face": "FACE\\FACE343",
+   "sex_hint": "?"
+  },
+  "蔡邕": {
+   "n": 344,
+   "face": "FACE\\FACE344",
+   "sex_hint": "?"
+  },
+  "蔡瑁": {
+   "n": 345,
+   "face": "FACE\\FACE345",
+   "sex_hint": "?"
+  },
+  "諸葛均": {
+   "n": 346,
+   "face": "FACE\\FACE346",
+   "sex_hint": "?"
+  },
+  "諸葛亮": {
+   "n": 347,
+   "face": "FACE\\FACE347",
+   "sex_hint": "?"
+  },
+  "諸葛恪": {
+   "n": 348,
+   "face": "FACE\\FACE348",
+   "sex_hint": "?"
+  },
+  "諸葛瑾": {
+   "n": 349,
+   "face": "FACE\\FACE349",
+   "sex_hint": "?"
+  },
+  "諸葛誕": {
+   "n": 350,
+   "face": "FACE\\FACE350",
+   "sex_hint": "?"
+  },
+  "鄧艾": {
+   "n": 351,
+   "face": "FACE\\FACE351",
+   "sex_hint": "?"
+  },
+  "鄧忠": {
+   "n": 352,
+   "face": "FACE\\FACE352",
+   "sex_hint": "?"
+  },
+  "鄧芝": {
+   "n": 353,
+   "face": "FACE\\FACE353",
+   "sex_hint": "?"
+  },
+  "鄧茂": {
+   "n": 354,
+   "face": "FACE\\FACE354",
+   "sex_hint": "?"
+  },
+  "鄧賢": {
+   "n": 355,
+   "face": "FACE\\FACE355",
+   "sex_hint": "?"
+  },
+  "魯肅": {
+   "n": 356,
+   "face": "FACE\\FACE356",
+   "sex_hint": "?"
+  },
+  "盧植": {
+   "n": 357,
+   "face": "FACE\\FACE357",
+   "sex_hint": "?"
+  },
+  "閻圃": {
+   "n": 358,
+   "face": "FACE\\FACE358",
+   "sex_hint": "?"
+  },
+  "霍峻": {
+   "n": 359,
+   "face": "FACE\\FACE359",
+   "sex_hint": "?"
+  },
+  "駱統": {
+   "n": 360,
+   "face": "FACE\\FACE360",
+   "sex_hint": "?"
+  },
+  "鮑隆": {
+   "n": 361,
+   "face": "FACE\\FACE361",
+   "sex_hint": "?"
+  },
+  "糜竺": {
+   "n": 362,
+   "face": "FACE\\FACE362",
+   "sex_hint": "?"
+  },
+  "糜芳": {
+   "n": 363,
+   "face": "FACE\\FACE363",
+   "sex_hint": "?"
+  },
+  "薛綜": {
+   "n": 364,
+   "face": "FACE\\FACE364",
+   "sex_hint": "?"
+  },
+  "鍾會": {
+   "n": 365,
+   "face": "FACE\\FACE365",
+   "sex_hint": "?"
+  },
+  "鍾繇": {
+   "n": 366,
+   "face": "FACE\\FACE366",
+   "sex_hint": "?"
+  },
+  "韓玄": {
+   "n": 367,
+   "face": "FACE\\FACE367",
+   "sex_hint": "?"
+  },
+  "韓忠": {
+   "n": 368,
+   "face": "FACE\\FACE368",
+   "sex_hint": "?"
+  },
+  "韓浩": {
+   "n": 369,
+   "face": "FACE\\FACE369",
+   "sex_hint": "?"
+  },
+  "韓嵩": {
+   "n": 370,
+   "face": "FACE\\FACE370",
+   "sex_hint": "?"
+  },
+  "韓當": {
+   "n": 371,
+   "face": "FACE\\FACE371",
+   "sex_hint": "?"
+  },
+  "韓遂": {
+   "n": 372,
+   "face": "FACE\\FACE372",
+   "sex_hint": "?"
+  },
+  "韓暹": {
+   "n": 373,
+   "face": "FACE\\FACE373",
+   "sex_hint": "?"
+  },
+  "韓馥": {
+   "n": 374,
+   "face": "FACE\\FACE374",
+   "sex_hint": "?"
+  },
+  "簡雍": {
+   "n": 375,
+   "face": "FACE\\FACE375",
+   "sex_hint": "?"
+  },
+  "顏良": {
+   "n": 376,
+   "face": "FACE\\FACE376",
+   "sex_hint": "?"
+  },
+  "魏延": {
+   "n": 377,
+   "face": "FACE\\FACE377",
+   "sex_hint": "?"
+  },
+  "魏續": {
+   "n": 378,
+   "face": "FACE\\FACE378",
+   "sex_hint": "?"
+  },
+  "龐統": {
+   "n": 379,
+   "face": "FACE\\FACE379",
+   "sex_hint": "?"
+  },
+  "龐義": {
+   "n": 380,
+   "face": "FACE\\FACE380",
+   "sex_hint": "?"
+  },
+  "龐德": {
+   "n": 381,
+   "face": "FACE\\FACE381",
+   "sex_hint": "?"
+  },
+  "譚雄": {
+   "n": 382,
+   "face": "FACE\\FACE382",
+   "sex_hint": "?"
+  },
+  "譙周": {
+   "n": 383,
+   "face": "FACE\\FACE383",
+   "sex_hint": "?"
+  },
+  "關平": {
+   "n": 384,
+   "face": "FACE\\FACE384",
+   "sex_hint": "?"
+  },
+  "關羽": {
+   "n": 385,
+   "face": "FACE\\FACE385",
+   "sex_hint": "?"
+  },
+  "關索": {
+   "n": 386,
+   "face": "FACE\\FACE386",
+   "sex_hint": "?"
+  },
+  "關鳳": {
+   "n": 387,
+   "face": "FACE\\FACE387",
+   "sex_hint": "F"
+  },
+  "關興": {
+   "n": 388,
+   "face": "FACE\\FACE388",
+   "sex_hint": "?"
+  },
+  "禰衡": {
+   "n": 389,
+   "face": "FACE\\FACE389",
+   "sex_hint": "?"
+  },
+  "嚴白虎": {
+   "n": 390,
+   "face": "FACE\\FACE390",
+   "sex_hint": "?"
+  },
+  "嚴政": {
+   "n": 391,
+   "face": "FACE\\FACE391",
+   "sex_hint": "?"
+  },
+  "嚴畯": {
+   "n": 392,
+   "face": "FACE\\FACE392",
+   "sex_hint": "?"
+  },
+  "嚴綱": {
+   "n": 393,
+   "face": "FACE\\FACE393",
+   "sex_hint": "?"
+  },
+  "嚴輿": {
+   "n": 394,
+   "face": "FACE\\FACE394",
+   "sex_hint": "?"
+  },
+  "嚴顏": {
+   "n": 395,
+   "face": "FACE\\FACE395",
+   "sex_hint": "?"
+  },
+  "蘇飛": {
+   "n": 396,
+   "face": "FACE\\FACE396",
+   "sex_hint": "?"
+  },
+  "闞澤": {
+   "n": 397,
+   "face": "FACE\\FACE397",
+   "sex_hint": "?"
+  },
+  "顧雍": {
+   "n": 398,
+   "face": "FACE\\FACE398",
+   "sex_hint": "?"
+  },
+  "龔都": {
+   "n": 399,
+   "face": "FACE\\FACE399",
+   "sex_hint": "?"
+  },
+  "龔景": {
+   "n": 400,
+   "face": "FACE\\FACE400",
+   "sex_hint": "?"
+  }
+ },
+ "count": 400,
+ "generated": "2026-11-25T04:04:30+0800",
+ "generator": "work/asset_pipe/make_face.py",
+ "source": "export/png/SHAPE/FACE/FACE<NNN>.png",
+ "encoding": {
+  "full": {
+   "format": "webp",
+   "quality": 85,
+   "method": 6,
+   "scale": "1:1 原尺寸"
+  },
+  "thumb": {
+   "format": "webp",
+   "quality": 78,
+   "method": 6,
+   "resample": "cover(100x120 -> 30x40) + LANCZOS"
+  }
+ },
+ "note": "键是武将名（前端按名字取图）；n 是原作 FACE 编号，文件名是零填充 3 位 %03d.webp。sex_hint 只有 6 名女性写 F，其余 ? 表示未知（generals.json 无性别字段）。",
+ "sex_known": {
+  "大喬": "F",
+  "小喬": "F",
+  "孫尚香": "F",
+  "祝融夫人": "F",
+  "貂蟬": "F",
+  "關鳳": "F"
+ },
+ "female_names": [
+  "大喬",
+  "小喬",
+  "孫尚香",
+  "祝融夫人",
+  "貂蟬",
+  "關鳳"
+ ]
+}

@@ -1,0 +1,12 @@
+﻿import { boot } from './cdp.mjs';
+const c = await boot();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log('##', ...a);
+log('href', await c.eval('location.href'));
+const mr = await c.rect('#map');
+log('map rect', JSON.stringify(mr));
+await c.mouse(mr.x + 442 * (mr.w / 750), mr.y + 223 * (mr.h / 695));
+await sleep(600);
+log('hint', await c.eval(`(document.getElementById('hint')||{}).innerText`));
+log('acts', JSON.stringify(await c.eval(`[...document.querySelectorAll('#actions [data-act]')].map(e=>e.dataset.act)`)));
+await c.close();

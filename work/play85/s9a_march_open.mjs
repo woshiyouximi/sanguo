@@ -1,0 +1,13 @@
+import { boot, sleep, BASE } from './cdp.mjs';
+const c = await boot();
+const log = (k, v) => console.log('##', k, JSON.stringify(v));
+await c.goto(BASE + 'campaign.html'); await sleep(1000);
+await c.mouse(146, 278); await sleep(500);
+const rr = await c.eval(`(()=>{const e=[...document.querySelectorAll('.city')].find(x=>x.dataset.name==='平原'); if(!e) return null; const b=e.getBoundingClientRect(); return [b.x+b.width/2,b.y+b.height/2];})()`);
+await c.mouse(rr[0], rr[1]); await sleep(600);
+log('acts', await c.eval(`(()=>[...document.querySelectorAll('#actions .btn')].map(b=>({act:b.dataset.act, txt:b.innerText.replace(/\\s+/g,' ').trim(), dis:b.disabled})))()`));
+const dr = await c.eval(`(()=>{const b=[...document.querySelectorAll('#actions .btn')].find(x=>x.dataset.act==='dispatch'); if(!b) return null; const q=b.getBoundingClientRect(); return [q.x+q.width/2,q.y+q.height/2];})()`);
+await c.mouse(dr[0], dr[1]); await sleep(700);
+log('marchSheet', await c.eval(`(()=>{const s=document.querySelector('#marchSheet'); if(!s) return null; return {hidden:s.hidden, cls:s.className, sub:(document.querySelector('#marchSub')||{}).innerText||'', targets:(document.querySelector('#marchTargets')||{}).innerText||'', foot:(document.querySelector('#marchFoot')||{}).innerText||'', cards:[...s.querySelectorAll('[data-march]')].map(e=>({name:e.dataset.march, txt:e.innerText.replace(/\\s+/g,' ').trim().slice(0,60), r:(()=>{const q=e.getBoundingClientRect();return [Math.round(q.x),Math.round(q.y),Math.round(q.width),Math.round(q.height)];})()}))};})()`));
+await c.shot('s9a_march_sheet');
+c.close();

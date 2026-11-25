@@ -1,0 +1,10 @@
+import { boot, BASE, sleep } from './cdp.mjs';
+const c = await boot({ w: 782, h: 1500 });
+await sleep(500);
+const geom = await c.eval(`(()=>{const cv=document.getElementById('stage'); const r=cv.getBoundingClientRect(); const bu=document.getElementById('battleui'); const slots=[...document.querySelectorAll('#battleui .slot, .slot')].map(e=>{const q=e.getBoundingClientRect(); return {cls:e.className, x:q.x,y:q.y,w:q.width,h:q.height,txt:(e.innerText||'').trim().slice(0,20)};});
+ return {href:location.href, inner:{w:innerWidth,h:innerHeight}, canvas:{w:cv.width,h:cv.height,rect:{x:r.x,y:r.y,w:r.width,h:r.height}}, buf:{w:cv.width,h:cv.height}, slots, hasSanguo:!!window.__sanguo, bodyH:document.body.scrollHeight};})()`);
+const st = await c.eval(`(()=>{const s=window.__sanguo&&window.__sanguo.state; if(!s) return null; return {mode:s.mode, keys:Object.keys(s).slice(0,40), msg:s.message, over:s.world&&s.world.over, skills:(s.skills||[]).map(k=>({name:k.name,ok:k.ok,cost:k.cost,block:k.block,reason:k.reason,kind:k.kind})), world:{turn:s.world&&s.world.turn, units:(s.world&&s.world.units||[]).length}, settle:s.settlement};})()`);
+const shot = await c.shot('s4_battle_enter');
+await c.save('s4_battle_enter', { geom, st, shot, errs: await c.errs(c.startErr) });
+console.log(JSON.stringify({ geom, st, shot, errs: await c.errs(c.startErr) }, null, 1));
+c.close();

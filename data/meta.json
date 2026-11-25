@@ -1,0 +1,90 @@
+{
+ "generated_from": "F:\\sanguo\\extract\\pak",
+ "tables": {
+  "scenarios": {
+   "count": 5,
+   "bytes": 327148,
+   "sha1_16": "7d1880d70efc0ee0"
+  },
+  "generals": {
+   "count": 401,
+   "bytes": 425467,
+   "sha1_16": "a2434ec26b395443"
+  },
+  "magics": {
+   "count": 110,
+   "bytes": 23070,
+   "sha1_16": "d50bcb272713fc43"
+  },
+  "wises": {
+   "count": 67,
+   "bytes": 8732,
+   "sha1_16": "c816502624653d69"
+  },
+  "items": {
+   "count": 77,
+   "bytes": 35485,
+   "sha1_16": "446592ff8a980ab5"
+  },
+  "terrains": {
+   "count": 12,
+   "bytes": 3586,
+   "sha1_16": "0d47d22539df3210"
+  },
+  "things": {
+   "count": 621,
+   "bytes": 615835,
+   "sha1_16": "336140b58cf4290b"
+  },
+  "things_define": {
+   "count": 2,
+   "bytes": 1914,
+   "sha1_16": "9a32c033004590aa"
+  },
+  "fonts": {
+   "count": 7,
+   "bytes": 1457,
+   "sha1_16": "c30b99d27d627289"
+  },
+  "sango_system": {
+   "count": 11,
+   "bytes": 332,
+   "sha1_16": "3825ccad89d1ff69"
+  },
+  "troops": {
+   "count": 2,
+   "bytes": 2182,
+   "sha1_16": "07268f1455c4484b"
+  },
+  "formations": {
+   "count": 2,
+   "bytes": 1206,
+   "sha1_16": "a61097d141a3f3cf"
+  }
+ },
+ "expect": {
+  "cities": 60,
+  "paths": 116,
+  "kings": 15,
+  "generals": 401,
+  "magics": 110,
+  "wises": 67,
+  "items": 77,
+  "terrains": 12,
+  "troops": 13,
+  "formations": 9
+ },
+ "source_files": {
+  "COMBINE.INI": "a2f25ff625de8249",
+  "MAGIC.INI": "8d84cc2c9a75d13e",
+  "MESSAGE.INI": "b7ff6ee6b3ea0707",
+  "SANGO.IDX": "42c2e13da4b78d9f",
+  "SANGO.INI": "7962641c1ab6c2d5",
+  "THINGS.INI": "2de2d90927241d54",
+  "TIMES1.INI": "ea1d51566929a715",
+  "TIMES2.INI": "a6a1f4ea126e2fb2",
+  "TIMES3.INI": "5eb99d077d252dcd",
+  "TIMES4.INI": "5d9f8f5642cc32ae",
+  "TIMES5.INI": "8c579cf90dd027f8"
+ }
+}

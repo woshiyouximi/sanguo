@@ -1,0 +1,21 @@
+﻿import { boot, BASE } from './cdp.mjs';
+const c = await boot();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log('##', ...a);
+const head = async (t) => log(t, JSON.stringify(await c.eval(`(()=>({ym:(document.getElementById('ym')||{}).innerText, gold:(document.getElementById('gold')||{}).innerText, ct:(document.getElementById('ct')||{}).innerText, rec:(document.getElementById('rec')||{}).innerText, badge:(document.getElementById('slotBadge')||{}).innerText, notice:(document.getElementById('notice')||{}).innerText, log0:(document.querySelector('#logrows .lr')||{}).innerText}))()`)));
+await c.goto(BASE + 'campaign.html'); await sleep(2000);
+await head('before load');
+const bs = await c.rect('#btnSave'); await c.mouse(bs.x + bs.w / 2, bs.y + bs.h / 2); await sleep(1000);
+log('rows', JSON.stringify(await c.eval(`[...document.querySelectorAll('#slotRows .slot')].slice(0,3).map(e=>e.innerText.replace(/\\s+/g,' ').slice(0,80))`)));
+await c.shot('07_存档面板');
+const rows = await c.eval(`[...document.querySelectorAll('#slotRows .slot')].slice(0,2).map((e,i)=>{const b=e.querySelector('button[data-do="load"]'); if(!b) return null; const r=b.getBoundingClientRect(); return {i:i+1,x:r.x+r.width/2,y:r.y+r.height/2,dis:b.disabled};})`);
+log('loadbtns', JSON.stringify(rows));
+const b2 = rows.filter(Boolean)[1];
+if (b2) { await c.mouse(b2.x, b2.y); await sleep(3200); }
+await head('after load slot2');
+log('href', await c.eval('location.href'));
+await c.shot('07b_读槽2后');
+log('saves now', JSON.stringify(await c.eval(`(()=>{const sv=JSON.parse(localStorage.getItem('sanguo_saves_v1')); return {last:sv.last, slots:sv.slots.map((s,i)=>s?{i:i+1,month:s.month,gold:s.gold,ct:s.ownedCount}:null).slice(0,3)};})()`)));
+await c.save('07_after_load_slot2', await c.eval(`JSON.stringify({saves:localStorage.getItem('sanguo_saves_v1'),campaign:localStorage.getItem('sanguo_campaign_v1'),items:localStorage.getItem('sanguo_items_v1')})`));
+log('errs', JSON.stringify((await c.errs(0)).map(e=>e.kind+':'+e.msg.slice(0,70)).slice(-3)));
+await c.close();

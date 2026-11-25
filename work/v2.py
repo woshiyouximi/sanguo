@@ -1,0 +1,26 @@
+﻿import json,sys,os,glob
+sys.stdout.reconfigure(encoding="utf-8")
+D=r"F:\sanguo\data"
+G=json.load(open(os.path.join(D,"generals.json"),encoding="utf-8"))
+print("generals", len(G))
+gy=[g for g in G if g["NAME"]=="關羽"][0]
+print("關羽 SKILL:", json.dumps(gy["SKILL"],ensure_ascii=False)[:300])
+print("關羽 WISESKILL:", json.dumps(gy["WISESKILL"],ensure_ascii=False)[:300])
+print("total SKILL pairs:", sum(len(g["SKILL"]) for g in G))
+print("total WISE pairs:", sum(len(g["WISESKILL"]) for g in G))
+print("names sample:", [g["NAME"] for g in G[:5]], "last:", G[-1]["NAME"])
+names=set(g["NAME"] for g in G)
+print("dup names:", len(G)-len(names))
+tr=json.load(open(os.path.join(D,"troops.json"),encoding="utf-8"))
+print("troops names:", tr["names"])
+print("troops matrix[0]:", tr["matrix"][0])
+fm=json.load(open(os.path.join(D,"formations.json"),encoding="utf-8"))
+print("form names:", fm["names"])
+print("form matrix[0]:", json.dumps(fm["matrix"][0],ensure_ascii=False)[:200])
+print("slot keys:", list(fm["slots"][0]))
+print("fill keys:", list(fm["slots"][0]["fill"]), {k:len(v) for k,v in fm["slots"][0]["fill"].items()})
+sc=json.load(open(os.path.join(D,"scenarios.json"),encoding="utf-8"))
+for s in sc: print("scenario", s["id"], s["system"].get("TIME"), "kings",len(s["kings"]),"cities",len(s["cities"]),"paths",len(s["paths"]))
+for d in [r"F:\sanguo\proto\ui\assets\hero", r"F:\sanguo\game\web\assets\hero"]:
+    fs=glob.glob(os.path.join(d,"*.png"))
+    print(d, "png:", len(fs), "sample:", [os.path.basename(x) for x in fs[:5]])

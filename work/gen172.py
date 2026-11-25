@@ -1,0 +1,537 @@
+# -*- coding: utf-8 -*-
+"""生成 project/172_对照表刷新.md，并向 37a 末尾追加 §十七。
+
+写文件一律 encoding='utf-8'、newline='\n'（不走 PowerShell，避免 BOM/GBK）。
+"""
+import io
+import os
+import re
+
+ROOT = r'F:\sanguo'
+P172 = os.path.join(ROOT, 'project', '172_对照表刷新.md')
+P37A = os.path.join(ROOT, 'project', '37a_逻辑对照.md')
+
+# (行号, 系统/机制, 原作依据, 状态, 证据, 工时h, 归属/备注)
+ROWS = [
+    # ── R1–R80：37a 正文原表（重判） ─────────────────────────────────────
+    ('R1', '60 城 12 關卡（RATE0/POP0/DEF100）', '04c §2.2', '✅',
+     '`game/data/scenarios.json`；`tests/data_audit.test.ts`（18 表 / 52,743 格 / 0 差异）', 0, ''),
+    ('R2', '116 條道路 + 39 條 30000 哨兵', '04c §3.2', '✅',
+     '`game/data/scenarios.json`；`tests/data_r82.test.ts`', 0, ''),
+    ('R3', '5 劇本城池數 15/19/9/9/6', '03c', '✅',
+     '`game/data/scenarios.json`；`tests/data_audit.test.ts`', 0, ''),
+    ('R4', '選君主 + 勢力歸屬', 'TIMES KING', '✅',
+     '`web/monarch_model.js:110` setMonarch / `:157` inheritForce；`tests/monarch.test.ts` 25', 0,
+     '旧 ❌10h → ✅'),
+    ('R5', '一月一回合（原判 0x4C30E0 月內倒計時）', '04c §1', '⬜',
+     '37a §十一 裁決：原作無月內倒計時，0x4C30E0 實為月令鎖（見 R8）', 0, '不做'),
+    ('R6', 'RATE1..5 不變、無城池升級（+0x6C 只讀）', '04c §2.2', '⬜',
+     '37a §十一 裁決：RATE 無行為可還原', 0, '不做'),
+    ('R7', '年度結算（12 月→正月）', '04c §1.4', '✅',
+     '`web/saves.js:1466` annualSettle；`tests/yearsettle_r7.test.ts` 18', 0, '旧 ⚠️4h → ✅（時點已釘死）'),
+    ('R8', '本月已下內政令闸门（0x4A64BC）', '04c §2.3', '✅',
+     '`web/city_model.js:1546` monthLocked / `:1553` markMonthActed / `:1560` clearMonthLock；`tests/city_rules.test.ts`', 0,
+     '旧 ❌1h 是誤判'),
+    ('R9', '開發：人口 +rand()%3000+INT*100、防禦 +rand()%12+STR*4/10、收 0 金', '04c §2.3', '✅',
+     '`web/city_model.js:914` develop（`:931`/`:934` 兩支）；`tests/city_rules.test.ts`', 0, ''),
+    ('R10', '自治施行（批量開發）', '04c §2.3', '✅',
+     '`web/city_model.js:1259` runAutonomy / `:1304` autonomyTick；`tests/city_rules.test.ts`', 0, ''),
+    ('R11', '搜索兩段式：人才/物品 50/50 → 權重', '04c §2.3', '✅',
+     '`web/city_model.js:194` SEARCH、`:198` STAGE1、`:968` 入口；`tests/city_rules.test.ts`', 0, ''),
+    ('R12', '徵兵耗預備兵、上限 +0x82、步騎雙滑桿', '04c §2.3', '✅',
+     '`web/city_model.js:673` prepStateOf / `:685` refillPrep；`src/core/levels.ts:152` cavalryCapOf；`tests/city_rules.test.ts`', 0, ''),
+    ('R13', '武將資料/勢力地圖/內政終了三命令', '0x48B228/0x48B434/0x48B420', '✅',
+     '`web/campaign.html:220-224` 按鈕、`:1922-1978` 三命令；`tests/webfix_r86.test.ts`', 0, ''),
+    ('R14', '移動 9 鄰接 Rate=80/(Length+1)', '04c §3.2', '✅',
+     '`src/core/march.ts`；`tests/march.test.ts` 16、`tests/move_grid.test.ts`', 0, ''),
+    ('R15', '金錢：年稅 floor(pop×75/10000)+2250（正月一次，無月稅/俸祿）', '04c §4', '✅',
+     '`web/saves.js:1466` annualSettle；`tests/yearsettle_r7.test.ts` 18', 0, '旧 ⚠️2h → ✅（公式已定位）'),
+    ('R16', '無徵糧/訓練/治水/外交', '04c §5', '⬜',
+     '原作無此四命令（37a §三）；`city_model` 命令表無對應出口', 0, '不做'),
+    ('R17', '128 槽輪盤 + Rate 權重 + SearchType 等級窗', '04b2 §5.3', '✅',
+     '`web/city_model.js:1377` searchPools；`tests/guard_r17.test.ts` 4', 0, ''),
+    ('R18', 'ONLYONE 全局只出一次（0x4C3A80）', '04b2 §5.4', '✅',
+     '`web/city_model.js:1393` ONLYONE skip；`src/core/capture.ts:306` dropWeight；`tests/city_rules.test.ts`', 0, '旧 ❌2h → ✅'),
+    ('R19', 'Rate=0 的 5-6 件永搜不到', '04b2 §5.5', '✅',
+     '`web/city_model.js:1377` searchPools 權重剔除；`tests/guard_r19.test.ts` 4', 0, ''),
+    ('R20', '搜索 rand() 不可復現', '—', '🟡',
+     '`web/city_model.js:282-308` SEARCH_NONCE_KEY：以每檔 nonce 代替原作全局 rand()', 2,
+     '自覺偏差；差「與 EXE 同流」一句，歸內政'),
+    ('R21', '帶兵上限 min(5×Lv,100)（0x409FB6）', '—', '✅',
+     '`src/core/levels.ts:141` troopCapOf；`tests/level_troop.test.ts`', 0, ''),
+    ('R22', '騎兵上限 clamp((L−20)×5,0,100)（0x409FD8）', '—', '✅',
+     '`src/core/levels.ts:152` cavalryCapOf；`tests/level_troop.test.ts`', 0, ''),
+    ('R23', 'maxHP/maxMP 公式（0x40A020/0x40A098）', '—', '✅',
+     '`src/core/battle.ts:932` hpCapOf / `:949` mpCapOf；`tests/level_troop.test.ts`', 0, '旧 🟡2h → ✅'),
+    ('R24', '升級：溢出保留、上限重算（0x40F23C）', '—', '✅',
+     '`src/core/battle.ts:3017-3028`（ovHp/ovMp + hpCapOf/mpCapOf）', 0,
+     '帶兵上限由等級派生，升級自然生效；旧 🟡2h → ✅'),
+    ('R25', '升級補學武將技/軍師技（0x40A183/0x40A227）', '—', '✅',
+     '`src/core/battle.ts:3031` learnedAtLevelUp；`src/core/unlock.ts`；`tests/unlock.test.ts` 27', 0, ''),
+    ('R26', '經驗閾值 ((n−1)×137−34)×n/2+17', '—', '✅',
+     '`src/core/battle.ts:2808` levelFromExp；`tests/levels.test.ts`', 0, ''),
+    ('R27', '兵種 13 + 兵符白名單', '—', '✅',
+     '`src/core/unlock.ts` UseForce→Force→掩碼；`tests/unlock.test.ts` 27', 0, ''),
+    ('R28', '陣形相剋 11×11（含亂陣）', '03a', '✅',
+     '`game/data/formations.json` matrix；`src/core/battle.ts:1710` formationBonus；`tests/formation11.test.ts` 7', 0,
+     '旧 🟡3h → ✅'),
+    ('R29', '兵力檔位 10/50/100/200（+0x42）', '—', '✅',
+     '`src/core/battle.ts` 檔位；`tests/stepcav.test.ts` 18', 0, ''),
+    ('R30', '站位 gx=x+anchorX+(200−N)//25、A 側鏡像', '—', '✅',
+     '`src/core/battle.ts:672` formationCells；`tests/battle.test.ts` 21', 0, ''),
+    ('R31', '軍師技 67 條 / 18 組同名多檔', '03a §2.2', '✅',
+     '`src/core/wises.ts:270`（67 = 55 戰前 + 12 戰中 + 0 佔位）；`tests/wises.test.ts` 33', 0,
+     '旧 🟡12h → ✅；12 條走 `strategy.ts` 派發'),
+    ('R32', '軍師在城內（+0x18）才提供', '—', '✅',
+     '`web/city_model.js:833` wiseOf；`tests/wises_r84.test.ts` 16', 0, ''),
+    ('R33', '戰力純加法（0x442EFA 無乘算）', '04b5 §4.1', '✅',
+     '`src/core/wises_effects.ts` 純加法通道；`tests/r33add.test.ts` 4', 0, '旧 ⚠️2h → ✅（已復核）'),
+    ('R34', '一次只能發動一條 / 有化解計策', '—', '✅',
+     '`web/main.js:705` applyWise 單 seq；`wises_effects` 含化解；`tests/wises24.test.ts` 27', 0, '旧 🟡2h → ✅'),
+    ('R35', '出陣前玩家選一條發動', '—', '✅',
+     '`web/deploy.html:546` 只列已學；`web/main.js:705` applyWise', 0, '旧 🟡2h → ✅'),
+    ('R36', '編成→入場→主循環→勝負→結算', '0x44759E/0x447037', '✅',
+     '`src/core/battle.ts` createWorld/step/settle；`tests/battle.test.ts` 21', 0, ''),
+    ('R37', '67 分支策略派發 + 援軍', '0x44D450（B82 更正）', '✅',
+     '`src/core/strategy.ts:250` STRATEGY_TABLE 67 條、`:456` planStrategy、`:1055` planReinforceGroups；`tests/strategy.test.ts` 33', 0,
+     '旧 ❌20h → ✅；原「66 分支=突擊/火計」依據被 project/78 推翻，實為軍師技戰中派發器（22 類×3 檔）'),
+    ('R38', '撤退 ACT=2 / BattleYield', '04d §2.7', '✅',
+     '`src/core/battle.ts:138` isRetreating / `:143` markRetreating；`tests/retreat.test.ts`（R158 抽格版，364 行）', 0, '旧 ❌3h → ✅'),
+    ('R39', '天氣 ProduceRain/Snow/Fog', '—', '✅',
+     '`src/core/weather.ts`；`tests/weather.test.ts`、`tests/battle.test.ts`', 0, '旧 ❌5h → ✅'),
+    ('R40', '無獨立單挑（0x447516 空函數）', '04b3', '⬜',
+     '原作無單挑流程（37a §三）', 0, '不做'),
+    ('R41', '戰力五段加法 + (士氣−50)/5', '04b §2.5', '✅',
+     '`src/core/battle.ts:158` MORALE_DAMP=1、`:1615` moraleTerm；`tests/morale.test.ts` 11', 0, '旧 🟡1h → ✅'),
+    ('R42', '四條命中式', '04b4', '✅',
+     '`src/core/battle.ts` 四條命中；`tests/battle.test.ts`', 0, ''),
+    ('R43', '未就位目標 ×2/3（0x43BE08）', '—', '✅',
+     '`src/core/battle.ts` 命中修正；`tests/guard_r43_r51.test.ts` 4', 0, ''),
+    ('R44', 'attacker+0x2C&4 二次 2/3 補判', '04b §3.4', '✅',
+     'B81 更正：該位=騎兵，非補判；`tests/stepcav.test.ts` 18', 0, '旧 ⚠️2h → ✅（依據更正）'),
+    ('R45', '地形 12×13 −25..+25（0x4307AE）', '—', '✅',
+     '`game/data/terrains.json`；`src/core/battle.ts` 地形項；`tests/battle.test.ts`', 0, ''),
+    ('R46', '士兵無 HP 即死 / 主將扣血 Process4', '0x43EC54', '✅',
+     '`src/core/battle.ts:1267` basicDamage；`tests/battle.test.ts`', 0, '旧 ⚠️2h → ✅'),
+    ('R47', '雙資源：MP + 氣力（初值 60000／滿 120000，POWER×1200）', '—', '✅',
+     '`src/core/battle.ts:172` QI_MAX / `:178` QI_START / `:2415` qiPowerPercentOf；`tests/r50_r67.test.ts` 23', 0,
+     '旧 🟡1h → ✅（60000 vs 120000 已解：60000 是初值）'),
+    ('R48', '90 opcode + 逐幀 WAIT', '—', '✅',
+     '`src/core/smartscript/vm.ts`；`tests/smartscript.test.ts` 13', 0, ''),
+    ('R49', '110 技 MAGIC.SO 入口 501..610', '—', '✅',
+     '`src/core/syso_host.ts`；`tests/syso.test.ts`、`tests/fidelity_net.test.ts`', 0, '旧 🟡3h → ✅'),
+    ('R50', '目標 ACTIVE 位掩碼 1/2/4/8', '03a §2.3', '✅',
+     '`src/core/battle.ts:1091` activeMaskOf；`tests/r50_r67.test.ts` 23', 0, '旧 🟡6h → ✅'),
+    ('R51', 'Attack 存全局（0x4A6888）', '—', '✅',
+     '`src/core/battle.ts` Attack 字段；`tests/guard_r43_r51.test.ts` 4', 0, ''),
+    ('R52', '特效/音效腳本內 syscall + 物件碰撞', '—', '✅',
+     '`src/core/audio_bus.ts` 音效 sink；`tests/magic_callback.test.ts` 7', 0, '旧 ❌8h → ✅'),
+    ('R53', '招降三硬門 L>90/70/50 → 0（0x404344）', '—', '✅',
+     '`src/core/capture.ts:206-208` recruitChanceOf 三硬門（code 0x11/0x12/0x13）、`:264-272` canRecruit 同規則；`tests/capture.test.ts` 11', 0, '三檔合併等價於 L>50 恒 0，仍逐档判以對上原作 code'),
+    ('R54', '敗方全部 status==3 逐個處置（0x40452E）', '—', '✅',
+     '`src/core/capture.ts:408-445`；`tests/postbattle.test.ts` 16', 0, ''),
+    ('R55', '君主不可俘（0x40975E）', '—', '✅',
+     '`src/core/capture.ts:412` isKingOf；`tests/capture.test.ts` 11', 0, ''),
+    ('R56', '斬首出池不可復活', '—', '✅',
+     '`src/core/roster.ts:293` applyPostBattle；`tests/postbattle.test.ts` 16', 0, '旧 🟡2h → ✅（已真接線）'),
+    ('R57', '戰鬥不掉落物品', '—', '✅',
+     '`src/core/capture.ts:455`（report.drops 恆空）；`tests/capture.test.ts` 11', 0, '旧 🟡1h → ✅（負證據）'),
+    ('R58', '招降忠≥50 折 2/3、先扣 (10−節操)×2', '—', '✅',
+     '`src/core/capture.ts:419`（先扣）、`:437-438`（折 2/3）；`tests/capture.test.ts` 11', 0, ''),
+    ('R59', '戰功：帶兵差×6 + 騎兵差×12（0x41048D）', '—', '✅',
+     '`tests/postbattle.test.ts` 16', 0, '旧 🟡2h → ✅'),
+    ('R60', '四 mode：殲滅/擊退/平手/大勝', '—', '✅',
+     '`tests/battle_feedback.test.ts` 9', 0, ''),
+    ('R61', '疲勞 15+秒/10、上限 100、雙方', '—', '✅',
+     '`tests/fatigue.test.ts` 13', 0, ''),
+    ('R62', '戰後士氣−20 / 忠 −(10−節操)×2（0x447520）', '—', '✅',
+     '`src/core/capture.ts:416`；`tests/postbattle.test.ts` 16', 0, ''),
+    ('R63', '戰績累加 / 連勝（0x4084C9）', '—', '✅',
+     '`tests/postbattle.test.ts` 16', 0, '旧 🟡1h → ✅'),
+    ('R64', '額外經驗 Σ敵Lv×32 / 我方人數（0x410989）', '—', '✅',
+     '`tests/postbattle.test.ts` 16', 0, '旧 🟡1h → ✅'),
+    ('R65', '月度疲勞−1 / 士氣 / 忠誠漂移', '04b5 §3.3', '✅',
+     '`web/monarch_model.js:541` recordDrift；`tests/campaign_ai.test.ts` 36', 0, '旧 🟡3h → ✅'),
+    ('R66', '110 條數據（MP/ATTACK/ATTRIB/SCRIPT）', '—', '✅',
+     '`game/data/magics.json`；`tests/fidelity_net.test.ts`（110 條逐欄）', 0, '旧 🟡3h → ✅'),
+    ('R67', '傷害由腳本 syscall 0x125 打', '—', '✅',
+     '`src/core/battle.ts` damageViaScript；`tests/r50_r67.test.ts` 23', 0, '旧 🟡6h → ✅'),
+    ('R68', '學習門檻 SKILL/SKILLLEVEL1-4', '—', '✅',
+     '`src/core/unlock.ts`；`tests/skills_r68.test.ts` 8', 0, '旧 ❌2h → ✅'),
+    ('R69', '67 條含出陣/擾亂/離間/混亂/包圍/亂陣/太公陣/封技', '—', '✅',
+     '`src/core/strategy.ts:250`；`tests/wises_r84.test.ts` 16', 0,
+     '旧 🟡12h → ✅；Exec34 語義另在 R81 追蹤'),
+    ('R70', 'SAVES\\SANGO%02d.SAV 結構（魔數/頭/7 段/32 槽/64 城摘要）', '07 §1-3', '✅',
+     '`web/saves.js:40-43` v3、`:1154` prepareSnapshot（寫檔入口）；`tests/saves_r70.test.ts` 30', 0,
+     '旧 ❌16h → ✅；SSAV 逐位元組登記不做（165 §4 D3）'),
+    ('R71', '槽描述串 城數/武將/時間（0x48D840）', '—', '✅',
+     '`web/saves.js:1332` slotSummary；`tests/saves_r70.test.ts` 30', 0, '旧 🟡0h → ✅'),
+    ('R72', '舊檔按字段遷移', '—', '✅',
+     '`web/saves.js:985` migrateLegacy；`tests/saves_r70.test.ts` 30', 0, '旧 🟡2h → ✅'),
+    ('R73', 'AI 四 Plan → ArgMaxRate（哨兵 800）→ ExecuteAction', '0x40D751', '✅',
+     '`web/ai_model.js:2102` planMonth；`tests/ai_act.test.ts` 34', 0, '旧 ❌12h → ✅'),
+    ('R74', 'ACT 九項', '04d §2.7', '✅',
+     '`web/ai_model.js:1609-2028` ACT_IMPL 九項；`tests/ai_act.test.ts` 34', 0, '旧 ❌8h → ✅'),
+    ('R75', '出兵數 min(城內兵+rand%3+1, limit, 5, 自家−1)', '0x40C635', '✅',
+     '`web/monarch_model.js:601` troopCapOf；`tests/campaign_ai.test.ts` 36', 0, '旧 🟡2h → ✅'),
+    ('R76', 'Rate：攻玩家 200/攻AI 100/占空城 80/(d+1)/聯合 50-200', '—', '✅',
+     '`web/ai_model.js` Rate 表；`tests/ai_act.test.ts` 34', 0, '旧 🟡2h → ✅'),
+    ('R77', '5 劇本 400 將 + 1 模板', '—', '✅',
+     '`game/data/generals.json`；`tests/data_audit.test.ts`', 0, ''),
+    ('R78', '君主陣亡→滅亡/繼承（+0x10）', '04c §2.1', '✅',
+     '`web/campaign.html:1996` forceExtinct；`web/monarch_model.js:340` extinguish / `:386` kingDeath；`tests/monarch.test.ts` 25', 0,
+     '旧 ❌8h → ✅'),
+    ('R79', 'SYSTEM.SO 39 函數', '04- §6.5', '✅',
+     '`src/core/syso_host.ts`；`tests/syso.test.ts:57`（39 = 35 host + 4 audio）', 0, '旧 ❌20h → ✅'),
+    ('R80', '音效 0x300/0x301', '04- §6.4', '✅',
+     '`src/core/audio_bus.ts`；`tests/smartscript_audio.test.ts` 29', 0, '旧 ❌4h → ✅'),
+
+    # ── R81–R117：B82–B171 批次新增系統補登 ──────────────────────────────
+    ('R81', '出陣隊列 / 名冊順序（Exec34「後選出陣」）', 'project/162', '⚠️',
+     '`src/core/deploy_queue.ts` 255 行；`tests/deploy_queue.test.ts` 19、`tests/exec34.test.ts` 7', 4,
+     '兩種解釋：①放開前 3 槽重排（162）②僅戰鬥內換將順序；「3 槽」是 [推測]（165 §4 D5）'),
+    ('R82', '戰場每側將領數 + 兩欄兵力上限', 'project/168', '✅',
+     '`src/core/levels.ts:168` troopCapSumOf / `:177` troopColumnsOf；`src/core/garrison.ts:475`；`src/core/battle.ts:326`', 0,
+     '44 的「步騎相加未改」已過期：已按兩欄相加落地'),
+    ('R83', '部隊指令層 6 按鈕 + 33 組×6 條', 'project/150', '⚠️',
+     '`src/core/army_cmd.ts` 642 行；`tests/army_cmd.test.ts` 44、`tests/battle_cmd_ui.test.ts` 25', 4,
+     '精確步長是 [推測]（165 §4 D5）；功能與真值已落地'),
+    ('R84', '全軍突擊（SYSTEM.SO#22 → 0x120，無速度倍率）', 'project/150', '✅',
+     '`src/core/syso_host.ts` #22；`tests/rush.test.ts` 17', 0, ''),
+    ('R85', '戰鬥操作台（8 技能格 / 雙資源 HUD / 行動條 46 幀）', 'project/156', '✅',
+     '`tests/hud_slots.test.ts` 16、`tests/battle_cmd_ui.test.ts` 25（web）', 0, 'Cocos 側見 R110'),
+    ('R86', '武將技不選落點（引擎自選目標）', '—', '✅',
+     '`tests/cast_autoaim.test.ts` 13；project/163 §2.3（G3 = 對面主將）', 0, ''),
+    ('R87', '並發腳本實例（每會話獨立 vm；G2..G5 共享）', 'project/159', '✅',
+     '`src/core/smartscript/runtime.ts`；`tests/script_instances.test.ts` 6', 0, ''),
+    ('R88', 'VM 語義（0x3C/0x3D 極性、CALLS 反序、binop 左操作數、WAITFOR）', 'project/153', '✅',
+     '`src/core/smartscript/vm.ts` binop；`tests/r87_waitfor.test.ts` 9、`tests/smartscript.test.ts` 13', 0, ''),
+    ('R89', 'G2/G3 引擎變量橋 + Hurt 0x125 符號', 'project/163', '✅',
+     '`src/core/battle.ts` damageViaScript(from?)；`tests/magic_callback.test.ts` 7', 0, ''),
+    ('R90', 'MAGIC 效果細節（神鬼亂舞多目標、7 條補兵技）', 'project/154/159/163', '✅',
+     '`tests/battle.test.ts:176-206`（特效 57 tick）、`tests/skill_kind.test.ts`、`tests/magic_effects.test.ts` 20', 0,
+     '163 實測 hits=26、斷言恢復 >=3；159 更正「7 條不走 0x312/0x314」'),
+    ('R91', '撤退態 0x4000（只置不清 / 46 幀 / 只倒走 / 0x8000 離場）', 'project/150/155', '🟡',
+     '`src/core/battle.ts:111` actionIntervalOf、`:138`/`:143`；`tests/retreat.test.ts` 364 行', 3,
+     '差「不還手」正證（0x43D5BF/0x43DA1A 未讀）＋第三檔 46+2Δ（150 §64 記未做）；歸戰核'),
+    ('R92', '移動抽格步進（1 格/40 幀、80/10/10、格佔位互斥）', 'project/158', '✅',
+     '`tests/move_grid.test.ts`；`src/core/battle.ts` chooseStepCell', 0, ''),
+    ('R93', '裝備加成進戰鬥 / 大地圖', 'project/161', '✅',
+     '`web/saves.js:632` equipOf；`web/campaign.html:1224` combatStatsOf；`tests/webfix_r86.test.ts` 32', 0, ''),
+    ('R94', '關隘可攻可取（無主 / 110 兵）', 'project/163_出征關卡', '✅',
+     '`tests/gate_target.test.ts` 10', 0, ''),
+    ('R95', '武將時代字段 *_by_times', 'project/167', '✅',
+     '`game/data/generals.json` pos_by_times 等；`tests/data_r82.test.ts` 6', 0, ''),
+    ('R96', 'UI 殼與皮膚（主選單/劇本/君主選擇 + 九宮/文字層級）', '—', '✅',
+     '`TitlePanel.ts` 476、`ScenarioSelect.ts` 585、`UiSkin.ts` 472、`TextRole.ts` 90', 0, ''),
+    ('R97', '武將資料 / 勢力圖 / 城池一覽 三面板', '0x48B228 等', '✅',
+     '`GeneralBookPanel.ts` 1050、`ForcesPanel.ts` 1042、`CityListPanel.ts` 717', 0, ''),
+    ('R98', '結局 / 繼承（2 年、即位時點）', '04c §2.1', '⚠️',
+     '`EndingModel.ts` 454、`EndingPanel.ts` 657；`tests/monarch.test.ts` 25', 2,
+     'P9 兩種解釋：①陣亡當月即位 ②次年正月即位（1 年 1 月 vs 1 年 3 月文案矛盾）；歸劇情/UI'),
+    ('R99', '存讀檔 10 槽 UI（含戰鬥內存檔）', '07', '✅',
+     '`SaveSlots.ts` 853；`tests/saves_r70.test.ts` 30', 0, ''),
+    ('R100', '招降決策面板（逐將 + 批量）', '04b2', '✅',
+     '`SurrenderPanel.ts` 683；`src/core/roster.ts:567`/`:634`；`tests/surrender.test.ts` 29', 0, ''),
+    ('R101', '戰報 / 結算面板（四 mode 文案）', '—', '✅',
+     '`tests/battle_feedback.test.ts` 9', 0, ''),
+    ('R102', '九宮皮膚（Cocos）', 'project/161', '✅',
+     '`UiSkin.ts` 472、`SkinLab.ts` 263；`tests/cocos_art_paths.test.ts` 3', 0, '色數殘留在 R103'),
+    ('R103', 'Cocos 渲染 parity（色數/漸變/ScrollView/按下態）', 'project/161', '🟡',
+     '161 §4.1 編成頁 2288 → 3134（線 2860、目標 3631 未達）；微信幀率未測（161 §5-2）', 12,
+     '殘留 11–13h；拆 3 項見 Top10；歸 j3 + lead'),
+    ('R104', '音頻 CDN 上線（遠端 base + 校驗）', '166 B7', '🟡',
+     '`dist/wechat-upload/subpackages/res/audio-remote.json` 仍 `https://example.com/sanguo/audio`（44:66）', 2,
+     '打包前唯一硬阻塞；歸 lead'),
+    ('R105', '技能音映射 110 條（A/A2/C/X 分級）', '04- §6.4', '✅',
+     '`tests/skill_sfx.test.ts`、`tests/sfx_tempo.test.ts`、`tests/smartscript_audio.test.ts` 29', 0, ''),
+    ('R106', '戰場底噪按地形 12 路', '—', '✅',
+     '`src/core/audio_bus.ts` 地圖底噪表；`tests/smartscript_audio.test.ts` 29', 0, ''),
+    ('R107', '大地圖版式（按城點外框定標 / 豎屏 letterbox）', '165 §4 D1', '✅',
+     '`web/campaign.html` map band；`tests/map_proj.test.ts` 13', 0, '豎屏差異已登記'),
+    ('R108', '內政頁美術（PALAIS 遠景 + MENU 九宮）', '—', '✅',
+     '`tests/city_art.test.ts` 13', 0, ''),
+    ('R109', '武將肖像 400/400', '—', '✅',
+     '`Portrait.ts` 529；`game/web/face_map.js`', 0, ''),
+    ('R110', 'Cocos 戰鬥操作台（兩層指令 + 8 格）', 'project/156', '✅',
+     '`BattleCmdUi.ts` 560、`BattleInput.ts` 715、`BattleHud.ts` 679；`work/cocos_input/cmd_assert.mjs` 369 條全過', 0, ''),
+    ('R111', '士兵造型 572 幀', '—', '✅',
+     '`tests/soldiers.test.ts` 15；`UnitFrames.ts` 101', 0, ''),
+    ('R112', '戰場背景 12 套三層視差', '—', '✅',
+     '`BattleBg.ts` 250、`BattleWeather.ts` 174', 0, ''),
+    ('R113', '武將戰場小人三層裝配', '—', '✅',
+     '`GeneralArt.ts` 261；`tests/units.test.ts` 13', 0, ''),
+    ('R114', '勢力分色 / 城點 tint（14 家 + 玩家金環）', '—', '✅',
+     '`web/saves.js:169` forceColorOf；`web/campaign.html` 城點 tint', 0, ''),
+    ('R115', '隨機/方向流與原作一致（D4）', '165 §4 D4', '⚠️',
+     '`web/city_model.js:282-308` searchNonce；方向抽樣走 80/10/10 權重但 PRNG 流不同', 8,
+     '兩種解釋：①原作 rand() 流不可完全復現（已登記允許差異）②可對齊但未做；歸數據/戰核'),
+    ('R116', '兩端內政對拍（unit3）', '166 B1', '✅',
+     '`work/parity_num/_run_all.json`（15:07:19）：unit3 14,696 條 / 242,017 欄位 / 不一致 0', 0,
+     '166 的 B1 已回 0，該行關閉'),
+    ('R117', '五劇本人工走查截圖（門禁 §3）', '166 B8', '✅',
+     '`work/gate170/`：scen1..scen5 map.png（14:36-14:37）+ s5_00_picker.png', 0,
+     '166 的 B8 已補拍，該行關閉'),
+]
+
+TOP10 = [
+    ('R103a', '編成頁色數 3631 未達（現 3134，門檻 2860）', '161 §4.1 / §5-2 只差餘量，不再改結構', 6, 'j3'),
+    ('R104', '音頻 CDN 真 base（`example.com/sanguo/audio`）', '44:66 / 166 B7；發布前必須重出包', 2, 'lead'),
+    ('R103b', '微信小遊戲幀率實測（vBands 12–16 段 × 10 欄）', '161 §5-2 第 8 條：未測幀率', 3, 'lead'),
+    ('R81', 'Exec34「後選出陣」語義（3 槽 or 僅排序）', '162 標 [推測]；`exec34.test.ts` 只釘住「不補兵」', 4, '戰核'),
+    ('R83', '部隊指令 33 組×6 的精確步長/時長', '165 §4 D5 [推測]；功能已通', 4, '戰核'),
+    ('R91', '撤退「不還手」正證（0x43D5BF/0x43DA1A）', '150 §64；`retreat.test.ts` 未覆盖還手', 3, '戰核'),
+    ('R115', '方向/隨機流與原作一致（D4）', '165 §4 D4；現為允許差異', 8, '數據/戰核'),
+    ('R103c', '物品頁版式/慣性回歸（100px 空帶舊帳）', '166 B5 後續；161 §4 ItemsPanel', 3, 'j3'),
+    ('R98', '繼承即位時點文案（1 年 1 月 vs 1 年 3 月）', 'P9；`EndingPanel` 兩處文案', 2, '劇情/UI'),
+    ('R20', '搜索隨機流與 EXE 同流（現用每檔 nonce）', '`city_model.js:282-308` 自覺偏差', 2, '內政'),
+]
+
+CROSS = [
+    ('R8', '✅', '旧 ❌→✅ 的闸门行，抽查最容易「假裝有」的状态位',
+     ['`web/city_model.js:1546-1561` 三个函数齐全：monthLocked（acted>0 且 acted===month）、markMonthActed、clearMonthLock。',
+      '注释逐条给出原作写点 0x427923 / 清点 0x41B6D5、0x438415，并说明「换月后 month 变大，条件自然失效」——与一月一令语义一致。',
+      '`tests/city_rules.test.ts` 覆盖下令人/换月/`?unlimited=1`。'],
+     '✅ 维持：实现 + 测试都在，且不是空壳（有写点/清点对照）'),
+    ('R28', '✅', '旧 🟡→✅，阵形相克是最容易被"表格存在但没人读"骗过的一项',
+     ['`game/data/formations.json` 有 matrix；`src/core/battle.ts:1710 formationBonus` 返回 `data.formations.matrix[aForm]?.vs[bForm] ?? 0`。',
+      '`:672` formationCells 用于站位、`:1633`/`:2245` 写并消费 `rt.formationBonus`，说明矩阵真的进了战力。',
+      '`tests/formation11.test.ts` 7 条。'],
+     '✅ 维持：数据、读取点、消费点三段闭合'),
+    ('R53', '✅', '三硬门是"看起来实现了其实顺序错"的高危项',
+     ['`src/core/capture.ts:206-208`：`if (loyal > 90) return 0; // 0x404344 code 0x11`，接着 `>70`（code 0x12）、`>50`（code 0x13）。',
+       '`:264-272` 在 `canRecruit()` 里再判一次同样三档（给上层报错文案用，code 与 0x404344 对齐）。',
+       '`:437-438` 招降落地忠≥50 折 2/3；`tests/capture.test.ts` 11 条（含 ④⑤ 两次掷骰）。'],
+     '✅ 维持：实现分两处（纯概率函数 + 决策函数）但规则一致，测试 11 条盖住 ④⑤ 两次掷骰'),
+    ('R79', '✅', '旧 ❌20h，最容易"报了 39 其实只写了一半"',
+     ['`tests/syso.test.ts:56-59` 断言 `SYSTEM_SO_FUNCTIONS.length === 39`、名字唯一、状态分布 35 host + 4 audio_bus + 0 无据。',
+      '`src/core/syso_host.ts` 1534 行；`tests/fidelity_net.test.ts` 另有 SYSTEM.SO 段。',
+      '门禁 G2 保真网 PASS 459 / FAIL 0 与 44 记录一致。'],
+     '✅ 维持：39/39 有断言钉住，不是清单自嗨'),
+    ('R20', '🟡', '唯一一个"作者自己承认偏差"的行',
+     ['`web/city_model.js:282-308`：`SEARCH_NONCE_KEY` 把 nonce 写进存档，`searchSeq()` 由它派生。',
+      '原作是进程内 `rand()`（0x450117），本作改成"每份存档一个 nonce"，所以同一存档可复现、跨存档不等价。',
+      '没有测试能证明与 EXE 同流（也不可能有，除非接原版 PRNG）。'],
+     '🟡 维持：可复现性改善了，但与原作不同流 → 2h 只够写清口径，不够对齐'),
+    ('R91', '🟡', '撤退态有 364 行测试，最容易被"测试多=全对"骗',
+     ['`src/core/battle.ts:111 actionIntervalOf`、`:138 isRetreating`、`:143 markRetreating` 都在，`tests/retreat.test.ts` 覆盖 46 帧、0x8000 离场、幂等、AI 阈值。',
+      '但全文件没有一条断言"撤退者不还手"；150 §64 只记了 `state&1` 第三档 46+2Δ 未做。',
+      '44 的下一步 ③ 也点名要"0x4000 撤退不还手正证"。'],
+     '🟡 维持：动作/离场对，判定侧缺一条正证'),
+    ('R103', '🟡', 'Cocos parity 是唯一还有两位数工时的行',
+     ['`project/161` §4.1：编成页色数 2288 → 3134，线 2860 已过，但 lead 追加目标 3631 未达。',
+      '§5-2 第 8 条：微信小游戏端未测帧率；`vBands` 提到 12–16 段后 Deploy 页多 4–6 千绘制。',
+      '`tests/cocos_art_paths.test.ts` 只钉住美术路径存在，不钉色数/帧率。'],
+     '🟡 维持：功能 parity 已过，观感/性能 parity 未收'),
+    ('R104', '🟡', '唯一硬阻塞，验证成本最低',
+     ['44:66 原文：`dist\\wechat-upload\\subpackages\\res\\audio-remote.json` 里是 `https://example.com/sanguo/audio`，构建时没给 `-AudioBase`。',
+      '165 门禁 G9 是音频 CDN 关；166 B7 把它列为 lead 项。',
+      '代码侧 `audio_bus.ts` 已就绪，缺的是发布参数 + 重出包。'],
+     '🟡 维持：不是代码问题，是打包参数'),
+    ('R4', '✅', '旧 ❌10h 翻案，必须证明不是"选君主页存在但没接势力"',
+     ['`web/monarch_model.js:110 setMonarch`、`:135 abdicate`、`:157 inheritForce`、`:265 successionList`、`:284 pickSuccessor`。',
+      '势力归属走 `forceIdOf/monarchOf`（`:85`/`:94`），不是另存一份字符串。',
+      '`tests/monarch.test.ts` 25 条覆盖继承/禅让/灭亡。'],
+     '✅ 翻案成立：有模型 + 有 UI + 25 条测试'),
+    ('R37', '✅', '旧 ❌20h 翻案，且原依据被推翻过，最值得复核',
+     ['`src/core/strategy.ts:12` 注释即写"跳表 0x44E6F4 共 67 項"，`:250 STRATEGY_TABLE` 逐条 d(seq, kind, value)，`:319` 的 d(67, ...) 收尾（`:320` 表闭）。',
+      '`:456 planStrategy`、`:685 runStrategy`、`:1055 planReinforceGroups` 三个入口都在。',
+      '`tests/strategy.test.ts` 33 条；`wises.test.ts` 断言 67 = 55 + 12 + 0，与派发器不双算。'],
+     '✅ 翻案成立；依据更正为"军师技战中派发器 22 类×3 档"，不是突击/火计'),
+    ('R74', '✅', '旧 ❌8h 翻案：九项 ACT 最怕"只写枚举没写函数"',
+     ['`web/ai_model.js:1609` 注释「R74：ACT 九项，一 ACT 一函数」，`:2028 ACT_IMPL` 九项齐全。',
+      '`:1611` 明确 ACT=0 无生成点、保留函数是为了"九项齐全可枚举"。',
+      '`tests/ai_act.test.ts` 34 条按 ACT 枚举逐个断言。'],
+     '✅ 翻案成立：枚举 + 实现 + 枚举断言三件套'),
+    ('R78', '✅', '旧 ❌8h 翻案：君主阵亡→灭亡/继承要对两个入口',
+     ['`web/campaign.html:1996 forceExtinct(forceId, deadName, opts)`，调用点 `:3111`（城池失守）与 `:4261`（手动灭亡）。',
+      '`web/monarch_model.js:340 extinguish` / `:386 kingDeath` 处理君主死与禅让。',
+      '`tests/monarch.test.ts` 25 条覆盖"我方灭亡顶栏回未选/king 清空"。'],
+     '✅ 翻案成立：两个入口都在，且防了脏档（king 从死人回退）'),
+]
+
+
+def render():
+    from collections import Counter
+    ids = [r[0] for r in ROWS]
+    assert len(ROWS) == 117, 'rows=%d' % len(ROWS)
+    assert ids == ['R%d' % i for i in range(1, 118)], 'id 不连续: %s' % [
+        (a, b) for a, b in zip(ids, ['R%d' % i for i in range(1, 118)]) if a != b][:5]
+    cnt = Counter(r[3] for r in ROWS)
+    hours = sum(r[5] for r in ROWS)
+    for r in ROWS:
+        for c in (r[1], r[2], r[4], r[6]):
+            assert '|' not in c, 'cell 含竖线: %r' % (c,)
+    per = ' / '.join('%s%d' % (s, cnt.get(s, 0)) for s in ('✅', '🟡', '❌', '⚠️', '⬜'))
+    man_days = hours / 8.0
+
+    L = []
+    A = L.append
+    A('# 172 對照表刷新（R172）')
+    A('')
+    A('> 本檔只做**核對與寫作**：沒有改 `game/**` 任何一行。舊表在 `project/37a_逻辑对照.md` 正文（R1–R80），**沒有就地改舊行**，新表全部落在本檔；37a 末尾追加 `§十七` 指向本檔。')
+    A('> 生成時間：2026-11-25 15:18（本機 Asia/Shanghai）；判據截止到 `project/169` / `work/parity_num/_run_all.json`（15:07:19）。')
+    A('')
+    A('## 0. 先說三件會影響派工的事')
+    A('')
+    A('1. **37a 正文只有 80 行（R1..R80），不是 117 行。** 腳本核過：舊狀態實為 ✅30 / ❌15 / 🟡30 / ⚠️5 = 80，舊人時 218h。口述的「117 行 / ✅49 ❌16 🟡30 ⚠️5」與檔案不符（49+16+30+5=100，也不是 80）。')
+    A('2. **本檔的 117 行 = R1–R80 原行重判 + R81–R117 新登**（B82–B171 批次新增的系統與缺口，37a 正文從來沒有它們的行）。')
+    A('3. **行號 R81+ 與批次號 B81–B171 同數字不同物。** 本檔與 37a 提及批次時一律寫 `B81`…`B171`；寫 `R81` 時指本表第 81 行（出陣隊列）。')
+    A('')
+    A('## 1. 統計摘要（117 行，逐行見 §3）')
+    A('')
+    A('| 狀態 | 行數 | 含義 |')
+    A('|---|---:|---|')
+    A('| ✅ 已還原 | %d | 有實現 + 至少一條測試守護 |' % cnt.get('✅', 0))
+    A('| 🟡 部分還原 | %d | 差一句/一個分支/一項實測，已在備註寫清 |' % cnt.get('🟡', 0))
+    A('| ❌ 未做 | %d | 本輪重算後**沒有**完全未做的行 |' % cnt.get('❌', 0))
+    A('| ⚠️ 語義存疑 | %d | 依據是 [推測] 或兩種解釋並存，見備註 |' % cnt.get('⚠️', 0))
+    A('| ⬜ 明確不做 | %d | 原作沒有 / 已裁決不做 |' % cnt.get('⬜', 0))
+    A('')
+    A('**合計 `%s` = 117 行**；**剩餘工時 %dh ≈ %.1f 人日**（8h/人日）。' % (per, hours, man_days))
+    A('')
+    A('與舊統計對照：舊 80 行 `✅30 / ❌15 / 🟡30 / ⚠️5`（218h）→ 現在 `%s`（%dh）。' % (per, hours))
+    A('差額的來源不是「又做了很多」，而是**舊狀態列早就過期**：B81–B171 一共翻了 15 個 ❌、澄清了 5 個 ⚠️、收掉 26 個 🟡。逐條：')
+    A('')
+    A('- **舊 15 個 ❌ 全部翻掉**：R4(10h) R8(1h) R10(3h) R12(3h) R18(2h) R37(20h) R38(3h) R39(5h) R52(8h) R68(2h) R70(16h) R73(12h) R74(8h) R78(8h) R79(20h)。')
+    A('- **舊 5 個 ⚠️ 全部澄清**：R7（年度結算時點，`yearsettle_r7` 18 條釘死）、R15（年稅公式已定位：`floor(pop×75/10000)+2250`，正月一次）、R33（純加法已復核）、R44（該位=騎兵，非二次補判）、R46（Process4 = `basicDamage`）。')
+    A('- **舊 30 個 🟡 只剩 4 個真尾巴**：R20、R91、R103、R104（其餘 26 個已 ✅，逐行備註有「旧 🟡Nh → ✅」）。')
+    A('')
+    A('## 2. Top 10 未完成（按影響排序）')
+    A('')
+    A('| # | 行 | 事項 | 差什麼 / 為什麼卡 | 工時 | 歸誰 |')
+    A('|---:|---|---|---|---:|---|')
+    for i, (rid, what, why, h, who) in enumerate(TOP10, 1):
+        A('| %d | %s | %s | %s | %dh | %s |' % (i, rid, what, why, h, who))
+    A('')
+    A('排序理由：能阻塞打包的排前面（音頻 base → 上架；Cocos 色數/幀率 → 觀感與性能）；其次是**玩法語義**（Exec34、部隊指令步長、撤退不還手），最後才是純保真度（PRNG 流、搜索流）與文案（即位時點）。')
+    A('R103 一行的 12h 拆成三項（a 色數 / b 幀率 / c 物品頁回歸），所以 Top10 有 10 條而只有 8 行。')
+    A('')
+    A('## 3. 新表 R1–R117')
+    A('')
+    A('表格約定：**工時 = 該行剩餘工時**（✅/⬜ 為 0）；「證據」一律給 `file:line` 或測試檔名，都是本機 grep/讀檔可復現的；備註裡的「旧 X → Y」是舊狀態列到本輪的翻轉記錄。')
+    A('')
+    A('> 行號說明：證據列的行號是 2026-11-25 15:3x 生成時的位置。`src/core/battle.ts`、`web/city_model.js` 當時仍有其他任務在改（`battle.ts` 在 30 分鐘內從 3078 行變成 3069 行），**行號會漂，以函數名/測試名 grep 為準**——每條證據都帶了符號名。')
+    A('')
+    A('| 行 | 系統 / 機制 | 原作依據 | 狀態 | 證據（file:line / 測試） | 工時(h) | 歸屬 / 備註 |')
+    A('|---|---|---|---|---|---:|---|')
+    for rid, title, basis, st, ev, h, note in ROWS:
+        A('| %s | %s | %s | %s | %s | %d | %s |' % (rid, title, basis, st, ev, h, note))
+    A('')
+    A('小計：`%s`；工時 %dh。' % (per, hours))
+    A('')
+    A('### 3.1 判據（狀態怎麼定的）')
+    A('')
+    A('- `✅`：代碼裡有對應實現 **且** `game/tests/**` 至少一條守護；只有 web 有、Cocos 缺的另立行（R103/R110）。')
+    A('- `🟡`：主幹在，差一個具體分支/實測；備註寫「差哪一句」。')
+    A('- `❌`：完全沒做。本輪 0 條——舊 15 個 ❌ 已在 B81–B171 全部翻掉（見 §1）。')
+    A('- `⚠️`：原作依據本身是 [推測]、或同一現象有兩種反匯編解釋（R81/R83/R98/R115）。')
+    A('- `⬜`：原作沒有這個機制（R5 月內倒計時、R6 RATE 升級、R16 徵糧/訓練/治水/外交、R40 單挑），或已裁決不做。')
+    A('')
+    A('## 4. 交叉校驗：12 行陰性對照（防我自己拍腦袋）')
+    A('')
+    A('抽樣規則：先按「最容易被假 ✅ 騙過」挑，不按行號隨機——①舊 ❌ 翻案行（4：R4/R37/R74/R78）、②帶硬門或順序的行（2：R8/R53）、③表格型數據（1：R28）、④清單型數據（1：R79）、⑤作者自己承認偏差的（1：R20）、⑥測試很多但缺一條正證的（1：R91）、⑦硬阻塞或兩位數工時的（2：R103/R104）。')
+    A('')
+    A('因為本輪 `❌ = 0`，原定的「❌ 抽 4 行」改成「**舊 ❌ → 現 ✅ 的翻案行抽 4 行**」（R4/R37/R74/R78）——這比抽查 ❌ 更能證明我沒有「把沒做的寫成做了」。')
+    A('')
+    for ci, (rid, st, why, steps, concl) in enumerate(CROSS, 1):
+        A('### 4.%d %s（新判 %s）— 抽樣理由：%s' % (ci, rid, st, why))
+        A('')
+        for s in steps:
+            A('- %s' % s)
+        A('')
+        A('**結論**：%s' % concl)
+        A('')
+    A('12/12 與代碼一致：4 個 ✅ 都不是空殼（有讀取點 + 消費點 + 斷言），4 個 🟡 的「差哪一句」都能指出具體缺口，4 個翻案行都有模型/入口/測試三件套。**沒有發現「判 ✅ 但代碼裡只有註釋」的行**。')
+    A('')
+    A('## 5. 與舊文檔的衝突（照舊派工會重複勞動）')
+    A('')
+    A('| 舊文檔說法 | 本輪實測 | 結論 |')
+    A('|---|---|---|')
+    A('| `44` 下一步 ①「補兵 7 條 0x312 vs 0x314 實參順序不統一」 | `tests/script_instances.test.ts:10` 已寫明「7 條補兵技**不走** 0x312/0x314」；`tests/skill_kind.test.ts` 逐條釘住 | 已過期 |')
+    A('| `44` 下一步 ②「士兵上限步騎兩欄相加未改（約 5h）」 | `src/core/levels.ts:168 troopCapSumOf` / `:177 troopColumnsOf` 已落地，`garrison.ts:475`、`battle.ts:326` 都在用 | 已過期 |')
+    A('| `44` 下一步 ⑤「Exec34 後選出陣 [推測]」 | `deploy_queue.ts` 255 行 + `exec34.test.ts` 7 條已落地，但「3 槽」語義仍是 [推測] | 部分過期（降为 ⚠️ 4h） |')
+    A('| `166 B1`「內政對拍 unit3 8678 條不一致」 | `work/parity_num/_run_all.json`（15:07:19）unit3 14,696 條 / 0 不一致 | 已回 0 |')
+    A('| `166 B3`「神鬼亂舞仍單體」 | `project/163` 已接物件碰撞回調：hits=26，斷言恢復 `>=3` | 已修 |')
+    A('| `166 B8`「五劇本走查未拍」 | `work/gate170/` 有 scen1..scen5 map.png（14:36–14:37） | 已補 |')
+    A('| `166 B7`「音頻 base 是 example.com」 | `44:66` 仍是，未改 | **仍阻塞（R104）** |')
+    A('')
+    A('## 6. 復現（誰都能跑一遍）')
+    A('')
+    A('```')
+    A('$env:PYTHONIOENCODING="utf-8"')
+    A('C:\\Users\\liutian\\.dsh\\dsh-runtimes\\dsh-primary-runtime\\dependencies\\python\\python.exe F:\\sanguo\\work\\check_project_links.py')
+    A('# 預期：broken: 0')
+    A('```')
+    A('')
+    A('本檔的行數核對（生成時腳本斷言過，讀者也可再數一次）：')
+    A('')
+    A('```')
+    A('python -c "import re,io;t=io.open(r\'F:\\sanguo\\project\\172_对照表刷新.md\',encoding=\'utf-8\').read();print(len(re.findall(r\'^\\| R\\d+ \\|\',t,re.M)))"')
+    A('```')
+    A('')
+    A('## 7. 本輪沒做的事')
+    A('')
+    A('- 沒改 `game/**` 一行；沒改 `project/31`、`project/44`、`project/165`（只在 37a 末尾追加 §十七）。')
+    A('- 沒有重新跑 1354 條測試/保真網（引用的數字都標了出處：44 / 165 / 161 / 169 / parity_num）。若需要「本輪現跑」的綠燈，另開一輪。')
+    A('- R103 的 12h 是 161 §6 的估算 + 色數差額折算，不是我實測的工時。')
+    A('')
+
+    text = '\n'.join(L)
+    with io.open(P172, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(text)
+
+    # ── 追記 37a §十七 ────────────────────────────────────────────────
+    S = []
+    B = S.append
+    B('')
+    B('## §十七 R172：對照表狀態刷新（117 行重算）')
+    B('')
+    B('> 口徑：正文 R1–R80 是本節之前的原表；**R81–R117 是 B82–B171 批次新增系統的補登**（正文從來沒有這些行）。行號 `R81+` 與批次號 `B81–B171` 同數字不同物，提及批次一律寫 B 前綴。')
+    B('> **正文舊狀態列（✅30 / ❌15 / 🟡30 / ⚠️5，80 行）已過期，請以本節與 `project/172_对照表刷新.md` 為準。**')
+    B('')
+    B('### 17.1 統計（117 行）')
+    B('')
+    B('| 狀態 | 行數 |')
+    B('|---|---:|')
+    B('| ✅ 已還原 | %d |' % cnt.get('✅', 0))
+    B('| 🟡 部分還原 | %d |' % cnt.get('🟡', 0))
+    B('| ❌ 未做 | %d |' % cnt.get('❌', 0))
+    B('| ⚠️ 語義存疑 | %d |' % cnt.get('⚠️', 0))
+    B('| ⬜ 明確不做 | %d |' % cnt.get('⬜', 0))
+    B('')
+    B('**合計 %s = 117 行；剩餘 %dh ≈ %.1f 人日。**' % (per, hours, man_days))
+    B('')
+    B('舊 80 行 218h → 現在 %dh。舊 15 個 ❌ 全翻、5 個 ⚠️ 全澄清、30 個 🟡 只剩 4 個真尾巴（R20/R91/R103/R104）。' % hours)
+    B('')
+    B('### 17.2 Top 10 未完成（帶證據與工時）')
+    B('')
+    B('| # | 行 | 事項 | 差什麼 / 證據 | 工時 | 歸誰 |')
+    B('|---:|---|---|---|---:|---|')
+    for i, (rid, what, why, h, who) in enumerate(TOP10, 1):
+        B('| %d | %s | %s | %s | %dh | %s |' % (i, rid, what, why, h, who))
+    B('')
+    B('### 17.3 三句話')
+    B('')
+    B('- 舊統計別再用：80 行不是 117 行，❌ 也不是 15/16 個，而是 **0 個**；剩下的 37h 裡有 2h 是打包參數。')
+    B('- 44/166 的「下一步」有 5 條已過期（補兵實參、士兵上限相加、內政對拍、神鬼亂舞、五劇本走查），照舊派工會重複勞動。')
+    B('- 打包前真正的硬阻塞只剩 1 條：**音頻 CDN 真 base（R104，2h）**；其餘都是觀感/保真度尾巴。')
+    B('')
+
+    if os.path.exists(P37A):
+        old = io.open(P37A, encoding='utf-8').read()
+        k = old.find('## §十七')
+        if k >= 0:
+            with io.open(P37A, 'w', encoding='utf-8', newline='\n') as f:
+                f.write(old[:k].rstrip('\n') + '\n')
+
+    with io.open(P37A, 'a', encoding='utf-8', newline='\n') as f:
+        f.write('\n'.join(S))
+
+    print('rows=%d  %s  hours=%d  man_days=%.1f' % (len(ROWS), per, hours, man_days))
+    print('wrote', P172, os.path.getsize(P172), 'bytes')
+    print('appended', P37A, os.path.getsize(P37A), 'bytes')
+
+
+if __name__ == '__main__':
+    render()

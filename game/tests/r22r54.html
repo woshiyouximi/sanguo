@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>R22 / R54 harness — 步骑分列 + 败方全员处置</title>
+<style>
+  html, body { margin: 0; background: #0d0d0f; }
+  canvas { display: block; }
+  #hud {
+    margin: 0; padding: 8px 10px; min-height: 96px;
+    color: #d8d2c0; background: #151513; border-top: 1px solid #4a4636;
+    font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre;
+  }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<pre id="hud">loading…</pre>
+<script type="module">
+// 验收专用 harness（不属于游戏页面，只在 game/tests/ 下，由 work/_br_shots.mjs 截图）
+// 为什么需要它：web/main.js 把敌将等级写死 5 级（readConfig），而骑兵上限 = clamp((等级−20)×5,0,100)，
+// 所以正式页面里敌侧永远 0 骑兵，拍不出"骑兵击杀 ×12"那一行、也拍不出一次抓 3 名将。
+// 这里直接用 core 的公开 API 造局：createWorld（带 cavalry / officers）→ step → settle → render。
+import { createWorld, settle, step } from '../dist/core/battle.js';
+import { render } from '../dist/view/battleView.js';
+import { DESIGN_H, DESIGN_W } from '../dist/view/layout.js';
+
+const DATA_FILES = ['troops', 'formations', 'magics', 'wises', 'generals', 'terrains', 'items', 'scenarios'];
+const data = Object.fromEntries(await Promise.all(DATA_FILES.map(async (name) => {
+  const res = await fetch(`../data/${name}.json`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`fetch data/${name}.json: HTTP ${res.status}`);
+  return [name, await res.json()];
+})));
+
+const Q = new URLSearchParams(location.search);
+const CASE = Q.get('case') || 'settle';
+
+// 败方 3 名副将（R54）：忠诚 40/37/35，被俘惩罚 −16 后 < 25 → 一定会招降成功（0x404344 的 L<25 分支）
+const OFFICERS = [
+  { name: '張寶', str: 60, int: 70, level: 14, loyal: 40, constancy: 2 },
+  { name: '張梁', str: 55, int: 60, level: 12, loyal: 37, constancy: 2 },
+  { name: '張飛', str: 88, int: 40, level: 11, loyal: 35, constancy: 2 },
+];
+
+function makeWorld(seed, opts) {
+  return createWorld({
+    data,
+    seed,
+    a: { soldiers: opts.soldiers, morale: 60, general: { name: '關羽', str: 97, int: 75, level: opts.aLevel } },
+    b: {
+      soldiers: opts.soldiers,
+      morale: 60,
+      general: { name: '張角', str: 70, int: 88, level: opts.bLevel },
+      officers: opts.officers ? OFFICERS : [],
+      cavalry: opts.cavalry,
+    },
+  });
+}
+
+function fight(w, limit = 12000) {
+  let i = 0;
+  while (!w.over && i++ < limit) step(w);
+  if (!w.over) {
+    // 没打完就按存活数硬判一个胜方（只影响这张验收图，不改 core）
+    w.over = true;
+    w.winner = w.sides.A.aliveCount >= w.sides.B.aliveCount ? 'A' : 'B';
+    w.endReason = 'troops';
+  }
+  return w;
+}
+
+/** 找到一局符合验收条件的对局：settle 档要 A 胜、骑兵有击杀；capture 档要一次抓到 ≥3 名将 */
+function pick() {
+  const trials = CASE === 'capture'
+    ? { soldiers: 20, aLevel: 20, bLevel: 20, officers: true, cavalry: 12, max: 90 }
+    : { soldiers: 60, aLevel: 30, bLevel: 30, officers: false, cavalry: 50, max: 12 };
+  for (let seed = 1; seed <= trials.max; seed++) {
+    const w = makeWorld(seed, trials);
+    fight(w);
+    if (w.winner !== 'A') continue;
+    const s = settle(w);
+    const ok = CASE === 'capture'
+      ? (s.post && s.post.captures.length >= 4)   // 4 人 → 面板列 3 人 + 「另有 1 人」
+      : (s.killsCav > 0 && s.killsInf > 0);
+    if (ok) return { w, s, seed };
+  }
+  throw new Error(`没有满足条件的种子（case=${CASE}）`);
+}
+
+const { w, s, seed } = pick();
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const dpr = 1;
+canvas.width = DESIGN_W * dpr;
+canvas.height = DESIGN_H * dpr;
+canvas.style.width = DESIGN_W + 'px';
+canvas.style.height = DESIGN_H + 'px';
+ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+render(ctx, w, {
+  mode: 'settled',
+  settlement: s,
+  time: 0,
+  seed,
+  aLabel: '蜀 · 關羽',
+  bLabel: '黃巾 · 張角',
+});
+
+const post = s.post || { captures: [], executed: [], released: [], drops: [] };
+const hud = [
+  `case=${CASE}  seed=${seed}  winner=${w.winner}  mode=${s.mode} ${s.modeName}  tick=${w.tick}`,
+  `kills: 步兵 ${s.killsInf} ×6 + 骑兵 ${s.killsCav} ×12 = ${s.killsInf * 6 + s.killsCav * 12}   敌将等级加成 ${s.score - (s.killsInf * 6 + s.killsCav * 12)}   战功 ${s.score}`,
+  `world.stats: killsInf=${w.stats.killsInf} killsCav=${w.stats.killsCav} killsInfB=${w.stats.killsInfB} killsCavB=${w.stats.killsCavB} blocks=${w.stats.blocks}`,
+  `R54 处置: 招降 ${post.captures.length} 人（归顺 ${post.captures.filter((c) => c.recruited).length}）· 斩首 ${post.executed.length} 人 · 释放 ${post.released.length} 人`,
+  `  captures: ${post.captures.map((c) => `${c.name}(忠誠${c.loyal}${c.recruited ? '·降' : '·拒'})`).join(' ')}`,
+].join('\n');
+document.getElementById('hud').textContent = hud;
+window.__harness = { seed, case: CASE, stats: w.stats, settlement: s };
+</script>
+</body>
+</html>

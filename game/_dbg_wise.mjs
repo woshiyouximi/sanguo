@@ -1,0 +1,11 @@
+import { loadData } from './src/data.ts';
+import { createWorld, step } from './src/core/battle.ts';
+import { applyWise } from './src/core/strategy.ts';
+import { engage } from './tests/_engage.ts';
+const data = loadData({ dir: 'F:/sanguo/game/data/' });
+const w = engage(createWorld({ data, seed: 11, a: { strategy: 6 }, b: { strategy: 17 } }));
+console.log('after engage', { tick: w.tick, over: w.over, aUsed: w.army.A.used, bUsed: w.army.B.used, bSeq: w.army.B.seq });
+console.log('applyWise', applyWise(w, 'A', 6));
+step(w);
+console.log('after 1 step', { tick: w.tick, over: w.over, aUsed: w.army.A.used, bUsed: w.army.B.used, bSeq: w.army.B.seq, events: w.strategyEvents.length });
+console.log(JSON.stringify(w.strategyEvents.slice(0, 3)));

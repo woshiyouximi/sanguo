@@ -1,0 +1,90 @@
+# -*- coding: utf-8 -*-
+"""Determine operand (fetch) count of every opcode handler by CFG walk."""
+import sys, struct, collections
+sys.path.insert(0, r'F:\sanguo\tools')
+import pefile
+from capstone import Cs, CS_ARCH_X86, CS_MODE_32
+
+PE = pefile.PE(r"C:\Users\liutian\Downloads\sgqyzzwb_146364\三国群英传2 修正版 1.05+\Sango2.exe", fast_load=True)
+IMAGE = PE.get_memory_mapped_image()
+IB = PE.OPTIONAL_HEADER.ImageBase
+
+def bytes_at(va, n):
+    off = va - IB
+    return bytes(IMAGE[off:off+n])
+
+md = Cs(CS_ARCH_X86, CS_MODE_32)
+md.detail = True
+
+CODE_LO, CODE_HI = 0x463800, 0x46A000
+FETCH = 0x467E30
+
+HANDLERS = {
+0x00:0x4638D0,0x01:0x4638E0,0x02:0x463A30,0x03:0x463B40,0x04:0x463B60,
+0x05:0x463BA0,0x06:0x463BB0,0x07:0x463BD0,0x08:0x463BE0,0x09:0x463BF0,
+0x0A:0x463C00,0x0B:0x463C30,0x0C:0x463CF0,0x0D:0x463DB0,0x0E:0x463DE0,
+0x0F:0x463E50,0x10:0x463E80,0x11:0x463EC0,0x12:0x463ED0,0x13:0x463F00,
+0x14:0x463F40,0x15:0x463F70,0x16:0x463FB0,0x17:0x463FE0,0x18:0x464020,
+0x19:0x464050,0x1A:0x464080,0x1B:0x4640A0,0x1C:0x4640D0,0x1D:0x4640F0,
+0x1E:0x464120,0x1F:0x464150,0x20:0x464170,0x21:0x4641A0,0x22:0x4641D0,
+0x23:0x4641F0,0x24:0x464220,0x25:0x464250,0x26:0x464280,0x27:0x464280,
+0x28:0x4642B0,0x29:0x4642C0,0x2A:0x4642C0,0x2B:0x4642F0,0x2C:0x464300,
+0x2D:0x464330,0x2E:0x464390,0x2F:0x4643A0,0x30:0x4643D0,0x31:0x464430,
+0x32:0x464440,0x33:0x464470,0x34:0x4644D0,0x35:0x4644E0,0x36:0x464510,
+0x37:0x464570,0x38:0x464580,0x39:0x4645A0,0x3A:0x4645F0,0x3B:0x464640,
+0x3C:0x464660,0x3D:0x464690,0x3E:0x4646C0,0x3F:0x4646F0,0x40:0x464720,
+0x41:0x4638D0,0x42:0x464770,0x43:0x4638D0,0x44:0x4638D0,0x45:0x4647B0,
+0x46:0x4647C0,0x47:0x4647D0,0x48:0x4647E0,0x49:0x464810,0x4A:0x464820,
+0x4B:0x464850,0x4C:0x464860,0x4D:0x464860,0x4E:0x4648D0,0x4F:0x4648E0,
+0x50:0x4648F0,0x51:0x464930,0x52:0x464A00,0x53:0x464AC0,0x54:0x464B00,
+0x55:0x464B40,0x56:0x464B80,0x57:0x464BB0,0x58:0x464BF0,0x59:0x464C30,
+}
+
+def analyze(entry, depth=0, seen=None):
+    """Return number of fetch calls reachable, following direct jmps outside range."""
+    if seen is None: seen = set()
+    if depth > 6: return None
+    fetches = 0
+    todo = [entry]
+    visited = set()
+    while todo:
+        ea = todo.pop()
+        while True:
+            if ea in visited or not (CODE_LO <= ea < CODE_HI):
+                break
+            visited.add(ea)
+            ins = next(md.disasm(bytes_at(ea, 16), ea), None)
+            if ins is None: break
+            t = ins.mnemonic
+            if t == 'call' and ins.operands and ins.operands[0].type == 2:
+                tgt = ins.operands[0].imm
+                if tgt == FETCH:
+                    fetches += 1
+                else:
+                    sub = analyze(tgt, depth+1, seen)
+                    if sub: fetches += sub
+                ea += ins.size
+                continue
+            if t == 'jmp':
+                if ins.operands and ins.operands[0].type == 2:
+                    tgt = ins.operands[0].imm
+                    if CODE_LO <= tgt < CODE_HI:
+                        todo.append(tgt)
+                break
+            if t.startswith('j') and ins.operands and ins.operands[0].type == 2:
+                tgt = ins.operands[0].imm
+                if CODE_LO <= tgt < CODE_HI:
+                    todo.append(tgt)
+                ea += ins.size
+                continue
+            if t == 'ret' or t == 'retn':
+                break
+            ea += ins.size
+    return fetches
+
+if __name__ == '__main__':
+    # need reader: use sango_dis for bytes
+    for op in sorted(HANDLERS):
+        h = HANDLERS[op]
+        n = analyze(h)
+        print('op %02X handler %08X fetches=%s' % (op, h, n))

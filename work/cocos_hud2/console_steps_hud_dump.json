@@ -1,0 +1,18 @@
+{
+ "console": [
+  {
+   "type": "timeEnd",
+   "text": "LoadScene db://assets/scene/Boot.scene: 15.9619140625 ms"
+  },
+  {
+   "type": "timeEnd",
+   "text": "LoadScene Battle: 9.032958984375 ms"
+  },
+  {
+   "type": "log",
+   "text": "[BattleRoot] 兵種圖集為原作 FORCE 版：按陣營取背視/正視幀（M 藍軍 / N 紅軍）"
+  }
+ ],
+ "exceptions": [],
+ "netFails": []
+}

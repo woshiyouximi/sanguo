@@ -1,0 +1,14 @@
+import { boot, BASE, sleep } from './cdp.mjs';
+const c = await boot();
+const out = {};
+await c.clickSel('#btnBack'); await c.waitLoad(); await sleep(1200);
+out.map = await c.eval(`(()=>{const t=(s)=>{const e=document.querySelector(s); return e?(e.innerText||'').replace(/\\s+/g,' ').trim().slice(0,200):null;}; return {ym:t('#ym'),gold:t('#gold'),ct:t('#ct'),rec:t('#rec')};})()`);
+await c.clickSel('#actions .btn[data-act="advance"]');
+await sleep(3000);
+out.after = await c.eval(`(()=>{const t=(s)=>{const e=document.querySelector(s); return e?(e.innerText||'').replace(/\\s+/g,' ').trim().slice(0,900):null;};
+ return {href:location.href, title:document.title, ym:t('#ym'), gold:t('#gold'), ct:t('#ct'), notice:t('#notice'), logrows:t('#logrows')};})()`);
+out.shot = await c.shot('s3_advance_m4');
+out.errs = await c.errs(c.startErr);
+await c.save('s3_advance_m4', out);
+console.log(JSON.stringify(out, null, 1));
+c.close();

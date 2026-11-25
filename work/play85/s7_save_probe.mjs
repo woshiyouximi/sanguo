@@ -1,0 +1,13 @@
+import { boot, sleep, BASE } from './cdp.mjs';
+const c = await boot();
+const log = (k, v) => console.log('##', k, JSON.stringify(v));
+const SLOTS = `(()=>{const raw=localStorage.getItem('sanguo_saves_v1'); const o=JSON.parse(raw);
+ return {last:o.last, v:o.v, slots:o.slots.map((s,i)=>s?{i:i+1,scenario:s.scenarioName,time:s.time,gold:s.gold,owned:s.ownedCount,wins:s.wins,losses:s.losses,ts:s.ts,size:JSON.stringify(s).length,snapMonth:s.snapshot?{month:s.snapshot.month,gold:s.snapshot.gold,owned:(s.snapshot.owned||[]).length}:null}:null)};})()`;
+await c.goto(BASE + 'campaign.html'); await sleep(1000);
+log('btnSaveTxt', await c.eval(`(()=>{const b=document.querySelector('#btnSave'); return b?{txt:b.innerText.replace(/\\s+/g,' ').trim(),r:(()=>{const q=b.getBoundingClientRect();return [Math.round(q.x),Math.round(q.y),Math.round(q.width),Math.round(q.height)];})()}:null;})()`));
+log('slots_before', await c.eval(SLOTS));
+const bs = await c.rect('#btnSave');
+await c.mouse(bs.x + bs.w / 2, bs.y + bs.h / 2); await sleep(800);
+log('sheet', await c.eval(`(()=>{const s=document.querySelector('#saveSheet'); if(!s) return null; return {hidden:s.hidden, cls:s.className, title:(s.querySelector('h3')||{}).innerText||'', rows:[...s.querySelectorAll('.slotrow,.row,[data-slot]')].slice(0,10).map(e=>e.innerText.replace(/\\s+/g,' ').trim().slice(0,90)), btns:[...s.querySelectorAll('button')].map(b=>({do:b.dataset.do||null, txt:b.innerText.replace(/\\s+/g,' ').trim().slice(0,20), r:(()=>{const q=b.getBoundingClientRect();return [Math.round(q.x),Math.round(q.y),Math.round(q.width),Math.round(q.height)];})()})).slice(0,24)};})()`));
+await c.shot('s7a_save_sheet');
+c.close();

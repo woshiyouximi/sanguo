@@ -1,0 +1,10 @@
+﻿import { loadData } from './src/data.ts';
+import { cast, createWorld, step, skillMarksOf } from './src/core/battle.ts';
+const d = await loadData();
+const w = createWorld({ data: d, seed: 7, a: { general: { name: '關羽', str: 97, int: 75, level: 6 }, soldiers: 20 }, b: { general: { name: '張角', str: 70, int: 88, level: 5 }, soldiers: 20 } });
+const B = w.sides.B.general;
+const ex = w.units.filter((u) => u.side === 'B').map((u) => [+u.x.toFixed(1), +u.y.toFixed(1), u.alive]);
+console.log('B general', B.x, B.y, 'first enemies', JSON.stringify(ex.slice(0, 8)));
+const r = cast(w, 'A', 2, B.x - 20, 6.5, 24);
+for (let i = 0; i < 400; i++) step(w);
+console.log('ok', r.ok, 'marks', JSON.stringify(skillMarksOf(w)), 'spellDamageA', w.stats.spellDamageA);

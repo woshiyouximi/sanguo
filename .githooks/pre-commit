@@ -1,0 +1,28 @@
+#!/bin/sh
+# =============================================================================
+# 提交前编码门禁（针对 R199 事故：PowerShell 5.1 的 Set-Content 把中文写成 U+FFFD，
+# 1962 个坏字符进过 game/src/core/battle.ts，556 个测试挂 53 个）
+#
+# 只扫本次 staged 的文本文件；命中 U+FFFD / 非法 UTF-8 直接中止提交。
+# 知道自己干嘛时才用 `git commit --no-verify` 绕过。
+# =============================================================================
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -z \
+  | tr '\0' '\n' | grep -Ei '\.(ts|js|mjs|html|css|json|md|ps1)$' || true)
+
+if [ -z "$files" ]; then
+  echo "[pre-commit] 没有文本文件改动，跳过编码门禁"
+  exit 0
+fi
+
+count=$(printf '%s\n' "$files" | wc -l | tr -d ' ')
+echo "[pre-commit] 编码门禁：扫 ${count} 个改动文件 ..."
+if ! printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 node work/enc/scan_utf8.mjs --quiet; then
+  echo ""
+  echo "[pre-commit] X 以上文件被写坏了（U+FFFD / 非法 UTF-8），提交已中止。"
+  echo "  修法：用 UTF-8 重写（edit/write 工具，或 python open(..., encoding='utf-8')）；"
+  echo "  绝对不要用 PowerShell 5.1 的 Get-Content/Set-Content 过一遍中文文件。"
+  exit 1
+fi

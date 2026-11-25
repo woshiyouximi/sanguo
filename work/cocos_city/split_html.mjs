@@ -1,0 +1,10 @@
+import fs from 'node:fs';
+const s = fs.readFileSync('F:/sanguo/game/web/city.html', 'utf8');
+const scripts = [...s.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+const code = scripts[1];
+fs.writeFileSync('F:/sanguo/work/cocos_city/city_app.js', code, 'utf8');
+const body = [...s.matchAll(/<body[\s\S]*?<\/body>/g)][0][0];
+fs.writeFileSync('F:/sanguo/work/cocos_city/city_body.html', body, 'utf8');
+const css = [...s.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1]).join('\n');
+fs.writeFileSync('F:/sanguo/work/cocos_city/city_style.css', css, 'utf8');
+console.log('app', code.length, 'body', body.length, 'css', css.length);

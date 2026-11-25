@@ -1,0 +1,11 @@
+﻿import { loadData } from './dist/data.js';
+import { createWorld, step } from './dist/core/battle.js';
+import { buildFrame } from './dist/view/battleView.js';
+const data = await loadData({ dir: './data' });
+const w = createWorld({ data, seed: 302, a: { formation: 0, troop: '大刀', soldiers: 100, morale: 60, general: { str: 97, int: 75, level: 6 } }, b: { formation: 1, troop: '黃巾', soldiers: 100, morale: 60, general: { str: 60, int: 40, level: 5 } } });
+for (let i = 0; i < 260; i++) step(w);
+const { frame } = buildFrame(w, { camX: null, width: 750, height: 1334 });
+const sprites = frame.filter((c) => c.kind === 'sprite');
+const act = sprites.filter((c) => c.img && c.img.__isAction);
+console.log('sprites', sprites.length, 'actionSprites', act.length);
+console.log('aliveA', w.sides.A.aliveCount, 'aliveB', w.sides.B.aliveCount, 'tick', w.tick);

@@ -1,0 +1,23 @@
+| CampaignRoot.ts:1453 | \pplyTextRole(s)(this.labelTitle, title, 32)\ | \:190\ |
+| CampaignRoot.ts:1455 | \pplyTextRole(s)(this.labelMonarch, body, 18)\ | \:192\ |
+| CampaignRoot.ts:1456 | \pplyTextRole(s)(this.labelStats, body, 18)\ | \:193\ |
+| CampaignRoot.ts:1457 | \pplyTextRole(s)(this.labelMonth, num, 20)\ | \:191\ |
+| CampaignRoot.ts:1459 | \pplyTextRole(s)(this.labelItems, num, 20)\ | \:194\ |
+| CampaignRoot.ts:1460 | \pplyTextRole(s)(this.labelForces, num, 20)\ | \:194\ |
+| CampaignRoot.ts:1467 | \pplyTextRole(s)(this.actionLabels, num, 20)\ | \:196\ |
+| CampaignRoot.ts:1472 | \pplyTextRole(s)(this.logTitle, head, 18)\ | \:195\ |
+| CampaignRoot.ts:2208 | \pplyTextRole(s)(label, body, CITY_LABEL_FONT)\ | \:201 / :418\ |
+| CityPanel.ts:509 | \pplyTextRole(s)(this.lblTitle, title, FONT.title)\ | \:259\ |
+| CityPanel.ts:514 | \pplyTextRole(s)(this.hudNames, body, 16)\ | \:264\ |
+| CityPanel.ts:515 | \pplyTextRole(s)(this.hudValues, num, 20)\ | \:265\ |
+| CityPanel.ts:518 | \pplyTextRole(s)(this.lblCmdTitle, head, 22)\ | \:261\ |
+| CityPanel.ts:519 | \pplyTextRole(s)(this.cmdTags, head, 22)\ | \:262\ |
+| CityPanel.ts:520 | \pplyTextRole(s)(this.cmdSubs, body, 16)\ | \:263\ |
+| CityPanel.ts:525 | \pplyTextRole(s)(this.logLabels, body, 18)\ | \:266\ |
+| ItemsPanel.ts:725 | \pplyTextRole(s)(this.labelTitle, title, 32)\ | \:327\ |
+| ItemsPanel.ts:751 | \pplyTextRole(s)(this.statNames, body, 11)\ | \:328\ |
+| ItemsPanel.ts:752 | \pplyTextRole(s)(this.statVals, num, 13)\ | \:329\ |
+| ItemsPanel.ts:760 | \pplyTextRole(s)(this.labelActMain, head, 22)\ | \:330\ |
+| DeployRoot.ts:676 | \pplyTextRole(s)(this.labelTitle, title, 32)\ | \:390\ |
+| DeployRoot.ts:684 | \pplyTextRole(s)(this.genLabels, body, 16)\ | \:392\ |
+| DeployRoot.ts:691 | \pplyTextRole(s)(this.actionLabels, head, 18)\ | \:391\ |

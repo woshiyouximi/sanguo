@@ -1,0 +1,4 @@
+{
+  "base": "",
+  "_readme": "CDN 音频根地址。留空 = 走包内 resources（当前出包已剔除音频 → 静音，但绝不报错、不卡战斗）。要开 CDN：先跑 tools/build_wechat.ps1 -Audio cdn 生成 dist/audio-cdn/，把其中 audio/ 与 audio-manifest.json 传到 CDN 根，再把根地址填进 base（例 https://cdn.your.com/sanguo/audio-cdn/ ，末尾斜杠可有可无），然后重新出包。CDN 域名必须同时加进微信公众平台的「downloadFile 合法域名」。详见 project/77_音频CDN通道.md。"
+}

@@ -1,0 +1,11 @@
+﻿import fs from "node:fs";
+const p = "F:/sanguo/game/src/core/battle.ts";
+let t = fs.readFileSync(p, "utf8");
+const hadBom = t.charCodeAt(0) === 0xfeff;
+if (hadBom) t = t.slice(1);
+const a = t.indexOf("/** 撤退单位步速倍数");
+const b = t.indexOf("/** AI 撤退阈值：本侧存活兵力");
+if (a < 0 || b < 0 || a >= b) throw new Error("markers " + a + " " + b);
+t = t.slice(0, a) + t.slice(b);
+fs.writeFileSync(p, (hadBom ? "\uFEFF" : "") + t, "utf8");
+console.log("removed", b - a, "chars");

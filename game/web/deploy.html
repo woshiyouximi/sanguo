@@ -1,0 +1,789 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>三國群英傳 2 · 豎屏重製 · 出征編成</title>
+<style>
+  :root{--bg:#0E1116;--panel:#161B22;--panel-2:#1D242D;--line:rgba(216,179,106,.26);
+    --gold:#D8B36A;--gold-2:#F3E0B4;--ink:#E9E4D6;--ink-2:#B6AF9E;--ink-3:#7A7566;--jade:#4F7E6C}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:#000;height:100%}
+  body{display:flex;align-items:center;justify-content:center;font-family:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;color:var(--ink)}
+  #stage{position:relative;width:750px;height:1334px;display:flex;flex-direction:column;overflow:hidden;
+    background:url("assets/bg/deploy_bg.png") center top / cover no-repeat,
+      radial-gradient(120% 70% at 50% 0%,#1B2430 0%,#0E1116 62%),var(--bg);transform-origin:top left}
+  /* 底图之上留一层很淡的压暗，保证任何一张底图换了都不影响读数。
+     deploy_bg 是 AI 重绘（不是原作素材），不受"透明度 ≥.55"那条占位约束，
+     所以这里只压到 .30→.52，让案几和烛光露出来 */
+  #stage::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:0;
+    background:linear-gradient(180deg,rgba(8,11,15,.30) 0%,rgba(8,11,15,.40) 46%,rgba(8,11,15,.52) 100%)}
+  #stage>*{position:relative;z-index:1}
+  /* 页眉下缘：原作横条 WAR05（111×12，金线＋藏青底）拉满 750 当分隔线 */
+  header{flex:none;padding:12px 24px 8px;border-bottom:0;
+    background:linear-gradient(180deg,rgba(216,179,106,.08),rgba(10,13,17,.5)),
+      url("assets/ui/orig/bar_div.png") left bottom / 100% 11px no-repeat}
+  h1{margin:0;font-size:28px;letter-spacing:.12em;color:var(--gold-2);text-shadow:0 2px 10px rgba(0,0,0,.75)}
+  .sub{margin-top:4px;font-size:17px;color:var(--ink-2);text-shadow:0 1px 6px rgba(0,0,0,.8)}
+  .sub b{color:var(--gold)}
+  /* [V4 竖版收尾] 6 个分区 + 页脚必须在一屏 1334 内：只收页眉/页脚/分区间隙，
+     分区内部的字号与项目一个不动。旧版 .body 内容 1111 > 可视 1080，#vs 被页脚压掉。 */
+  .body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:5px;padding:6px 22px;overflow-y:auto;
+    scrollbar-width:none}
+  .body::-webkit-scrollbar{display:none}
+  /* 分区仍是半透明卡片（rgba .72）＋原作金线外框，底图从缝里透出来，但字一直在暗底上。
+     外框 = 原作战报面板 WARINFO01（212×293）九宫：slice 8 / 描边 8px / 不 fill，
+     所以只画那圈金线＋暗红内线，中间仍然是卡片自己的 rgba 底。
+     用绝对定位伪元素是为了「零布局代价」：这一页 6 张卡片已经顶到 1334 了。 */
+  .sec{position:relative;background:rgba(16,20,26,.72);border:0;border-radius:6px;padding:8px 14px;
+    box-shadow:0 10px 26px rgba(0,0,0,.32)}
+  .sec::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border:8px solid transparent;
+    border-image:url("assets/ui/orig/frame_panel.png") 8 / 8px / 0 stretch;
+    box-shadow:inset 0 0 18px rgba(0,0,0,.28)}
+  /* 小标题前的金色菱玉：原作菜单条目引子 D3_1D（22×22），14px 像素化 */
+  .sec h2{margin:0 0 6px;font-size:18px;color:var(--gold);letter-spacing:.08em;font-weight:600}
+  .sec h2::before{content:"";display:inline-block;width:14px;height:14px;margin-right:6px;vertical-align:-2px;
+    opacity:.9;background:url("assets/ui/orig/gem_gold.png") center / contain no-repeat;image-rendering:pixelated}
+  .gen{display:flex;gap:12px;align-items:center}
+  /* 头像框：原作方格框 D0_B（64×68）九宫 slice 12 / 描边 6px */
+  .gen img{width:88px;height:110px;object-fit:cover;object-position:50% 14%;background:#0B0E12;
+    border:6px solid transparent;
+    border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .gen .info{flex:1;min-width:0}
+  .gen .nm{font-size:26px}
+  .gen .st{font-size:17px;color:var(--ink-2);margin-top:4px}
+  .gen .st b{color:var(--gold)}
+  /* 可选项（武将/兵种/阵形/军师技/兵力）：原作小方格框 D0_B（64×68）九宫当牌面。
+     同样是「伪元素画框」：.it 的盒子尺寸和内边距一点没动，所以「保留氣力」不会被边框挤到折行，
+     选中态也不再换 border（border-image 会盖掉 border-color），只压一圈金色 inset 光 */
+  .pick{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}
+  .pick .it{position:relative;flex:none;width:88px;height:58px;
+    background:rgba(20,26,34,.78);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--ink-2)}
+  .pick .it::before{content:"";position:absolute;inset:0;pointer-events:none;
+    border:6px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .pick .it.on{color:var(--gold-2);background:rgba(44,33,14,.94)}
+  .pick .it.on::before{box-shadow:inset 0 0 0 2px rgba(216,179,106,.55),inset 0 0 14px rgba(216,179,106,.22)}
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .grid .it{position:relative;height:50px;
+    background:rgba(20,26,34,.78);
+    display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--ink-2)}
+  .grid .it::after{content:"";position:absolute;inset:0;pointer-events:none;
+    border:6px solid transparent;border-image:url("assets/ui/orig/plate_sq.png") 12 / 6px / 0 stretch}
+  .grid .it.on{color:var(--gold-2);background:rgba(44,33,14,.94)}
+  .grid .it.on::after{box-shadow:inset 0 0 0 2px rgba(216,179,106,.55),inset 0 0 14px rgba(216,179,106,.22)}
+  /* 兵种格左侧挂原作兵符单字图标 FORCE01..13（16×16，顺序＝兵种表 0..12：朴刀/长枪/大刀/弓/链/飞/
+     武/蛮/铁/藤/黄/弩/女）。用 nth-child 而不是 data-troop，这样「未學」的灰格也有图标 */
+  #troopgrid .it::before{content:"";flex:none;width:19px;height:19px;margin-right:5px;
+    background:center / contain no-repeat;image-rendering:pixelated}
+  #troopgrid .it:nth-child(1)::before{background-image:url("assets/ui/orig/force_01.png")}
+  #troopgrid .it:nth-child(2)::before{background-image:url("assets/ui/orig/force_02.png")}
+  #troopgrid .it:nth-child(3)::before{background-image:url("assets/ui/orig/force_03.png")}
+  #troopgrid .it:nth-child(4)::before{background-image:url("assets/ui/orig/force_04.png")}
+  #troopgrid .it:nth-child(5)::before{background-image:url("assets/ui/orig/force_05.png")}
+  #troopgrid .it:nth-child(6)::before{background-image:url("assets/ui/orig/force_06.png")}
+  #troopgrid .it:nth-child(7)::before{background-image:url("assets/ui/orig/force_07.png")}
+  #troopgrid .it:nth-child(8)::before{background-image:url("assets/ui/orig/force_08.png")}
+  #troopgrid .it:nth-child(9)::before{background-image:url("assets/ui/orig/force_09.png")}
+  #troopgrid .it:nth-child(10)::before{background-image:url("assets/ui/orig/force_10.png")}
+  #troopgrid .it:nth-child(11)::before{background-image:url("assets/ui/orig/force_11.png")}
+  #troopgrid .it:nth-child(12)::before{background-image:url("assets/ui/orig/force_12.png")}
+  #troopgrid .it:nth-child(13)::before{background-image:url("assets/ui/orig/force_13.png")}
+  /* 軍師技：標題右側跟一行灰字效果提示（選中才有字），籌碼橫向滾動 */
+  .sec h2.wise{display:flex;align-items:baseline;gap:8px}
+  .sec h2 .lv{margin-left:2px;font-size:15px;font-weight:400;letter-spacing:0;color:var(--ink-3)}
+  .sec h2 .hint{flex:1;min-width:0;text-align:right;font-size:15px;font-weight:400;letter-spacing:0;
+    color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pick .it.dim{opacity:.5}
+  /* 未學的兵種/陣形：置灰不可選（原作就是不能選，不是選了再報錯）。
+     边框已经交给 border-image，所以「灰格」只靠 opacity，不再用虚线边 */
+  .grid .it.lock,.pick .it.lock{opacity:.34;cursor:default}
+  .grid .it.lock .tag,.pick .it.lock .tag{font-size:11px;line-height:1;padding:2px 3px;border-radius:4px;
+    border:1px solid rgba(255,255,255,.22);margin-left:4px;vertical-align:3px}
+  /* 兵力：滑桿 1..上限，右側 N/上限 */
+  .srow{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+  .srow input[type=range]{flex:1;height:24px;accent-color:#D8B36A;background:transparent}
+  .sval{font-size:16px;color:var(--ink-3);white-space:nowrap}
+  .sval b{font-size:21px;color:var(--gold-2)}
+  /* 页脚上缘 = 同上横条，倒过来贴顶 */
+  /* 出陣順序：本作新增的便利功能（原作沒有多將上陣，見 project/168）。
+     上移/下移只在前 3 列生效（後選出陣的落地點，[推測]），後 2 列灰顯。 */
+  .qrow{display:flex;align-items:center;gap:8px;padding:3px 0}
+  .qrow .qi{flex:none;width:24px;text-align:center;font-size:16px;color:var(--ink-3)}
+  .qrow .qn{flex:1;min-width:0;font-size:18px;color:var(--ink);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis}
+  .qrow .qn i{font-style:normal;font-size:12px;color:var(--ink-3);margin-left:4px}
+  .qrow .qtr{flex:none;width:104px;height:40px;background:rgba(20,26,34,.78);color:var(--ink-2);
+    font:inherit;font-size:16px;border:1px solid rgba(216,179,106,.35);border-radius:6px}
+  .qrow .qnum{flex:none;width:62px;text-align:right;font-size:15px;color:var(--ink-3)}
+  .qrow .qmv{flex:none;display:flex;gap:6px}
+  .qrow .qmv button{width:42px;height:40px;font-size:17px;color:var(--ink);background:rgba(20,26,34,.78);
+    border:1px solid rgba(216,179,106,.35);border-radius:6px;cursor:pointer}
+  .qrow .qmv button:disabled{opacity:.26;cursor:default}
+  /* 後 2 列灰顯：不可調序（原作並無「預備槽」，此處只是本作的名冊順序） */
+  .qrow.reserve .qn,.qrow.reserve .qnum{color:var(--ink-3)}
+  .qrow.reserve .qi{opacity:.6}
+  #qhint{font-size:14px}
+  footer{flex:none;padding:8px 20px calc(10px + env(safe-area-inset-bottom));border-top:0;
+    background:linear-gradient(180deg,rgba(10,13,17,.86),rgba(8,10,14,.95)),
+      url("assets/ui/orig/bar_div.png") left top / 100% 11px no-repeat}
+  .row{display:flex;gap:10px}
+  /* 按钮底：原作空按钮牌 D3_2H（308×40，双线金框＋四角十字）九宫 slice 16 / 描边 10px。
+     中间透明，所以下面的渐变照旧透出来；.primary 不用 border-color（会被 border-image 盖掉），
+     改用一圈 inset 金光区分 */
+  .btn{flex:1;height:80px;border:10px solid transparent;
+    border-image:url("assets/ui/orig/plate_btn.png") 16 / 10px / 0 stretch;
+    background:linear-gradient(165deg,#2A3038,#191D23);
+    color:var(--ink);font-size:28px;letter-spacing:.1em;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .btn small{font-size:15px;color:var(--ink-3);letter-spacing:0}
+  .btn.primary{background:linear-gradient(165deg,#4A3A1E,#2A2114);color:var(--gold-2);
+    box-shadow:inset 0 0 0 2px rgba(216,179,106,.45),0 0 20px rgba(216,179,106,.10)}
+  #hint{padding:6px 4px 0;font-size:16px;color:var(--ink-2);line-height:1.45;text-shadow:0 1px 5px rgba(0,0,0,.8)}
+  /* 統一提示條（project/93 §4）：預設 6s 自動消失、重要 12s、點一下立刻關。
+     貼在底部按鈕列上方，不擋「出征」，也不會像舊 notice 那樣一直掛著。 */
+  #toast{position:fixed;left:16px;right:16px;bottom:150px;z-index:40;padding:12px 16px;
+    border-radius:12px;background:rgba(22,18,12,.94);color:var(--gold-2);font-size:16px;
+    line-height:1.5;text-align:center;letter-spacing:.02em;cursor:pointer;
+    box-shadow:inset 0 0 0 1px rgba(216,179,106,.45),0 8px 24px rgba(0,0,0,.55);
+    opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .18s,transform .18s}
+  #toast.on{opacity:1;transform:none;pointer-events:auto}
+  #toast small{display:block;margin-top:4px;font-size:13px;color:var(--ink-2)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <header>
+    <h1>出 征 編 成</h1>
+    <!-- 兩個數字本來就不同，標籤必須分開寫：守軍=城內總兵，上陣=這一仗敵方實際出場（來自出征令） -->
+    <div class="sub">目標 <b id="target">—</b> · 守軍 <b id="gar">—</b> 兵 · 上陣 <b id="bs">—</b> 兵 · 防御 <b id="def">—</b></div>
+  </header>
+  <div class="body">
+    <div class="sec">
+      <h2 class="wise">主 將<span class="hint" id="gennote"></span></h2>
+      <div class="gen">
+        <img id="gimg" alt="">
+        <div class="info">
+          <div class="nm" id="gname">—</div>
+          <div class="st">武力 <b id="gstr">—</b> · 智力 <b id="gint">—</b> · 節操 <b id="gcap">—</b></div>
+          <div class="st" id="gskill">—</div>
+          <div class="st" id="gtire">疲勞 —</div>
+          <div class="st" id="gmorale">士氣 —</div>
+        </div>
+      </div>
+      <div class="pick" id="genpick" style="margin-top:10px"></div>
+    </div>
+    <!-- 出陣順序（本作新增，非原作結構）：
+         原作沒有「5 個武將槽」——`army+0x04` 是**名冊下標**，全程序只有兩個寫點
+         （`0x4496C8` A 側 / `0x44984B` B 側），都由「出陣名冊列表」的選人動作寫入；
+         戰場上每側**恰好 1 個**將領單位（`0x448690` 每側建一次，`0x446F45` 只有 2 個呼叫點）。
+         「5」是名冊列表**每頁 5 行**（`0x44883D: mov dword ptr [msg+0x28], 5`）。
+         證據：project/168_战场每侧单位数.md §1/§2（62 條地址逐條回比 EXE，0 處不符）。
+         所以這裡的排序是**本作的便利功能**：決定名冊順序與「誰算主將」，不是原作的多將上陣。 -->
+    <div class="sec">
+      <h2 class="wise">出 陣 順 序<span class="hint" id="qhint">原作只上陣 1 名主將 · 此處決定名冊順序</span></h2>
+      <div id="qlist"></div>
+    </div>
+    <div class="sec">
+      <h2>兵 種（相剋 ±68）</h2>
+      <div class="grid" id="troopgrid"></div>
+    </div>
+    <div class="sec">
+      <h2>陣 形（相剋 ±25）</h2>
+      <div class="grid" id="formgrid"></div>
+    </div>
+    <div class="sec">
+      <h2 class="wise">軍 師 技<span class="lv" id="wiselv"></span><span class="hint" id="wisehint">—</span></h2>
+      <div class="pick" id="wisepick"></div>
+    </div>
+    <div class="sec">
+      <h2>戰 前 情 報</h2>
+      <div class="sub" id="intel" style="line-height:1.6">—</div>    </div>
+    <div class="sec">
+      <h2>兵 力<span class="hint" id="numhint">步/騎 兩欄 · 相加才是上陣兵</span></h2>
+      <div class="srow">
+        <input type="range" id="numrange" min="1" max="100" step="1" value="100">
+        <div class="sval">步 <b id="numnow">100</b> / <span id="numcap">100</span></div>
+      </div>
+      <div class="srow">
+        <input type="range" id="cavrange" min="0" max="100" step="1" value="0">
+        <div class="sval">騎 <b id="cavnow">0</b> / <span id="cavcap">0</span></div>
+      </div>
+      <div class="pick" id="numgrid"></div>
+      <div class="sub" id="numtotal" style="margin-top:6px">—</div>
+      <div class="sub" id="vs" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <footer>
+    <div class="row">
+      <div class="btn" id="back"><span>返 回</span><small>大地圖</small></div>
+      <div class="btn primary" id="go"><span>出 征</span><small id="gosub">—</small></div>
+    </div>
+    <div id="hint">相剋由原作 13×13 兵種表與 9×9 陣形表算出，顯示的是「我方對敵方」的淨加值。</div>
+  </footer>
+  <!-- 統一提示條：自動消失 + 點擊可關（project/93 §4） -->
+  <div id="toast" hidden></div>
+</div>
+<!-- [audio] 音效总线（window.SG.audio）：本页原来完全静音 -->
+<script src="./release.js"></script>
+<script src="./audio.js"></script>
+<!-- [face] 原作肖像映射（window.SG.portraitUrl）：FACE 100×120，本页主將框 88×110 -->
+<script src="./face_map.js"></script>
+<script type="module">
+// 軍師技的「已學 / 效果提示」直接喫 core 的實現（dist 由 src 編出），避免分類表在
+// HTML 裡再抄一份。沒有 dist 時這一頁會整體報錯——index.html 本来也依賴 dist。
+import { listWisdomChoices, wiseHintOf } from '../dist/core/wises.js';
+import { battleSetup, garrisonOf } from '../dist/core/garrison.js';
+import { levelOf, troopCapOf } from '../dist/core/levels.js';
+// 兩欄口徑的第二半：騎兵欄上限與士兵槽上限（`0x409FD8` / `0xC8`），同樣只在 core 裡有一份。
+import { TROOP_COLUMNS_MAX, cavalryCapOf } from '../dist/core/levels.js';
+// R94：出陣隊列（每方 5 槽）+ 存檔容器。同一份純邏輯給 campaign.html / cocos DeployRoot.ts 用，
+// 不在 HTML 裡另抄一份（槽數/去重/夾值只有一個口徑）。
+import * as DQ from '../dist/core/deploy_queue.js';
+import * as Saves from './saves.js';
+// 關卡判定只有一份（`RATE===0 || POPULATION===0`）：本頁用它把「空城」與「關卡」的守將說明分開，
+// 也讓 12 座關的守軍口徑（garrison.json 的 garrison）與 campaign.html / Cocos 三處一致（project/163）。
+import * as CM from './city_model.js';
+
+// [audio] 出征编成属于大地图流程，放 17 大地图曲（原作战前不换曲，只有 03/17 两档可选）
+const audio = () => window.SG?.audio;
+// [face] 原作肖像：face_map.js 提供 name → assets/face/{full,thumb}/NNN.webp，缺映射回落 AI 立绘
+const portraitUrl = (name, variant) => (window.SG?.portraitUrl
+  ? window.SG.portraitUrl(name, variant)
+  : `assets/hero/${encodeURIComponent(name)}.webp`);
+
+const $ = (id) => document.getElementById(id);
+const stage = $('stage');
+function fit() {
+  const s = Math.min(window.innerWidth / 750, window.innerHeight / 1334);
+  // 同 campaign.html：先定位缩放后的盒，再 scale，否则 1200x900 下标题会被裁掉
+  stage.style.position = 'absolute';
+  stage.style.left = Math.round((window.innerWidth - 750 * s) / 2) + 'px';
+  stage.style.top = Math.round((window.innerHeight - 1334 * s) / 2) + 'px';
+  stage.style.transform = `scale(${s})`;
+  document.body.style.width = 750 * s + 'px';
+  document.body.style.height = 1334 * s + 'px';
+}
+window.addEventListener('resize', fit); fit();
+
+const qs = new URLSearchParams(location.search);
+const target = qs.get('city') || '南皮';
+const KEY = 'sanguo_campaign_v1';
+let save = {};
+try { save = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+save.owned = save.owned || [];
+// 疲勞容錯：老檔沒有 save.tire、或值越界/是字串，都按 0..100 整數讀。
+function tireOfName(name) {
+  const raw = save && save.tire && typeof save.tire === 'object' ? save.tire[name] : 0;
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, Math.trunc(v))) : 0;
+}
+// 士氣（原作 general+0x38，武將級）：沒有存過就按本作缺省 60。老檔可能一個名字都沒有。
+function moraleOfName(name) {
+  const raw = save && save.morale && typeof save.morale === 'object' ? save.morale[name] : 60;
+  const v = Number(raw);
+  return Number.isFinite(v) ? Math.min(100, Math.max(0, Math.trunc(v))) : 60;
+}
+
+const [scen, generals, troops, forms, wises, garRaw] = await Promise.all([
+  fetch('../data/scenarios.json').then((r) => r.json()),
+  fetch('../data/generals.json').then((r) => r.json()),
+  fetch('../data/troops.json').then((r) => r.json()),
+  fetch('../data/formations.json').then((r) => r.json()),
+  fetch('../data/wises.json').then((r) => r.json()),
+  fetch('../data/garrison.json').then((r) => r.json()),
+]);
+
+// 剧本：存檔里的 scenario 是 id（1..5），city_by_times / status_by_times 按索引对齐
+const SCEN_IDX = Math.max(0, Math.min(scen.length - 1, (Number(save.scenario) || scen[0].id) - 1));
+const scenario = scen[SCEN_IDX];
+const city = (scenario.cities || []).find((c) => c.NAME === target)
+  || { NAME: target, POPULATION: 200000, DEFENSE: 300 };
+// 守军与守将：优先取 garrison.json（五个剧本各自的真实配置），缺了才退回人口估算
+const GDATA = { scenarios: scen, generals, garrison: garRaw };
+const enemy = (() => {
+  try { return battleSetup(GDATA, SCEN_IDX, target, 100); }
+  catch { return { enemyGeneral: { name: '守將', str: 70, int: 60 }, enemyTroops: 100, enemyOfficers: [] }; }
+})();
+const garrison = (() => {
+  try { const g = garrisonOf(GDATA, SCEN_IDX, target); if (g) return g.garrison; } catch {}
+  return Math.min(Math.floor((city.POPULATION || 0) / 2500) + 110, 600);
+})();
+// 敵方**上陣**兵只有一個口徑：大地圖 `campaign.html` 的 `enemySetup().enemyTroops`，
+// 出征令用 `?bsoldiers=` 帶進來（project/93 §5）。這頁**不重算、不猜**：沒帶參數就顯示
+// 「—」並提示，避免像舊版那樣出現「守軍 110、敵軍 6」兩個互相矛盾的數字。
+// 舊寫法（`round(garrison/6)` 現場估）已移除：同一場仗在 deploy 與 campaign 各算一次，
+// 兩邊公式一漂移就變成 100 vs 60 的假戰鬥。
+const BS_QUERY = Number(qs.get('bsoldiers'));
+const BS_KNOWN = Number.isFinite(BS_QUERY) && BS_QUERY > 0;
+// 上限 200 = `battle.ts` 的 `formationCells()` 最后一档填充（100 步 + 100 騎上限），不是 100：
+// 普通城的上陣兵 `campaign.html` 本來就夾在 100 以內，但**關卡**的守軍是 `garrison.json` 的
+// `garrison`（12 座關實測 110）——夾成 100 會讓出征列表寫 110、戰場上只有 100（project/163 §3）。
+const BS_MAX = 200;
+const bsoldiers = BS_KNOWN ? Math.max(1, Math.min(BS_MAX, Math.round(BS_QUERY))) : 0;
+// 有沒有守將：battleSetup 的 `enemyParams === null` 就等於「這座城沒有守將」（garrison.ts:501/520），
+// 此時它給的 enemyGeneral 是 `{name:'守將', str:0, int:0}` 的佔位值 —— 那個「守將（武0/智0）」
+// 就是 project/89 裡的空城占位將，不要顯示、也不要帶進戰鬥（project/93 §1）。
+const enemyChief = enemy.enemyParams ? enemy.enemyGeneral : null;
+
+// 主將候選 = **出發城**的武將（不是目標城）：該劇本 city_by_times 指向出發城、status 不是「未」，太守排第一。
+// 出發城來源：?from=<城名>（行军/出征会带）→ 存档 owned[0] → 目标城（兜底）。
+const HOME = qs.get('from') || (save.owned && save.owned[0]) || target;
+const homeCity = (scenario.cities || []).find((c) => c.NAME === HOME) || { NAME: HOME };
+function officersOf(name) {
+  const major = homeCity.NAME === name ? (homeCity.MAJOR || '') : '';
+  return generals
+    .filter((g) => g.NAME !== '盜賊'
+      && g.city_by_times?.[SCEN_IDX] === name
+      && g.status_by_times?.[SCEN_IDX] !== '未')
+    .sort((a, b) => (b.NAME === major) - (a.NAME === major) || (b.STR + b.INT) - (a.STR + a.INT));
+}
+let borrowed = false;
+let pool = officersOf(HOME);
+if (!pool.length) {
+  // 本城無人 → 暫調全勢力（存檔 owned 為空時就是原型，直接給全部武將）
+  borrowed = true;
+  const mine = save.owned || [];
+  pool = generals
+    .filter((g) => g.NAME !== '盜賊'
+      && g.status_by_times?.[SCEN_IDX] !== '未'
+      && g.city_by_times?.[SCEN_IDX]
+      && (!mine.length || mine.includes(g.city_by_times[SCEN_IDX])))
+    .sort((a, b) => (b.STR + b.INT) - (a.STR + a.INT));
+}
+if (!pool.length) pool = generals.filter((g) => g.NAME !== '盜賊');
+// 主將只有一個數據源：出征令帶進來的名字（`?a=`；舊連結用 `?gen=`）。
+// campaign.html 的按鈕（commander()）與浮層（localGeneral()）各自算過一次名字，兩個都不等於
+// 這一頁的「武將池第一個」—— 三處各挑一個，就成了 project/89 §五 的三個名字。
+// 這裡的規矩：**URL 說誰就是誰**，武將池只當備選；沒帶參數才回退「本城太守優先」的舊排序。
+const ASSIGNED = (qs.get('a') || qs.get('gen') || '').trim();
+const assignedRow = ASSIGNED
+  ? generals.find((g) => g.NAME === ASSIGNED && g.status_by_times?.[SCEN_IDX] !== '未')
+  : null;
+if (assignedRow && !pool.some((g) => g.NAME === assignedRow.NAME)) pool = [assignedRow, ...pool];
+let gen = assignedRow || pool[0];
+
+const WISE_BY_SEQ = new Map(wises.map((w) => [w.SEQUENCE, w]));
+const TROOP_NAMES = troops.names || troops.map?.((t) => t.name) || [];
+const FORM_NAMES = forms.names || [];
+// 阵形列表只列玩家可选的 9 阵。formations.json 的相克矩阵是 11×11（第 10 行/列是亂陣，
+// 对任何阵 -25），但亂陣是"不布阵"的引擎内部阵，原作玩家选不到 —— 只让它在相克表里生效。
+const PLAYABLE_FORMS = Math.min(Number(forms.playable) || FORM_NAMES.length, FORM_NAMES.length);
+const troopMatrix = troops.matrix || [];
+const formMatrix = forms.matrix || [];
+
+// 原作兵符是單字（UseForce 刀/槍/弓/…）。兵種表順序：朴刀0 长枪1 大刀2 弓箭3 链锤4 飞刀5
+// 武斗6 蛮族7 铁缒8 藤甲9 黄巾10 弩兵11 女兵12；關刀本作歸大刀，故 關→2。
+const TROOP_BY_CHAR = { 刀: 2, 槍: 1, 弓: 3, 鍊: 4, 飛: 5, 武: 6, 蠻: 7, 鐵: 8, 籐: 9, 賊: 10, 弩: 11, 女: 12, 關: 2 };
+// 陣形：方0 圓1 錐2 雁3 玄4 魚5 鉤6 衝7 箭8 → 方形/圆形/锥形/雁形/玄襄/鱼丽/钩形/冲锋/箭矢
+const FORM_BY_CHAR = { 方: 0, 圓: 1, 錐: 2, 雁: 3, 玄: 4, 魚: 5, 鉤: 6, 衝: 7, 箭: 8 };
+// 白名單 → 下標集合；return null 表示「資料沒給，不限制」
+function troopSet(g) {
+  const s = new Set((g.UseForce || []).map((c) => TROOP_BY_CHAR[c]).filter((v) => v !== undefined));
+  return s.size ? s : null;
+}
+function formSet(g) {
+  const s = new Set((g.BattleArray || []).map((c) => FORM_BY_CHAR[c]).filter((v) => v !== undefined));
+  return s.size ? s : null;
+}
+const defaultTroop = (g) => TROOP_BY_CHAR[(g.UseForce || [])[0]] ?? 2;
+const defaultForm = (g) => FORM_BY_CHAR[g.UseBattleArray]
+  ?? (g.BattleArray || []).map((c) => FORM_BY_CHAR[c]).find((v) => v !== undefined) ?? 0;
+
+// 步/騎**兩欄**上限（原作 `general+0x42` 帶兵上限 / `+0x46` 騎兵上限，互不包含）：
+// 帶兵上限只管步兵那一欄、騎兵上限只管騎兵那一欄，上陣總兵力 = 步 + 騎（`unit+0x5C`）。
+// 口徑來源：project/168_战场每侧单位数.md §4（`0x443118`/`0x443124` 逐地址回比 EXE）
+// 與 project/170_步骑两栏兵力.md。舊版把騎兵當成帶兵數的子集，於是 20 級以下永遠 0 騎、
+// 20 級以上又卡在 100 兵 —— 兩頭都跟原作不符。
+// 等級口徑統一走 core/levels.ts（R84）：`?lv=`（campaign 帶過來的存檔等級）> 武將行 level
+// > 起始等級 `startLevelOf()`（`BaseEXP` 反推，`generals.json` 全是 200 ⇒ Lv2 ⇒ 10 兵）。
+const LV_OVERRIDE = Math.max(0, Math.trunc(Number(qs.get('lv')) || 0));
+let GEN_LEVEL = levelOf(gen, LV_OVERRIDE);
+/** 步兵欄上限（`0x409FB6` = min(5×等級,100)）；變數名沿用舊的 SOLDIER_CAP 以免同一頁兩個名字 */
+let SOLDIER_CAP = troopCapOf(GEN_LEVEL);
+/** 騎兵欄上限（`0x409FD8` = clamp((等級−20)×5,0,100)），與上面互不包含 */
+let CAV_CAP = cavalryCapOf(GEN_LEVEL);
+/** 兩欄相加後的上陣總上限（200 = 100 步 + 100 騎 = 原作士兵槽 `0xC8`） */
+let TROOP_CAP = Math.min(TROOP_COLUMNS_MAX, SOLDIER_CAP + CAV_CAP);
+let troop = defaultTroop(gen), form = defaultForm(gen);
+// `soldiers` = 步兵欄、`cavalry` = 騎兵欄；帶去戰鬥頁的是兩者之和（`main.js` 只認總數）
+let soldiers = SOLDIER_CAP, cavalry = CAV_CAP;
+
+/**
+ * 兩欄按等級重算，並把「總兵力」維持在 `total`（換將/調序時不讓玩家的兵自己變多變少）。
+ *
+ * 隊列（`deploy_queue.ts` 的槽位）只有 `troops` 一個數字 = 總數，所以總數要能反推兩欄：
+ * **步兵欄先補滿，餘數歸騎兵欄**（`cav = clamp(total − 步上限, 0, 騎上限)`）。
+ */
+function rerollCaps(level, total) {
+  SOLDIER_CAP = troopCapOf(level);
+  CAV_CAP = cavalryCapOf(level);
+  TROOP_CAP = Math.min(TROOP_COLUMNS_MAX, SOLDIER_CAP + CAV_CAP);
+  const keep = Math.max(1, Math.min(TROOP_CAP, Math.round(Number(total) || TROOP_CAP)));
+  cavalry = Math.max(0, Math.min(CAV_CAP, keep - SOLDIER_CAP));
+  soldiers = Math.max(1, Math.min(SOLDIER_CAP, keep - cavalry));
+}
+// 隨軍軍師（兵團指令「任命軍師」，campaign 帶 ?advisor= 進來）。軍師技來自他、不是主將，
+// 所以下面「不在主將可選清單就清掉」那條要放行他（否則一出征軍師技就被抹掉）。
+const ADVISOR = qs.get('advisor') || '';
+let wise = Number(qs.get('wise')) || 0;
+
+// ---------------------------------------------------------------- 出陣順序（R94）
+// 每方 5 槽（原作 Obj3 部隊池 +0x010..+0x020 五個武將下標，docs/07b §6），順序即出陣序。
+// 第 1 槽＝主將。原作每側只上陣 1 名（project/168 §1，62 條 EXE 證據），本作多槽排序是新設計；軍師技 seq 3「後選出陣」（Execute 34）放開的
+// 正是開戰前重排前 3 槽（project/109 §5.3）；存檔字段是 v3 可選的 `save.deployQueue`，
+// 舊檔沒這欄就按「當前 5 將」即時生成，不做遷移跳。
+const TROOP_CHARS = Object.keys(TROOP_BY_CHAR).filter((c) => c !== '關');
+const QUEUE_FALLBACK = pool.slice(0, DQ.DEPLOY_SLOTS).map((g) => g.NAME);
+const QUEUE_STORED = DQ.hasQueue(save);
+let queue = DQ.queueOf(save, QUEUE_FALLBACK);
+if (!queue.length) queue = DQ.makeQueue([gen.NAME]);
+// 兩個方向要分清楚：
+//  · 出征令 / 大地圖指定了主將（?a=）→ 他就是主將，必須坐第 1 槽；已在別槽就互換，不在就頂掉。
+//  · 沒指定、但存檔有隊列 → **存檔的第 1 槽才是主將**，要把它回填到頂部。否則刷新一次
+//    就被「池子默認第一人」頂回原位，玩家改過的順序看起來沒保存（R94 實測抓到的 bug）。
+if (assignedRow && queue[0].general !== gen.NAME) {
+  queue = DQ.setGeneral(queue, 0, gen.NAME);
+} else if (!assignedRow && QUEUE_STORED) {
+  const head = pool.find((g) => g.NAME === queue[0].general);
+  if (head) gen = head;
+}
+// 主將可能被上面換掉，等級/兩欄上限要跟著重算，否則第 1 槽的兵力會被舊上限夾錯。
+GEN_LEVEL = levelOf(gen, LV_OVERRIDE);
+rerollCaps(GEN_LEVEL, soldiers + cavalry);
+// 存過隊列就沿用玩家上次的兵種/兵力（第 1 槽）；沒存過就用本頁預設，讓第一次進來的人有合理值。
+// 隊列只存總數，兩欄由 `rerollCaps()` 反推（步兵欄先補滿、餘數歸騎兵）。
+if (QUEUE_STORED && queue[0]) {
+  troop = TROOP_BY_CHAR[queue[0].troop] ?? troop;
+  rerollCaps(GEN_LEVEL, queue[0].troops);
+}
+
+/** 第 1 槽＝主將：調序/換人後把頂部等級、兵種、兵力都對齊它，避免同一頁出現兩個「主將」。 */
+function syncFromQueue() {
+  const head = queue[0];
+  if (!head) return;
+  gen = pool.find((g) => g.NAME === head.general) || gen;
+  GEN_LEVEL = levelOf(gen, LV_OVERRIDE);
+  // 隊列裡只有總數：兩欄按新主將的上限重切（步兵欄先補滿）
+  rerollCaps(GEN_LEVEL, head.troops || TROOP_CAP);
+  let t = TROOP_BY_CHAR[head.troop] ?? defaultTroop(gen);
+  const okTroop = troopSet(gen);
+  if (okTroop && !okTroop.has(t)) t = defaultTroop(gen);
+  troop = t;
+  const okForm = formSet(gen);
+  if (okForm && !okForm.has(form)) form = defaultForm(gen);
+  queue = DQ.setTroop(queue, 0, TROOP_CHARS[troop] ?? '刀');
+  queue = DQ.setTroops(queue, 0, soldiers + cavalry);
+}
+
+/**
+ * 寫回存檔（兩份，口径不同）：
+ *  1) legacy 鍵 `sanguo_campaign_v1` —— campaign.html / main.js 戰鬥寫回都認這份；
+ *  2) 當前自動存檔槽的 snapshot —— campaign.html 讀槽時直接拿到，不必賭 legacy 的 ts 比較。
+ * 任一步失敗都不影響本頁操作（私隱模式 / 槽壞掉最多是這次調序沒存上）。
+ */
+function persistQueue() {
+  if (!queue.length) return;
+  DQ.saveQueue(save, queue);
+  try { localStorage.setItem(KEY, JSON.stringify(save)); } catch { /* 留給 autosave */ }
+  try {
+    const store = Saves.loadStore(localStorage);
+    const entry = store.slots && store.slots[Saves.lastUsed(store)];
+    if (entry && entry.snapshot && typeof entry.snapshot === 'object') {
+      Saves.setDeployQueue(entry.snapshot, queue);
+      Saves.saveStore(store, localStorage);
+    }
+  } catch { /* 槽坏了不擋調序 */ }
+}
+
+function bonus(matrix, a, b) {
+  if (!Array.isArray(matrix) || !matrix[a]) return 0;
+  const row = matrix[a];
+  const vs = row.vs || row;
+  return vs[b] ?? 0;
+}
+
+function render() {
+  $('target').textContent = city.NAME;
+  $('gar').textContent = garrison;
+  // 上陣兵沒帶出征令參數時顯示「—」：不拿另一個公式湊一個數字出來（project/93 §5）
+  $('bs').textContent = BS_KNOWN ? bsoldiers : '—';
+  $('def').textContent = city.DEFENSE ?? '—';
+
+  $('gname').textContent = gen.NAME;
+  $('gstr').textContent = gen.STR;
+  $('gint').textContent = gen.INT;
+  $('gcap').textContent = gen.CONSTANCY ?? gen.Loyal ?? '—';
+  $('gskill').textContent = `必殺 ${(gen.SKILL || []).length} · 軍師 ${(gen.WISESKILL || []).length}`;
+  // 疲勞（原作 general+0x3A）：只在這裡顯示一次；≥60 轉橙，和每月士氣懲罰同門檻。
+  const genTire = tireOfName(gen.NAME);
+  $('gtire').textContent = `疲勞 ${genTire}/100`;
+  $('gtire').style.color = genTire >= 60 ? '#E2914E' : '';
+  // 士氣（原作 general+0x38，武將級）：<30 標紅（低迷，戰力 -4 起跳），≥80 標綠。
+  const genMorale = moraleOfName(gen.NAME);
+  $('gmorale').textContent = `士氣 ${genMorale}/100`;
+  $('gmorale').style.color = genMorale < 30 ? '#E25B4A' : (genMorale >= 80 ? '#7FCB9B' : '');
+  const img = $('gimg');
+  // 不預設空 src（空 src 會被瀏覽器當成「請求當前頁」再失敗一次，console 多一條資源錯）
+  img.style.visibility = 'hidden';
+  img.onload = () => { img.style.visibility = 'visible'; };
+  img.onerror = () => { img.style.visibility = 'hidden'; };
+  img.src = portraitUrl(gen.NAME, 'full');
+
+  $('genpick').innerHTML = pool.slice(0, 12).map((g) =>
+    `<div class="it ${g.NAME === gen.NAME ? 'on' : ''}" data-gen="${g.NAME}">${g.NAME}</div>`).join('');
+  // 名字來源寫清楚：出征令指定 > 本城（太守優先）> 本城無將暫調
+  $('gennote').textContent = assignedRow
+    ? '出征令指定（?a=）· 可在此換人'
+    : (borrowed
+      ? `本城無將，暫調${(save.owned || []).length ? '我方' : '全勢力'}武將（${pool.length} 人）`
+      : `本城武將 ${pool.length} 人 · 太守 ${homeCity.MAJOR || '—'}`);
+
+  // 兵種/陣形只開該武將的 UseForce / BattleArray；其餘置灰標「未學」，連點都點不到。
+  const okTroop = troopSet(gen), okForm = formSet(gen);
+  $('troopgrid').innerHTML = TROOP_NAMES.map((n, i) => ((!okTroop || okTroop.has(i))
+    ? `<div class="it ${i === troop ? 'on' : ''}" data-troop="${i}">${n}</div>`
+    : `<div class="it lock">${n}<span class="tag">未學</span></div>`)).join('');
+  $('formgrid').innerHTML = FORM_NAMES.slice(0, PLAYABLE_FORMS).map((n, i) => ((!okForm || okForm.has(i))
+    ? `<div class="it ${i === form ? 'on' : ''}" data-form="${i}">${n}</div>`
+    : `<div class="it lock">${n}<span class="tag">未學</span></div>`)).join('');
+
+  // 軍師技：只列主將當前等級已學的（WISESKILL 學習等級 + 檔次門檻），可空選。
+  // 未實作的技照樣能選（原作確實有），只是標暗、提示裡寫明不產生效果。
+  const choices = listWisdomChoices({ wises }, { ...gen, level: GEN_LEVEL });
+  if (wise && !choices.includes(wise) && !ADVISOR) wise = 0;   // 換將後清掉不合法選擇（軍師帶來的技除外）
+  $('wiselv').textContent = `主將 Lv.${GEN_LEVEL}`;
+  $('wisepick').innerHTML = [
+    `<div class="it ${wise === 0 ? 'on' : ''}" data-wise="0">不 用</div>`,
+    ...choices.map((seq) => {
+      const hint = wiseHintOf(seq);
+      const name = WISE_BY_SEQ.get(seq)?.NAME ?? String(seq);
+      return `<div class="it ${seq === wise ? 'on' : ''}${hint ? '' : ' dim'}" data-wise="${seq}"`
+        + ` title="${hint ?? '原作有此技，本作尚未實作'}">${name}</div>`;
+    }),
+    // 軍師帶來的技不在主將的 WISESKILL 表裡，但它是本場要發動的那一條 —— 補一個已選中的格子，
+    // 否則玩家會看到「hint 寫著軍師技、格子卻是空的」。
+    ...(ADVISOR && wise && !choices.includes(wise)
+      ? [`<div class="it on" data-wise="${wise}" title="軍師 ${ADVISOR} 的軍師技">${WISE_BY_SEQ.get(wise)?.NAME ?? wise}</div>`]
+      : []),
+  ].join('');
+  $('wisehint').textContent = wise === 0
+    ? '未選 · 本次不發動軍師技'
+    : `${ADVISOR ? `軍師 ${ADVISOR} · ` : ''}${wiseHintOf(wise) ?? '原作有此技，本作尚未實作（不會產生效果）'}`;
+
+  // 兵力：兩欄各自 0..上限（原作 `+0x42` 帶兵 / `+0x46` 騎兵，互不包含，project/168 §4）。
+  // 上陣兵 = 步 + 騎（`unit+0x5C`）；兩欄相加的天花板 200 = 100 步 + 100 騎 = 原作士兵槽 `0xC8`。
+  // `troopCapOf()` / `cavalryCapOf()` 都由 core/levels.ts 給（web 與 Cocos 同一份），這頁不另抄公式。
+  const range = $('numrange');
+  const cavRange = $('cavrange');
+  soldiers = Math.max(1, Math.min(SOLDIER_CAP, soldiers));
+  cavalry = Math.max(0, Math.min(CAV_CAP, cavalry));
+  range.max = String(SOLDIER_CAP);
+  range.value = String(soldiers);
+  cavRange.max = String(Math.max(0, CAV_CAP));
+  cavRange.value = String(cavalry);
+  cavRange.disabled = CAV_CAP <= 0;
+  $('numnow').textContent = soldiers;
+  $('numcap').textContent = SOLDIER_CAP;
+  $('cavnow').textContent = cavalry;
+  $('cavcap').textContent = CAV_CAP;
+  $('numhint').textContent = CAV_CAP > 0
+    ? `步/騎 兩欄 · 相加才是上陣兵（${SOLDIER_CAP} + ${CAV_CAP}）`
+    : `步/騎 兩欄 · Lv.${GEN_LEVEL} 還沒到 20 級，騎兵欄為 0`;
+  $('numtotal').innerHTML =
+    `上陣 <b>${soldiers + cavalry}</b> 兵 = 步 ${soldiers} + 騎 ${cavalry}`
+    + `<span class="tag">兩欄相加</span>`;
+  // 快捷档按「当前步兵上限」切分（半编 / 八成 / 满编）；骑兵栏另有自己的滑杆，不受这里影响。
+  const quick = [Math.round(SOLDIER_CAP / 2), Math.round(SOLDIER_CAP * 0.8), SOLDIER_CAP]
+    .map((n) => Math.max(1, Math.min(SOLDIER_CAP, n)))
+    .filter((n, i, a) => a.indexOf(n) === i);
+  $('numgrid').innerHTML = quick.map((n) => `<div class="it ${n === soldiers ? 'on' : ''}" data-num="${n}" style="width:112px">步 ${n}${n === SOLDIER_CAP ? '<span class="tag">滿編</span>' : ''}</div>`).join('');
+
+  // 出陣順序：5 行。第 1 槽永遠跟隨主將區的兵種/兵力（同一頁不能有兩個主將口徑）；
+  // 前 3 槽可上下移（後選出陣的落地點，[推測]），後 2 槽灰顯、按鈕 disabled。
+  if (queue.length) {
+    queue = DQ.setTroop(queue, 0, TROOP_CHARS[troop] ?? '刀');
+    queue = DQ.setTroops(queue, 0, soldiers + cavalry);
+  }
+  $('qlist').innerHTML = queue.map((slot, i) => {
+    const onField = i < DQ.DEPLOY_FIELD_SLOTS;
+    const up = onField && i > 0;
+    const down = onField && i + 1 < DQ.DEPLOY_FIELD_SLOTS && i + 1 < queue.length;
+    const cur = TROOP_BY_CHAR[slot.troop] !== undefined ? slot.troop : '刀';
+    const opts = TROOP_CHARS.map((c) =>
+      `<option value="${c}"${c === cur ? ' selected' : ''}>${TROOP_NAMES[TROOP_BY_CHAR[c]] ?? c}</option>`).join('');
+    return `<div class="qrow${onField ? '' : ' reserve'}">`
+      + `<span class="qi">${i + 1}</span>`
+      + `<span class="qn">${slot.general}${i === 0 ? '<i>主將</i>' : ''}</span>`
+      + `<select class="qtr" data-qtr="${i}" title="換兵種">${opts}</select>`
+      + `<span class="qnum">${slot.troops} 兵</span>`
+      + `<span class="qmv">`
+      + `<button data-qmove="${i}:-1"${up ? '' : ' disabled'} title="上移">▲</button>`
+      + `<button data-qmove="${i}:1"${down ? '' : ' disabled'} title="下移">▼</button>`
+      + `</span></div>`;
+  }).join('');
+  // 原作每側只上陣 1 名將領（project/168 §1），這裡的多列只是本作的名冊順序：
+  // 不再對玩家宣稱「前 3 上陣 / 後 2 預備」，那只會誤導成原作有 3 將上場。
+  $('qhint').textContent = wise === 3
+    ? '後選出陣 · 開戰前可重排前 3 列'
+    : '原作只上陣 1 名主將 · 此處決定名冊順序';
+
+  // 相剋净加值：敌方取守军的兵种/阵形（原型里按固定 黃巾/雁形 代理）
+  const enemyTroop = 10, enemyForm = 3;
+  const tb = bonus(troopMatrix, troop, enemyTroop) - bonus(troopMatrix, enemyTroop, troop);
+  const fb = bonus(formMatrix, form, enemyForm) - bonus(formMatrix, enemyForm, form);
+  $('vs').innerHTML = `對 敵軍·${TROOP_NAMES[enemyTroop] ?? '?'}·${FORM_NAMES[enemyForm] ?? '?'}：`
+    + `兵種 <b style="color:${tb >= 0 ? '#7FD1A8' : '#E08A7A'}">${tb > 0 ? '+' : ''}${tb}</b> · `
+    + `陣形 <b style="color:${fb >= 0 ? '#7FD1A8' : '#E08A7A'}">${fb > 0 ? '+' : ''}${fb}</b>`;
+  $('gosub').textContent = `${gen.NAME} · ${TROOP_NAMES[troop] ?? '?'} · ${FORM_NAMES[form] ?? '?'} · ${soldiers}+${cavalry} 兵`;
+  const net = tb + fb;
+  // 情報口徑（project/93 §1 + §5）：
+  //   「上陣」= 這一仗敵方實際出場的兵（出征令 ?bsoldiers=，唯一口徑）
+  //   「城內守軍」= 這座城的總兵，兩者本來就不一樣，所以分開標、不再寫成「敵軍 6 兵（守軍 110）」
+  //   空城沒有守將就直說「無」，不再顯示武 0 / 智 0 的佔位「守將」
+  // 守將的兩欄（`garrison.ts` 的 `defenderBattleParams()`：`troopsMax` = 帶兵欄、`cavalryMax` = 騎兵欄）
+  // 一併列出來，玩家才看得出「敵軍 125 兵」是 100 步 + 25 騎加起來的（project/168 §4）。
+  const ep = enemy.enemyParams;
+  const enemyCols = ep ? `（步 ${ep.troopsMax} / 騎 ${ep.cavalryMax}）` : '';
+  const bsTxt = BS_KNOWN ? `<b>${bsoldiers}</b> 兵${enemyCols}` : '—（未取得出征令，本頁不猜）';
+  const gateTarget = CM.isGate(city);
+  const chiefTxt = enemyChief
+    ? `守將 ${enemyChief.name}（武 ${enemyChief.str} / 智 ${enemyChief.int}）`
+    : (gateTarget
+      // 關卡沒有武將（garrison.json 的 officers 是空的），守軍就是關上那 N 兵，不是「空城民兵」
+      ? '守將 無（關卡：garrison.json 沒有守將，只有關上守軍）'
+      : '守將 無（空城：只有城內民兵，沒有武將）');
+  $('intel').innerHTML =
+    `敵軍上陣 ${bsTxt} · 城內守軍共 ${garrison} 兵<br>` +
+    `${chiefTxt}<br>` +
+    `我方 步 ${soldiers} + 騎 ${cavalry} = <b>${soldiers + cavalry}</b> 兵`
+    + `（上限 ${SOLDIER_CAP} 步 + ${CAV_CAP} 騎）· 主將 ${gen.NAME}（武 ${gen.STR} / 智 ${gen.INT}）<br>` +
+    `相剋淨值合計 <b style="color:${net >= 0 ? '#7FD1A8' : '#E08A7A'}">${net > 0 ? '+' : ''}${net}</b>` +
+    `（原作命中 = 150 + 相剋 + 士氣/疲勞修正，300 制隨機）`;
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-gen],[data-troop],[data-form],[data-num],[data-wise]');
+  if (!t) return;
+  if (t.dataset.gen) {
+    gen = pool.find((g) => g.NAME === t.dataset.gen) || gen;
+    // 換將要把等級/兩欄上限跟著換，否則沿用上一位的上限（關羽 30 兵 → 換嚴白虎還是 30）。
+    // 總兵力保住（夾在 1..新總上限），再按新上限重切兩欄。
+    GEN_LEVEL = levelOf(gen, LV_OVERRIDE);
+    rerollCaps(GEN_LEVEL, soldiers + cavalry);
+    // 換將後兵種/陣形若不在新將的白名單裡，退回他的預設（原作換將就不能用沒學的）
+    const okTroop = troopSet(gen), okForm = formSet(gen);
+    const wasTroop = troop, wasForm = form;
+    if (okTroop && !okTroop.has(troop)) troop = defaultTroop(gen);
+    if (okForm && !okForm.has(form)) form = defaultForm(gen);
+    // 這種「悄悄改掉你剛選的東西」最容易讓人以為按鈕壞了 → 用提示條說一聲（6s 自動消失）
+    if (troop !== wasTroop || form !== wasForm) {
+      const changed = [];
+      if (troop !== wasTroop) changed.push(`兵種換成 ${TROOP_NAMES[troop] ?? '?'}`);
+      if (form !== wasForm) changed.push(`陣形換成 ${FORM_NAMES[form] ?? '?'}`);
+      notice(`${gen.NAME} 沒學過你剛才選的，已${changed.join('、')}`);
+    }
+  }
+  if (t.dataset.troop) troop = Number(t.dataset.troop);
+  if (t.dataset.form) form = Number(t.dataset.form);
+  if (t.dataset.num) soldiers = Math.min(Number(t.dataset.num), SOLDIER_CAP);
+  if (t.dataset.wise !== undefined) wise = Number(t.dataset.wise) || 0;
+  // 換將要把新人放到第 1 槽（＝主將）；他本來在別槽時兩槽互換，不把人擠掉
+  if (queue.length && t.dataset.gen) queue = DQ.setGeneral(queue, 0, gen.NAME);
+  render();
+});
+
+// 出陣順序：上/下移只在「前 3 槽」內換位（後選出陣的落地點），後 2 槽預備、按鈕 disabled
+document.addEventListener('click', (e) => {
+  const mv = e.target.closest('[data-qmove]');
+  if (!mv) return;
+  const [idx, dir] = String(mv.dataset.qmove).split(':').map(Number);
+  const next = DQ.moveSlot(queue, idx, idx + dir, DQ.DEPLOY_FIELD_SLOTS);
+  if (DQ.sameQueue(next, queue)) return;
+  queue = next;
+  syncFromQueue();
+  persistQueue();
+  render();
+});
+
+// 出陣順序：換兵種（只改該槽，不動順序）。第 1 槽改了要同步頂部的 troop，否則 render 又蓋回去。
+document.addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-qtr]');
+  if (!sel) return;
+  const i = Number(sel.dataset.qtr);
+  queue = DQ.setTroop(queue, i, sel.value);
+  if (i === 0) troop = TROOP_BY_CHAR[sel.value] ?? troop;
+  persistQueue();
+  render();
+});
+
+// 兵力滑桿：兩欄各自 0..自己的上限，拖到哪帶到哪（互不影響，原作兩欄獨立）
+$('numrange').addEventListener('input', (e) => {
+  soldiers = Math.max(1, Math.min(SOLDIER_CAP, Math.round(Number(e.target.value) || 1)));
+  render();
+});
+$('cavrange').addEventListener('input', (e) => {
+  cavalry = Math.max(0, Math.min(CAV_CAP, Math.round(Number(e.target.value) || 0)));
+  render();
+});
+
+$('back').addEventListener('click', () => { location.href = './campaign.html?sel=' + encodeURIComponent(target); });
+$('go').addEventListener('click', () => {
+  // 出征前落一次盤：滑桿/換兵種可能還沒 persist 過，這一仗的隊列必須是畫面上這個順序
+  persistQueue();
+  // 主將名用**同一個**：a=（新，規範）與 gen=（舊連結相容）都寫同一個名字，
+  // main.js 的 generalFromQuery() 也是先讀 a= 再退回 gen=，所以 HUD / 結算 / 寫回全是這一個名字。
+  const q = new URLSearchParams({
+    city: target, from: 'campaign', a: gen.NAME, gen: gen.NAME,
+    troop: String(troop), form: String(form),
+    // 上陣兵 = 步 + 騎（`unit+0x5C`，原作兩欄相加）：main.js 只讀 `soldiers` 當總數，
+    // 所以這裡送的是兩欄之和；`cav` 另外記一份騎兵欄，供以後戰鬥頁接上（main.js 本輪禁改）。
+    soldiers: String(soldiers + cavalry), cav: String(cavalry),
+    atire: String(tireOfName(gen.NAME)),
+    amorale: String(moraleOfName(gen.NAME)),
+    // 沒選就給空值（main.js 的 num() 會退回 0 = 不發動）
+    wise: wise ? String(wise) : '',
+    blevel: qs.get('blevel') || '',
+  });
+  // 上陣兵只轉發出征令帶來的數字；沒有就不寫（main.js 的預設值接手，不在編成頁編一個）
+  if (BS_KNOWN) q.set('bsoldiers', String(bsoldiers));
+  // 空城沒有守將 → 不寫 bgen/bstr/bint/bmorale，戰鬥頁就不會顯示「守將（武0/智0）」
+  if (enemyChief) {
+    q.set('bgen', enemyChief.name);
+    q.set('bstr', String(enemyChief.str));
+    q.set('bint', String(enemyChief.int));
+    q.set('bmorale', String(moraleOfName(enemyChief.name)));
+  }
+  location.href = './index.html?' + q.toString();
+});
+
+// ---------------------------------------------------------------- 通知條（project/93 §4）
+// 舊行為：campaign.html 的 notice() 預設 9s、重要提示 12～14s，而且沒有點擊關閉，推進一月後
+// 那句「戰鬥結果已寫回…」一直擋在底欄上。本頁統一口徑：預設 6s 自動消失、重要提示 12s、點一下立刻關。
+const toastEl = $('toast');
+let toastTimer = 0;
+function hideToast() {
+  clearTimeout(toastTimer);
+  if (!toastEl) return;
+  toastEl.classList.remove('on');
+  toastEl.hidden = true;
+}
+/** @param {string} msg @param {number} [ms] 預設 6000；重要提示傳 12000 */
+function notice(msg, ms = 6000) {
+  if (!toastEl) return;
+  toastEl.textContent = msg;
+  toastEl.hidden = false;
+  toastEl.classList.add('on');
+  clearTimeout(toastTimer);
+  // 再短也不低於 1.2s，避免一閃而過看不見
+  toastTimer = setTimeout(hideToast, Math.max(1200, ms));
+}
+toastEl?.addEventListener('click', hideToast);
+
+render();
+// 直接開這頁 / 舊書籤（沒帶 ?bsoldiers=）時說清楚：上陣兵不是這頁算的
+if (!BS_KNOWN) notice('未取得出征令的上陣兵（?bsoldiers=）：本頁不猜數字，請從大地圖「出征」進入', 12000);
+// [audio] 出征编成页：大地图曲 17（懒加载；不点"出陣"也一直在响，和 campaign 同一首所以不重播）
+audio()?.bgm('map');
+</script>
+</body>
+</html>

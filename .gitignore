@@ -1,0 +1,68 @@
+# =============================================================================
+# 三國群英傳2 重制 —— 仓库只收「源码 / 脚本 / 文档 / 运行必需的小素材」
+# 不进库：构建产物、依赖、浏览器 profile、逐轮日志与截图、>100 MB 重型参考件
+# （全部可从源码 + 原作 PAK 重新生成；理由见 README「版本库」一节）
+# =============================================================================
+
+# ── 1. 依赖 / 构建产物 ───────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+game/dist/
+game/cocos-build*/
+game/cocos/library/
+game/cocos/temp/
+game/cocos-park/
+dist/
+apk/
+export/
+extract/
+proto/
+webfix86_tmp/
+
+# 第三方引擎与工具链（4.7 GB，装一次就有，不该进库）
+tools/cocos/
+
+# ── 2. 重型参考资料（1.2 GB，原作美术参考 / 动画）───────────────────────────
+project/art_ref/
+project/anim/
+
+# ── 3. 杂项 ─────────────────────────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+*.tsbuildinfo
+Thumbs.db
+.DS_Store
+
+# ── 4. work/：46 GB 里只留「能复跑的代码 + 断言基准」────────────────────────
+# 做法：先全挡，放开目录，再按扩展名放行脚本/文档，最后把大件挡回去。
+work/**
+!work/**/
+!work/fidelity/**
+!work/enc/**
+!work/cocos_hud2/**
+!work/**/*.mjs
+!work/**/*.py
+!work/**/*.ps1
+!work/**/*.md
+
+# 仍有大件 / 运行垃圾的位置
+work/**/cocos-build*/
+work/**/library/
+work/**/temp/
+work/**/.edgeprof*/
+work/**/*prof*/
+work/**/*.log
+work/**/*.png
+work/**/*.jpg
+work/**/*.jpeg
+work/**/*.webm
+work/**/*.mp4
+work/**/*.gz
+work/**/*.db
+work/**/*.bak
+work/**/*.wav
+work/**/*.mp3
+
+# R201 前被 CP936 写坏、已无参考价值的一次性探针（本地保留，不入库）
+work/probe_fix.mjs

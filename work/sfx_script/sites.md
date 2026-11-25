@@ -1,0 +1,149 @@
+# 脚本里的音效调用点（静态表）
+
+> 生成器 `work/sfx_script/sites.py`，输入 `export/script/{magic_so,system_so}.dis.txt`。
+
+## 结论
+
+- MAGIC.SO 与 SYSTEM.SO 合计 **133** 个发声站（0x301 直接播 + 0x300 3D 播）。
+- 0x301 的音量参数是 **0..255**（不是 0..1）：分布 255×70, 128×7, 180×7, 200×5, 210×3, 220×3, 224×2, 230×2, 160×2, 1×1, 15×1。
+- 名字是资源键（`m016snd01`、`Rush01`、`VICTORY`…），所以"只记录不播"的损失
+  只是最后一步 `audio.sfx(name)` —— 这是 R52 的直接依据。
+
+## 全部调用点
+
+| 文件 | op | 地址 | 函数 | argc | 名字 | 音量 |
+| --- | --- | --- | --- | --- | --- | --- |
+| MAGIC.SO | 0x301 | 0x000894 | `DelayAmbientSound` | 3 | `(动态)` | 1 |
+| MAGIC.SO | 0x300 | 0x00137C | `Hurt` | 3 | `Hit01` | 255 |
+| MAGIC.SO | 0x300 | 0x002700 | `SmallFireBall` | 4 | `hit01` | 255 |
+| MAGIC.SO | 0x300 | 0x002888 | `SmallFireBall2` | 4 | `hit01` | 255 |
+| MAGIC.SO | 0x300 | 0x002A34 | `SmallFireBall3` | 4 | `hit01` | 255 |
+| MAGIC.SO | 0x300 | 0x002BBC | `SmallFireBall4` | 4 | `hit01` | 255 |
+| MAGIC.SO | 0x301 | 0x003E7C | `NoMoreSoldierCallback` | 2 | `m000snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x004A54 | `HalfMoon` | 1 | `m001snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x005674 | `MoreSoldier` | 2 | `m002snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x005690 | `MoreSoldier` | 2 | `m002snd03` | 255 |
+| MAGIC.SO | 0x300 | 0x006C1C | `ShootObject` | 2 | `m003snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x006C8C | `ShootObject` | 2 | `m003snd02` | 255 |
+| MAGIC.SO | 0x300 | 0x006CFC | `ShootObject` | 2 | `m003snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x0098C8 | `BigThunder` | 0 | `m005snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x009FB8 | `FlyArrowLU` | 0 | `arrow` | 255 |
+| MAGIC.SO | 0x300 | 0x00A144 | `FlyArrowRU` | 0 | `arrow` | 255 |
+| MAGIC.SO | 0x301 | 0x00C2F0 | `StoneExplode` | 1 | `m007snd03` | 200 |
+| MAGIC.SO | 0x301 | 0x00C750 | `FireStoneExplode` | 1 | `m007snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x00F4A8 | `ExplodeRound` | 3 | `m008snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x00FC90 | `EightWayFire` | 3 | `m009snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x012C50 | `Tornado` | 1 | `m011snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x013B48 | `Duplicator` | 1 | `att07` | 255 |
+| MAGIC.SO | 0x300 | 0x013E04 | `Duplicator` | 1 | `m012snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x013E30 | `Duplicator` | 1 | `m012snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x014784 | `Frozen` | 0 | `m013snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0151B0 | `DemonDancing` | 0 | `att07` | 255 |
+| MAGIC.SO | 0x300 | 0x0151D4 | `DemonDancing` | 0 | `yell01` | 255 |
+| MAGIC.SO | 0x300 | 0x0154F4 | `DemonDancing` | 0 | `att07` | 255 |
+| MAGIC.SO | 0x301 | 0x0156AC | `DemonDancing` | 0 | `att07` | 255 |
+| MAGIC.SO | 0x300 | 0x0156D0 | `DemonDancing` | 0 | `yell01` | 255 |
+| MAGIC.SO | 0x300 | 0x016054 | `CreateSmallSwords` | 3 | `att04` | 128 |
+| MAGIC.SO | 0x300 | 0x0161E8 | `CreateSmallSwords` | 3 | `att04` | 128 |
+| MAGIC.SO | 0x301 | 0x016620 | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x016674 | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x0166C8 | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x01671C | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x016770 | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x0167C4 | `SwordBomb` | 3 | `m015snd02` | 128 |
+| MAGIC.SO | 0x301 | 0x01743C | `FlyingSword` | 1 | `m015snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x017470 | `FlyingSword` | 1 | `m015snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0174A4 | `FlyingSword` | 1 | `m015snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x018068 | `Heal` | 1 | `m016snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x018418 | `sc4501` | 2 | `m017snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x019178 | `FireDragon` | 1 | `m017snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x019DE0 | `sc3602` | 4 | `m016a` | 255 |
+| MAGIC.SO | 0x300 | 0x01A35C | `sc3604` | 0 | `m018snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x01A564 | `CallDragon` | 1 | `m018snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x01AA5C | `CallDragon` | 1 | `m018snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x01AA80 | `CallDragon` | 1 | `m018snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x01AAA4 | `CallDragon` | 1 | `m018snd02` | 255 |
+| MAGIC.SO | 0x300 | 0x01B520 | `RunningBow` | 1 | `m019snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x01CAE4 | `BlackHole` | 1 | `m020snd01` | 180 |
+| MAGIC.SO | 0x301 | 0x01CB08 | `BlackHole` | 1 | `m020snd02` | 210 |
+| MAGIC.SO | 0x301 | 0x01D82C | `FireRing` | 2 | `m021snd01` | 200 |
+| MAGIC.SO | 0x301 | 0x01F010 | `Ice` | 1 | `m022snd01` | 180 |
+| MAGIC.SO | 0x301 | 0x01F414 | `Ice` | 1 | `m022snd01` | 200 |
+| MAGIC.SO | 0x301 | 0x01F818 | `Ice` | 1 | `m022snd01` | 220 |
+| MAGIC.SO | 0x301 | 0x01FEDC | `CreateOnFireFire` | 3 | `m023snd01` | 128 |
+| MAGIC.SO | 0x301 | 0x01FF5C | `CreateOnFire` | 2 | `m023snd01` | 224 |
+| MAGIC.SO | 0x301 | 0x0200C0 | `CreateOnFire` | 2 | `m023snd02` | 224 |
+| MAGIC.SO | 0x301 | 0x0211A4 | `BackSoldier` | 2 | `m002snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0211C0 | `BackSoldier` | 2 | `m002snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x021D8C | `CreateTaichi` | 2 | `m025snd01` | 220 |
+| MAGIC.SO | 0x301 | 0x023450 | `CreateSpoutAround` | 3 | `m026snd01` | 200 |
+| MAGIC.SO | 0x301 | 0x023798 | `CreateSpoutAround` | 3 | `m026snd01` | 230 |
+| MAGIC.SO | 0x301 | 0x0247DC | `FireCow` | 1 | `m027snd01` | 180 |
+| MAGIC.SO | 0x301 | 0x0247F8 | `FireCow` | 1 | `m027snd02` | 180 |
+| MAGIC.SO | 0x301 | 0x025008 | `FireCow` | 1 | `m027snd02` | 210 |
+| MAGIC.SO | 0x301 | 0x025030 | `FireCow` | 1 | `m027snd01` | 160 |
+| MAGIC.SO | 0x301 | 0x026664 | `RollDown` | 1 | `m028snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x026FD8 | `CreateBigPaBomb` | 1 | `m029snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x0276E8 | `CreatePa` | 2 | `m029snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0279D0 | `CreatePa` | 2 | `m029snd03` | 255 |
+| MAGIC.SO | 0x300 | 0x028C40 | `HalfMoonNew` | 1 | `m001snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x029090 | `CreateFirePillarSource` | 3 | `m031snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x029E30 | `CreateFirePillar` | 2 | `m031snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x029F94 | `CreateFirePillar` | 2 | `m031snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x02A668 | `CreateSparkle` | 1 | `m032snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x02A938 | `CreateSparkle` | 1 | `m032snd02` | 255 |
+| MAGIC.SO | 0x300 | 0x02CE58 | `CreatePowderBreak` | 2 | `m034snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x02E2C0 | `Spear` | 1 | `m035snd01` | 230 |
+| MAGIC.SO | 0x301 | 0x02E408 | `Spear` | 1 | `m035snd01` | 180 |
+| MAGIC.SO | 0x301 | 0x02E7B4 | `CreateSlashByTarget` | 4 | `m036snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x02EA10 | `CreateSlash` | 6 | `m036snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x02EC58 | `Slash` | 1 | `m036snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x02FD1C | `Wall` | 1 | `m037snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x02FF84 | `Wall` | 1 | `m037snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x030C98 | `CreateTwisterSword` | 3 | `m038snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x031134 | `TwisterSword` | 0 | `m038snd02` | 200 |
+| MAGIC.SO | 0x301 | 0x031AC8 | `RollTub` | 1 | `m039snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x031B08 | `RollTub` | 1 | `m039snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0320CC | `QuakeSound` | 0 | `m040snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x032140 | `QuakeSound` | 0 | `m040snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x032A1C | `MakeInterceptorSound` | 0 | `m041snd01` | 15 |
+| MAGIC.SO | 0x300 | 0x032B88 | `Interceptor` | 1 | `m041snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x03382C | `Xsc3602` | 4 | `m016a` | 255 |
+| MAGIC.SO | 0x300 | 0x033DA8 | `Xsc3604` | 0 | `m018snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x033EB4 | `XCallDragon` | 1 | `m018snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0343AC | `XCallDragon` | 1 | `m018snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x0343D0 | `XCallDragon` | 1 | `m018snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x0343F4 | `XCallDragon` | 1 | `m018snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x03500C | `XFireCow` | 1 | `m027snd01` | 180 |
+| MAGIC.SO | 0x301 | 0x035028 | `XFireCow` | 1 | `m027snd02` | 180 |
+| MAGIC.SO | 0x301 | 0x0358F8 | `XFireCow` | 1 | `m027snd02` | 210 |
+| MAGIC.SO | 0x301 | 0x035920 | `XFireCow` | 1 | `m027snd01` | 160 |
+| MAGIC.SO | 0x301 | 0x035CB4 | `XCreateSparkle` | 1 | `m032snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x035F84 | `XCreateSparkle` | 1 | `m032snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x03673C | `XCreateFirePillarSource` | 3 | `m031snd03` | 255 |
+| MAGIC.SO | 0x301 | 0x0374DC | `XCreateFirePillar` | 2 | `m031snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x037640 | `XCreateFirePillar` | 2 | `m031snd02` | 255 |
+| MAGIC.SO | 0x301 | 0x038308 | `XCreateTaichi` | 2 | `m025snd01` | 220 |
+| MAGIC.SO | 0x300 | 0x0399E4 | `XDuplicator` | 1 | `att07` | 255 |
+| MAGIC.SO | 0x300 | 0x039C3C | `XDuplicator` | 1 | `m012snd01` | 255 |
+| MAGIC.SO | 0x300 | 0x039C68 | `XDuplicator` | 1 | `m012snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x03A69C | `XMoreSoldier` | 1 | `m002snd01` | 255 |
+| MAGIC.SO | 0x301 | 0x03A6B8 | `XMoreSoldier` | 1 | `m002snd03` | 255 |
+| SYSTEM.SO | 0x301 | 0x001E20 | `LoadingBattleMap` | 1 | `BG03A` | 255 |
+| SYSTEM.SO | 0x301 | 0x001E74 | `LoadingBattleMap` | 1 | `BG04A` | 255 |
+| SYSTEM.SO | 0x301 | 0x001EF8 | `LoadingBattleMap` | 1 | `BG08A` | 255 |
+| SYSTEM.SO | 0x301 | 0x001F44 | `LoadingBattleMap` | 1 | `BG09A` | 255 |
+| SYSTEM.SO | 0x301 | 0x002C34 | `AllRush` | 0 | `Rush01` | 255 |
+| SYSTEM.SO | 0x301 | 0x0035F0 | `SearchTalk` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x00379C | `SearchTalk` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x003948 | `SearchTalk` | 1 | `FAILURE2` | 255 |
+| SYSTEM.SO | 0x301 | 0x003A64 | `SearchTalk` | 1 | `FAILURE2` | 255 |
+| SYSTEM.SO | 0x301 | 0x003B48 | `SearchTalk` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x003C48 | `SearchTalk` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x003EFC | `ChildGenTalkNew` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x003FFC | `ChildGenTalkNew` | 1 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x301 | 0x004320 | `YieldGeneral` | 2 | `SUCCESS` | 255 |
+| SYSTEM.SO | 0x300 | 0x004888 | `MajorDeath` | 2 | `Yell03` | 255 |
+| SYSTEM.SO | 0x300 | 0x0048AC | `MajorDeath` | 2 | `Horse02` | 255 |
+| SYSTEM.SO | 0x301 | 0x004960 | `MajorDeath` | 2 | `VICTORY` | 255 |
+

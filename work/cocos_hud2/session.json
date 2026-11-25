@@ -1,0 +1,16 @@
+{
+  "targetId": "F43CC22470843A263462B95EE86E4EB9",
+  "pageUrl": "http://127.0.0.1:5299/cocos-build/web-mobile/index.html",
+  "browser": "Edg/158.0.4370.33",
+  "headed": true,
+  "args": [
+    "--remote-debugging-port=9333",
+    "--user-data-dir=F:\\sanguo\\work\\.edgeprof_hud2",
+    "--window-size=900,1500",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--hide-scrollbars",
+    "--force-device-scale-factor=1",
+    "about:blank"
+  ]
+}

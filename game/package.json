@@ -1,0 +1,19 @@
+{
+  "name": "sanguo2-vertical",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "三国群英传2 竖屏重制 · 与引擎无关的核心逻辑（Cocos Creator 3.8 之前先在本机跑通）",
+  "scripts": {
+    "test": "node --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "sim": "node tools/sim.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22.6"
+  }
+}

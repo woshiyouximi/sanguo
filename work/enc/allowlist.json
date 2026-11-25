@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "comment": "编码守门的显式豁免名单。每条都必须写清 reason；没有 reason 的条目扫描器会拒绝加载。用 --strict 可以无视本名单再跑一遍。",
+  "entries": [
+    {
+      "path": "docs/02_资源格式规格.md",
+      "maxHits": 2,
+      "reason": "文件本身没问题：第 283 行是文档故意展示「用 gbk + errors='replace' 解 PAK 里的 .INI 会把中文全变成 U+FFFD」的反面示例，那 2 个 U+FFFD 是正文引用的替换字符。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.mjs",
+      "maxHits": null,
+      "reason": "R192 编码事故的原件（2026-11-25 18:34，888 个 U+FFFD 全是文件头注释），保留作取证；现役生成器的可用数据是 fidelity_expect.json（0 U+FFFD）。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.fixed.mjs",
+      "maxHits": null,
+      "reason": "R192 事故后的抢救副本之一（仍残留 140 个 U+FFFD，且带 BOM），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.fixed.restored.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（把 UTF-8 当 GBK 读回去的二次损坏，3468 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.fixed2.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（981 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.fixed3.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（973 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.recovered.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（180 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.recovered.restored.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（3407 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.repair.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（1004 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.repair2.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（993 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/gen_expect.restored.mjs",
+      "maxHits": null,
+      "reason": "抢救副本之一（1143 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/_cmp_regen.json",
+      "maxHits": null,
+      "reason": "2026-11-25 18:16 用当时已损坏的 gen_expect.mjs 重新生成的 expect 快照（1125 个 U+FFFD），是事故的物证，不是现役数据；现役是 fidelity_expect.json。"
+    },
+    {
+      "path": "work/fidelity/fidelity_expect.regen.json",
+      "maxHits": null,
+      "reason": "同上，_cmp_regen.json 同一批产物的另存（1125 个 U+FFFD），归档取证用。"
+    },
+    {
+      "path": "work/fidelity/fidelity_expect.pre_backfill.json",
+      "maxHits": null,
+      "reason": "backfill 之前的 expect 快照（1125 个 U+FFFD，来自已损坏的生成器），归档取证用。"
+    },
+    {
+      "path": "work/enc/archive/layout.damaged.r199.ts",
+      "maxHits": 150,
+      "reason": "R199 编码事故的物证副本（PowerShell 5.1 的 Set-Content 把 layout.ts 写成 CP936，150 个 U+FFFD）；现役 game/src/view/layout.ts 已修复、0 U+FFFD。"
+    }
+  ]
+}

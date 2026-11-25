@@ -1,0 +1,13 @@
+{
+ "TotalTimes": 6,
+ "TotalGeneralType": 3,
+ "TotalThings": 99,
+ "Times01": "Times1.INI, 黃巾之亂",
+ "Times02": "Times2.INI, 討伐董卓",
+ "Times03": "Times3.INI, 群雄割劇",
+ "Times04": "Times4.INI, 赤壁之戰",
+ "Times05": "Times5.INI, 三國鼎立",
+ "FontDirectory": "FONTS\\",
+ "DefaultFont": 1,
+ "TotalForce": 11
+}

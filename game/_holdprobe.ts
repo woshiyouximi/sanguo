@@ -1,0 +1,13 @@
+﻿import { loadData } from './src/data.ts';
+import { createWorld, step, unitCell } from './src/core/battle.ts';
+import * as A from './src/core/army_cmd.ts';
+const data = loadData({ dir: 'data/' });
+const w = createWorld({ data, seed: 8, a: { general: { name: '關羽', str: 97, int: 75, level: 6 } }, b: { general: { name: '張角', str: 70, int: 88, level: 5 } } });
+A.installArmyOrders(w);
+console.log('apply4', A.applyArmyCmd(w, 'A', 4));
+const st = A.armyOrderOf(w, 'A');
+console.log('cmds', st.cmds, 'last', st.last, 'active', st.active, 'targets', st.targets);
+const before = new Map(w.units.filter((u) => u.side === 'A' && u.alive).map((u) => [u, unitCell(u).gx]));
+for (let i = 0; i < 120; i++) step(w);
+const moved = w.units.filter((u) => u.side === 'A' && u.alive).map((u) => ({ k: u.kind, gen: !!u.isGeneral, d: unitCell(u).gx - (before.get(u) ?? unitCell(u).gx) }));
+console.log('moved', moved.filter((m) => m.d !== 0).slice(0, 8), 'count', moved.filter((m) => m.d !== 0).length, 'of', moved.length);

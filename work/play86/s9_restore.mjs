@@ -1,0 +1,17 @@
+﻿import { boot } from './cdp.mjs';
+import fs from 'node:fs';
+const c = await boot();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const log = (...a) => console.log('##', ...a);
+const bk = JSON.parse(JSON.parse(fs.readFileSync('state/08_before_migrate.json', 'utf8')));
+log('lens', Object.entries(bk).map(([k,v])=>k+':'+(v||'').length).join(' '));
+await c.eval(`(function(b){ localStorage.setItem('sanguo_saves_v1', b.saves); localStorage.setItem('sanguo_campaign_v1', b.campaign); localStorage.setItem('sanguo_items_v1', b.items); return 1; })(${JSON.stringify(bk)})`);
+log('stored', await c.eval(`Object.keys(localStorage).map(k=>k+':'+localStorage.getItem(k).length).join(' ')`));
+await c.eval(`sessionStorage.removeItem('__dsh_errs86')`);
+await c.eval('location.reload()'); await sleep(3200);
+log('errs', JSON.stringify(await c.errs(0)));
+log('head', await c.eval(`(()=>[document.getElementById('ym').innerText, document.getElementById('gold').innerText, document.getElementById('ct').innerText, document.getElementById('rec').innerText, document.getElementById('slotBadge').innerText, document.getElementById('scName').innerText, document.getElementById('kingName').innerText].join(' | '))()`));
+log('cities', await c.eval(`document.querySelectorAll('#list .city').length`), 'logrows', await c.eval(`document.querySelectorAll('#logrows .logrow').length`), 'act', await c.eval(`document.querySelectorAll('#actions button').length`));
+log('store', await c.eval(`(()=>{const st=JSON.parse(localStorage.getItem('sanguo_saves_v1')); return {last:st.last, v:st.slots[0].snapshot.v, month:st.slots[0].snapshot.month};})()`));
+await c.shot('08b_刷新重进');
+await c.close();

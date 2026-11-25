@@ -1,0 +1,16 @@
+{
+  "ver": "1.2.0",
+  "importer": "directory",
+  "imported": true,
+  "uuid": "5146641c-f4dc-4182-901a-2b71bf27ea99",
+  "files": [],
+  "subMetas": {},
+  "userData": {
+    "isBundle": true,
+    "bundleConfigID": "default",
+    "bundleName": "res",
+    "priority": 1,
+    "compressionType": "merge_dep",
+    "isRemote": true
+  }
+}

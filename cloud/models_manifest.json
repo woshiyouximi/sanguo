@@ -1,0 +1,50 @@
+{
+  "note": "V0 验证所需的 6 个模型。size 必须精确匹配；sha256 前 16 位可选（本机算一次即可）。upload.ps1 只打包这里列的文件。",
+  "comfyui_version": "0.43.0",
+  "total_bytes": 35789926613,
+  "files": [
+    {
+      "dir": "diffusion_models",
+      "name": "qwen_image_2.1_Q8_0.gguf",
+      "size": 7624265888,
+      "used_by": "qwen_t2i（UnetLoaderGGUF）",
+      "sha256_16": ""
+    },
+    {
+      "dir": "text_encoders",
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "size": 9350798360,
+      "used_by": "qwen_t2i（CLIPLoader type=qwen_image）",
+      "sha256_16": "",
+      "fallback": "拿不到同款量化时用 Qwen/Qwen3-VL-8B-Instruct 的 bf16/fp8 版，但要重测 prompt 一致性（本机踩过：qwen_2.5_vl_7b 的 hidden=3584，Qwen-Image 2.1 要 4096，会直接 RuntimeError）"
+    },
+    {
+      "dir": "vae",
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "size": 675509688,
+      "used_by": "qwen_t2i（VAELoader）",
+      "sha256_16": ""
+    },
+    {
+      "dir": "diffusion_models",
+      "name": "wan2.2_ti2v_5B_fp16.safetensors",
+      "size": 9999658848,
+      "used_by": "wan_i2v（UnetLoaderGGUF 不需要，直接用 UNETLoader）",
+      "sha256_16": ""
+    },
+    {
+      "dir": "text_encoders",
+      "name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "size": 6735906897,
+      "used_by": "wan_i2v（CLIPLoader type=wan）",
+      "sha256_16": ""
+    },
+    {
+      "dir": "vae",
+      "name": "wan2.2_vae.safetensors",
+      "size": 1409400960,
+      "used_by": "wan_i2v（VAELoader / Wan22ImageToVideoLatent）",
+      "sha256_16": ""
+    }
+  ]
+}

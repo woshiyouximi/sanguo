@@ -1,0 +1,7 @@
+{
+  "base": "",
+  "note": "音频 CDN 根（不带结尾斜杠）。填好这里之后直接出包即可，注入逻辑见 tools/build_wechat.ps1 步骤 2.7：-AudioBase 参数优先，其次读本文件；空 = 静音出包（不崩、不拦构建）；example.com / your.com / localhost 这类占位地址会被构建直接拒绝。",
+  "placement": "把 dist/audio-cdn（tools/publish_audio_cdn.ps1 -Target 生成的 110 个文件）上传到该根下面，路径形如 <base>/battle/sfx/m016snd01.mp3",
+  "verifiedAt": "",
+  "verifiedBy": "node tools/check_audio_cdn.mjs"
+}
