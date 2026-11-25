@@ -76,6 +76,20 @@ git add -A && git commit -m "S-0xx 一句话" && git push
 
 物证类文件（故意保留的历史坏文件）要先在 `work/enc/allowlist.json` 里登记理由，门禁才放行。
 
+**GitHub 凭据失效时**（症状：`remote: Invalid username or token. Password authentication is not supported for Git operations.`，或 `git push` 长时间无输出、进程里多出 `git-credential-manager` 且它没有 Established 连接）：本机凭据管理器是 GCM 2.9.1，重新授权跑
+
+```sh
+git credential-manager github login     # 会打开浏览器，登录并点 Authorize
+git credential-manager github list      # 应列出 woshiyouximi
+git push -u origin main
+```
+
+`github list` 为空说明本机根本没存账号；`git config --system credential.helper` 是 `manager`（GCM）。若登录窗口点不到，也可以直接用 PAT（`repo` 权限）：
+
+```sh
+printf "protocol=https\nhost=github.com\nusername=woshiyouximi\npassword=<PAT>\n\n" | git credential approve
+```
+
 ## 版权
 
 仅用于架构与设计研究，**不要直接复用原作的美术/音乐/文本素材**（1999 年 Odin Soft / 宇峻 版权作品）。
