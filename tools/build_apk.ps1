@@ -1,4 +1,4 @@
-# [216_apk] 无 Gradle 的 APK 构建流水线：aapt2 → javac → d8 → ZipPack（assets 逐条 STORED）→ zipalign → apksigner
+﻿# [216_apk] 无 Gradle 的 APK 构建流水线：aapt2 → javac → d8 → ZipPack（assets 逐条 STORED）→ zipalign → apksigner
 #
 # 为什么手写：这台机器只有 JDK 17 + Android SDK 的 platforms/build-tools，
 # 没有 NDK、没有 cmake、没有 gradle（也明确不下载，几百 MB 起）。本作是纯 Canvas2D + WebAudio
