@@ -51,6 +51,31 @@ C:\Users\liutian\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\pytho
 2. **PAK 内所有 INI 是 cp950（Big5 繁体）**，不是 GBK；外层目录的 `.txt` 说明才是 GBK。
 3. **判断未知图形格式要看引擎怎么读它**（反汇编 20 行），别用"图像相似度"反推位布局——本项目在 `.TEX` 上因此判错过两次。
 
+## 版本库（git）
+
+2026-11-26 起本工程用 git 管版本：远端 `https://github.com/woshiyouximi/sanguo.git`，分支 `main`，第一个提交是 R207 基线（1555 测试绿 / 保真网 459）。提交信息格式 `S-0xx 一句话`，跨多轮的任务在末尾附上该轮日志/报告号。
+
+| 进库 | 不进库（可重建，见 `.gitignore`） |
+|---|---|
+| `game/src`、`game/web`（含 44 MB 运行素材）、`game/tests`、`game/cocos/{assets,settings,…}` | `node_modules`、`game/dist`、`game/cocos-build*`、`game/cocos/{library,temp}` |
+| `tools/*.ps1|*.py|*.mjs|*.json`（根脚本） | `tools/cocos`（4.7 GB 引擎）、`dist`、`apk`、`export`、`extract`、`proto` |
+| `work/` 下能复跑的脚本（`fidelity`/`enc`/`cocos_hud2`/各轮 probe）+ 断言基准 | `work/` 里的日志、截图、浏览器 profile、构建产物 |
+| `project/`、`docs/`、`cloud/`、`data/` | `project/art_ref`、`project/anim`（1.2 GB 参考美术） |
+
+**提交前编码门禁**：仓库自带 `.githooks/pre-commit`，会扫本次改动的文本文件，命中 U+FFFD / 非法 UTF-8 直接拒绝提交（R199 那次 1962 个坏字符混进 `battle.ts` 的教训）。新克隆的仓库先跑一次：
+
+```sh
+git config core.hooksPath .githooks      # 挂上编码门禁
+```
+
+日常：
+
+```sh
+git add -A && git commit -m "S-0xx 一句话" && git push
+```
+
+物证类文件（故意保留的历史坏文件）要先在 `work/enc/allowlist.json` 里登记理由，门禁才放行。
+
 ## 版权
 
 仅用于架构与设计研究，**不要直接复用原作的美术/音乐/文本素材**（1999 年 Odin Soft / 宇峻 版权作品）。
