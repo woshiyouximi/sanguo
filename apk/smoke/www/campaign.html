@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>SHELL OK · 烟雾测试</title>
+<style>
+  html,body{margin:0;background:#0E1116;color:#E9E4D6;font:15px/1.55 monospace}
+  body{padding:18px 16px 40px}
+  h1{margin:0 0 4px;font-size:26px;color:#7BD88F;letter-spacing:.06em}
+  h1.bad{color:#FF6B5A}
+  .sub{color:#7A7566;font-size:13px;margin-bottom:18px}
+  .row{border-top:1px solid rgba(216,179,106,.22);padding:8px 0}
+  .k{color:#D8B36A;font-size:13px}
+  .v{word-break:break-all;white-space:pre-wrap}
+  .ok{color:#7BD88F}
+  .no{color:#FF6B5A}
+  #verdict{margin-top:18px;padding:12px;border:1px solid rgba(216,179,106,.4);border-radius:8px;background:#161B22}
+</style>
+</head>
+<body>
+<h1 id="title">SHELL OK</h1>
+<div class="sub">这一页只验证「壳 + assets 取数」通不通，不加载任何游戏素材。用的是 ES5，任何内核都该跑得动。</div>
+<div class="row"><div class="k">UA</div><div class="v" id="ua">…</div></div>
+<div class="row"><div class="k">WebView 内核</div><div class="v" id="cv">…</div></div>
+<div class="row"><div class="k">GET /campaign.html</div><div class="v" id="get">…</div></div>
+<div class="row"><div class="k">GET + Range: bytes=0-9</div><div class="v" id="rng">…</div></div>
+<div class="row"><div class="k">GET /nope-404.html（应 404）</div><div class="v" id="nf">…</div></div>
+<div class="row"><div class="k">语法：?. 可选链</div><div class="v" id="s1">…</div></div>
+<div class="row"><div class="k">语法：?? 空值合并</div><div class="v" id="s2">…</div></div>
+<div class="row"><div class="k">语法：顶层 await / ESM</div><div class="v" id="s3">…</div></div>
+<div id="verdict">判定中…</div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var ua = String(navigator.userAgent || '');
+  $('ua').textContent = ua;
+  var m = /Chrome\/(\d+)/.exec(ua);
+  var chrome = m ? parseInt(m[1], 10) : 0;
+  $('cv').textContent = chrome ? ('Chromium ' + chrome) : '认不出来（UA 里没有 Chrome/）';
+
+  function req(method, url, range, cb) {
+    var x = new XMLHttpRequest();
+    try { x.open(method, url, true); } catch (e) { cb(-9, 'open 失败 ' + e, ''); return; }
+    if (range) { try { x.setRequestHeader('Range', range); } catch (e2) {} }
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4) return;
+      cb(x.status, x.getResponseHeader('Content-Length'), x.getResponseHeader('Content-Range') || '');
+    };
+    x.onerror = function () { cb(-1, '(网络/拦截错误)', ''); };
+    try { x.send(); } catch (e3) { cb(-8, 'send 失败 ' + e3, ''); }
+  }
+  function put(id, status, len, cr) {
+    var ok = id === 'nf' ? (status === 404) : (status === 200 || status === 206);
+    var el = $(id);
+    el.className = 'v ' + (ok ? 'ok' : 'no');
+    el.textContent = 'HTTP ' + status + (len ? '  Content-Length: ' + len : '')
+      + (cr ? '  Content-Range: ' + cr : '')
+      + (id === 'nf' ? '（期望 404）' : (id === 'rng' ? '（期望 206）' : '（期望 200）'));
+  }
+  req('GET', '/campaign.html', '', function (s, l) { put('get', s, l); });
+  req('GET', '/campaign.html', 'bytes=0-9', function (s, l, c) { put('rng', s, l, c); });
+  req('GET', '/nope-404.html', '', function (s, l) { put('nf', s, l); });
+
+  function syntax(id, body, label) {
+    var r;
+    try { new Function(body); r = true; } catch (e) { r = false; }
+    var el = $(id);
+    el.className = 'v ' + (r ? 'ok' : 'no');
+    el.textContent = (r ? '支持' : '不支持') + ' — ' + label;
+    return r;
+  }
+  var canOpt = syntax('s1', 'var o={a:{b:1}};return o.a?.b;', 'ES2020 可选链');
+  var canNull = syntax('s2', 'var o={};return o.x ?? 1;', 'ES2020 空值合并');
+  var canAwait = syntax('s3', 'return (async function(){await 0;})();', 'async/await（ES2017）');
+
+  var modOk = false;
+  var sc = document.createElement('script');
+  sc.type = 'module';
+  sc.textContent = 'window.__SG_MOD = 1;';
+  document.head.appendChild(sc);
+  setTimeout(function () {
+    modOk = !!window.__SG_MOD;
+    $('s3').textContent += modOk ? ' ｜ ES module 支持' : ' ｜ ES module 不支持';
+    var v = $('verdict');
+    if (!canOpt || !canNull || !modOk) {
+      $('title').className = 'bad';
+      $('title').textContent = 'SHELL OK，但内核太旧';
+      v.innerHTML = '<b class="no">壳是好的，黑屏的原因在 WebView 内核。</b><br>'
+        + '你的内核 = Chromium ' + chrome + '；游戏页面 campaign.html 里有 143 处 <code>?.</code>、'
+        + '22 处 <code>??</code>、以及顶层 await（ES module 61+ / ?. 80+ / 顶层 await 89+）。<br>'
+        + '老内核在<b>解析期</b>就抛 SyntaxError：一行 JS 都不执行、Java 侧没有任何异常，所以就是黑屏。<br><br>'
+        + '解法：用 <b>API 31+（Android 12 以上）</b>的模拟器镜像；或带 Play 商店的镜像把 '
+        + '「Android System WebView」更新到 89 以上；真机直接更新 WebView。';
+    } else {
+      $('title').textContent = 'SHELL OK · 壳与取数全部正常';
+      v.innerHTML = '<b class="ok">壳没问题</b>：assets 拦截、Content-Length、Range 206、404 都正常，'
+        + '内核 Chromium ' + chrome + ' 也够新。<br>'
+        + '如果主包（sanguo-debug.apk）此时仍然黑屏，问题只在游戏页面/素材，看 '
+        + '<code>adb logcat -s SanguoShell</code> 里 onReceivedError 那几行。';
+    }
+  }, 600);
+})();
+</script>
+</body>
+</html>

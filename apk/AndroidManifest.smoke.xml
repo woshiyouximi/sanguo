@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  smoke 包的清单：与 AndroidManifest.xml 逐项一致，只有三处不同——
+    ① package 变成 .smoke（可以和主包同时安装，桌面上两个图标，不会互相覆盖）
+    ② label 多一个「煙霧測試」后缀（一眼看出装的是哪个）
+    ③ activity 用全限定名（包名改了，相对名 .MainActivity 会指到不存在的类）
+  为什么包名要不同：主包黑屏时，玩家得能同时留着主包和 smoke 对照，而不是二选一。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sanguo.webview.smoke"
+    android:versionCode="3"
+    android:versionName="1.3-smoke">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name_smoke"
+        android:supportsRtl="false"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name="com.sanguo.webview.MainActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:enableOnBackInvokedCallback="false"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
