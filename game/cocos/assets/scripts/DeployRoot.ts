@@ -350,6 +350,9 @@ export class DeployRoot extends Component {
   private queueTitle: Label | null = null;
   private queueHint: Label | null = null;
   private queueClose: Label | null = null;
+  /** 出陣順序面板独立图层：与主界面 Label 分层，避免被卡片/选择框盖住 */
+  private queueLayer: Node | null = null;
+  private queueGfx: Graphics | null = null;
 
   /* ---- F-07 前 / 中 / 後列（站位） ---- */
 
@@ -455,6 +458,27 @@ export class DeployRoot extends Component {
     // 收起態時當窄條標題、展開態時當面板底部的說明（同一顆 Label，省一個節點）
     this.queueHint = this.makeLabel('', 375, 1300, 700, 15, COLORS.textDim, 'center');
     this.queueClose = this.makeLabel('確 定', 375, 830, 270, 22, COLORS.goldLight, 'center');
+
+    // 出陣順序面板独立成一层（最后添加 → 永远在最上层）：胶暗底 + 面板 + 自己的 Label 都在这层里，
+    // 不再被主界面的九宫格底板 / 选中框盖住。
+    const queueLayer = new Node('QueueLayer');
+    const qTransform = queueLayer.addComponent(UITransform);
+    qTransform.setContentSize(DESIGN_W, DESIGN_H);
+    this.queueGfx = queueLayer.addComponent(Graphics);
+    this.node.addChild(queueLayer);
+    const queueNodes: (Label | null)[] = [
+      this.queueTitle,
+      this.queueHint,
+      this.queueClose,
+      ...this.queueLabels,
+      ...this.queueTroopLabels,
+      ...this.queueColLabels,
+    ];
+    for (const label of queueNodes) {
+      if (label) label.node.setParent(queueLayer);
+    }
+    queueLayer.active = false;
+    this.queueLayer = queueLayer;
 
     // 最後一步：所有 Label 都建好了，統一上文字層級
     this.applyRoles();
@@ -1582,6 +1606,7 @@ export class DeployRoot extends Component {
     if (this.queueClose) this.queueClose.node.active = this.queueOpen;
 
     if (!this.queueOpen) {
+      if (this.queueLayer) this.queueLayer.active = false;
       // 收起態：兵力快捷鈕與底欄之間一條窄條，點它展開
       // w7-cocos-render3：12×2 二維色域（678×36 → 每格 56×18 設計像素）
       this.cellGrid(g, 24, QUEUE_Y, 678, 36, '#1E2024', '#10151C', 16, 5, 240);
@@ -1597,7 +1622,12 @@ export class DeployRoot extends Component {
     }
 
     // 展開態：模態面板（吃掉全部觸摸，背後的滑桿/按鈕本帧不 push）
-    this.fillRect(g, 0, 0, DESIGN_W, DESIGN_H, '#000000', 186);
+    const qg = this.queueGfx;
+    if (!qg) return;
+    qg.clear();
+    g = qg;
+    if (this.queueLayer) this.queueLayer.active = true;
+    this.fillRect(g, 0, 0, DESIGN_W, DESIGN_H, '#000000', 235);
     const px = 40;
     const py = 214;
     const pw = 670;
