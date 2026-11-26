@@ -30,13 +30,14 @@ function fnBody(src: string, name: string): string {
   const hit = new RegExp(`(?:function|private|public|protected)\\s+(?:static\\s+)?(?:async\\s+)?${name}\\s*\\(`).exec(src);
   if (!hit) return '';
   const at = hit.index;
-  // 函式體的 `{`：優先取「這一行的最後一個非空白字元是 `{`」的那個，
-  // 避開 `): { battle: boolean } {` 這種回傳型別裡的大括號。
+  // 函式體的 `{`：跳過回傳型別裡的物件字面值（`): { battle: boolean } {` 的第一個 `{` 前面是 `:`）。
+  // 判據：body 的 `{` 前一個非空白字元是 `)`、`}`、`>`、`]` 或型別名（`void`/`boolean`/`Promise<void>`）。
   let open = -1;
   for (let p = src.indexOf('{', at); p >= 0; p = src.indexOf('{', p + 1)) {
-    let q = p + 1;
-    while (q < src.length && (src[q] === ' ' || src[q] === '\t')) q += 1;
-    if (src[q] === '\n') {
+    let q = p - 1;
+    while (q >= at && /\s/.test(src[q])) q -= 1;
+    const prev = q >= at ? src[q] : '';
+    if (/[)>}\w\]]/.test(prev)) {
       open = p;
       break;
     }
@@ -66,7 +67,7 @@ test('源码契约：純邏輯區 [[ENCOUNTER_CORE]] 存在，且 AUTO_ENCOUNTER
   assert.match(COCOS, /\/\/ \[\[\/ENCOUNTER_CORE\]\]/, 'CampaignRoot.ts 缺少 [[/ENCOUNTER_CORE]] 區尾');
   const core = COCOS.match(/\/\/ \[\[ENCOUNTER_CORE\]\][^\n]*\n([\s\S]*?)\/\/ \[\[\/ENCOUNTER_CORE\]\]/);
   assert.ok(core, '抽不出 ENCOUNTER_CORE 段');
-  assert.match(core[1], /const AUTO_ENCOUNTER = false;/, 'AUTO_ENCOUNTER 必須默認 false（正式版必須真打）');
+  assert.match(core[1], /const AUTO_ENCOUNTER(?::\s*boolean)? = false;/, 'AUTO_ENCOUNTER 必須默認 false（正式版必須真打）');
   // 默認 false 的註釋必須寫清楚「僅調試用，正式版必須真打」
   assert.match(core[1], /僅調試用/, 'AUTO_ENCOUNTER 註釋要標「僅調試用」');
 });
@@ -261,7 +262,7 @@ test('行為：encounterPlan() 依 wins/losses 增量判勝負（我方勝 → �
   assert.equal(win.winner, 'A');
   assert.equal(win.restores.length, 1, '我方勝只復原我方殘部');
   assert.equal(win.restores[0].id, 'a1');
-  assert.equal(win.restores[0].troops, 60, '勝方留一半兵力（240→120 的一半）');
+  assert.equal(win.restores[0].troops, 60, '勝方留一半兵力（120→60）');
   assert.equal(win.restores[0].progress, 0, '回圖後重新行軍');
   assert.equal(win.lastBattle.won, true);
   assert.equal(win.lastBattle.city, '平原');

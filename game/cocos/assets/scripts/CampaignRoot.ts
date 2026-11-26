@@ -1128,7 +1128,7 @@ export function successionLand(save: Record<string, unknown>, state: SuccessionS
  * **僅調試用：正式版必須真打**（默認 false → 遭遇戰一律進 Battle 場景）。
  * 只有把它改成 true，或 URL 帶 `?autoenc=1`（`autoEncounterOn()` 認這個），才走舊擲骰。
  */
-const AUTO_ENCOUNTER = false;
+const AUTO_ENCOUNTER: boolean = false;
 
 /** 調試開關：`AUTO_ENCOUNTER = true` 或 `?autoenc=1` → 允許舊擲骰結算（正式版必須真打） */
 function autoEncounterOn(debugFlag: unknown): boolean {
