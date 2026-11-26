@@ -1028,7 +1028,7 @@ export class CityPanel extends Component {
     const windowClosed = this.locked;
     // [P0-4] 逐將年令：開發/搜索要指定執行將，城內沒有「今年還沒行動」的將時這兩格變灰。
     const freeExecs = save
-      ? M.rosterOf(save, this.cityName, this.ctx).filter((g) => !M.actedLocked(save, g.NAME)).length
+      ? this.presentRoster().filter((g) => !M.actedLocked(save, g.NAME)).length
       : 0;
     for (let i = 0; i < this.cmdRects.length; i += 1) {
       const rect = this.cmdRects[i];
@@ -1409,10 +1409,38 @@ export class CityPanel extends Component {
    * [P0-4/F2] 選執行武將（原作「每項主令都要指定人，不能空手代行」）：只列今年還沒行動的城內將。
    * 沒有可用將 → 記一條提示並取消命令（不吃年令、不扣金）。
    */
+  /**
+   * [R239] 「這座城現在真正能幹活的將」。
+   *
+   * `M.rosterOf()` 回的是 `sanguo_city_v1` 裡的名單，屬**快照**：俘虜/戰死/隨軍出發的將
+   * 不會自動從那份名單消失，於是玩家會看到「已俘/已死/在途」的將還能被派去搜索或開發
+   * （製作人回報：「不在城中的武將依舊可以搜索（包括戰敗被俘虜或者死亡的）」）。
+   *
+   * 這裡做兩道過濾：
+   *   ① 去掉 `awayNameSet()`（隨軍/返程/圍城中的將）；
+   *   ② 若存檔有運行時 `save.roster[城]`（與物品頁/名冊同一來源），取交集——
+   *      俘虜/戰死/調走的將不會出現在那份名單裡。
+   */
+  private presentRoster(): M.CityGeneral[] {
+    const save = this.save;
+    if (!save) return [];
+    const all = M.rosterOf(save, this.cityName, this.ctx);
+    const away = M.awayNameSet(save);
+    let runtime: string[] | null = null;
+    try {
+      const gs = GameState.loadSave() as unknown as { roster?: Record<string, unknown> };
+      const row = gs?.roster?.[this.cityName];
+      if (Array.isArray(row)) runtime = row.map((name) => String(name)).filter((name) => !!name);
+    } catch {
+      runtime = null;
+    }
+    return all.filter((gen) => !away.has(gen.NAME) && (!runtime || runtime.includes(gen.NAME)));
+  }
+
   private pickExec(title: string, cb: (name: string) => void): void {
     const save = this.save;
     if (!save) return;
-    const all = M.rosterOf(save, this.cityName, this.ctx);
+    const all = this.presentRoster();
     const free = all.filter((g) => !M.actedLocked(save, g.NAME));
     if (!free.length) {
       const used = all.filter((g) => M.actedLocked(save, g.NAME)).map((g) => g.NAME);

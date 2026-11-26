@@ -125,3 +125,15 @@ test('[R236] 出征不得收束內政窗口（否則一按出征其餘武將就�
   assert.ok(seg.includes('this.persist()'), '仍要把選定目標/存檔寫回');
   assert.ok(seg.includes('onDeploy(target)'), '仍要交給 CampaignRoot 走 march');
 });
+
+test('[R239] 搜索/開發的執行武將只能來自在城且未隨軍的將（俘虜/陣亡/在途不得再派）', () => {
+  const cp = readFileSync(join(process.cwd(), 'cocos/assets/scripts/CityPanel.ts'), 'utf8');
+  assert.ok(cp.includes('private presentRoster()'), '要有 presentRoster()');
+  const pr = bodyOf(cp, 'private presentRoster');
+  assert.ok(pr.includes('M.awayNameSet(save)'), '要濾掉在途（隨軍/返程/圍城）');
+  assert.ok(pr.includes('roster'), '要和運行時 save.roster[城] 取交集（俘虜/陣亡不會在裡面）');
+  // pickExec 不得再直接用 M.rosterOf
+  const pick = bodyOf(cp, 'private pickExec');
+  assert.ok(pick.includes('this.presentRoster()'), 'pickExec 要用 presentRoster()');
+  assert.equal(pick.includes('M.rosterOf('), false, 'pickExec 不得直接用 M.rosterOf');
+});
