@@ -16,6 +16,15 @@ import type { ReinforceConfig } from './core/strategy';
 import { clearRunScoped } from './core/run_scoped';
 import { advanceOneMonth } from './core/advance_month';
 import type { MonthContext, MonthCivicTick, MonthReport, MonthSaveLike } from './core/advance_month';
+import {
+  EQUIP_ITEMS_CACHE_KEY,
+  EQUIP_SAVE_KEY,
+  effectiveStatsOf,
+  equipBagFromJson,
+  equipNamesForGeneral,
+  equipRowsFromJson,
+  type EquipItemLike,
+} from './core/equip_bonus';
 import type { GameData, General } from './types';
 
 export const SAVE_KEY = 'sanguo_campaign_v1';
@@ -988,6 +997,51 @@ export function takeDeployFrom(): string | null {
 }
 
 /**
+ * 讀裝備加成用的兩份 localStorage 資料（F-05）：
+ *   - `sanguo_equip_items_v1`：物品表快照（`ItemsPanel.open()` 寫入的 `data/items` 列）；
+ *   - `sanguo_items_v1`：物品存檔 `{equip:{名:{槽:Sequence}}, bag}`（裝備的權威來源）。
+ *
+ * 為什麼走快照而不是 `DataLoader`：`loadGameData()` 只有 Promise、沒有同步 peek，而
+ * `startBattle()` 是同步函數且 `BattleRoot` 進場就要參數；快照由唯一持有整張物品表的
+ * 物品頁寫入，跨場景/跨會話都在。兩份都缺 / 壞檔 / 沒開過物品頁 → 空資料、加成 0。
+ */
+function readEquipBattleItems(): EquipItemLike[] {
+  try {
+    return equipRowsFromJson(sys.localStorage.getItem(EQUIP_ITEMS_CACHE_KEY));
+  } catch {
+    return [];
+  }
+}
+
+function readEquipBattleBag(): unknown {
+  try {
+    return equipBagFromJson(sys.localStorage.getItem(EQUIP_SAVE_KEY));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把主將的裝備加成算進出征參數（F-05）。
+ *
+ * 公式（四槽累加、五屬性投影、`max(0, trunc(base)+trunc(bonus))`）在
+ * `core/equip_bonus`，與 web `items_model.js` / `campaign.html` 同源，這裡不另寫算法。
+ * `BattleRoot` 只讀 `genStr/genInt/genLevel`（沒有 hp/mp 欄位），所以只覆寫武力/智力；
+ * 原本是 `undefined` 的欄位保持 `undefined`（`BattleRoot` 自己有 80/60 回退），
+ * 不要用「原值 + 0」把那份回退語義改掉。
+ */
+function applyEquipBonus(launch: BattleLaunch): BattleLaunch {
+  if (typeof launch.genStr !== 'number' && typeof launch.genInt !== 'number') return launch;
+  const items = readEquipBattleItems();
+  if (items.length === 0) return launch;
+  const names = equipNamesForGeneral(launch.gen, loadSave(), items, readEquipBattleBag());
+  const stats = effectiveStatsOf({ str: launch.genStr, int: launch.genInt }, names, items);
+  if (typeof launch.genStr === 'number') launch.genStr = stats.str;
+  if (typeof launch.genInt === 'number') launch.genInt = stats.int;
+  return launch;
+}
+
+/**
  * 三屏之间的唯一"导航"入口。
  *
  * Cocos 的 scene 不能像浏览器一样在 URL 上带参，所以这里先把 BattleLaunch 放进
@@ -1001,6 +1055,7 @@ export function startBattle(target: string, loadout: BattleLoadout): BattleLaunc
     seed: 20261124,
     from: 'campaign',
   };
+  applyEquipBonus(launch);
   pendingLaunch = launch;
   director.loadScene('Battle');
   return launch;

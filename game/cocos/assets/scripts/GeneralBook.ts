@@ -41,15 +41,31 @@
  *    20 級時第一段（等級 1）一定學到了，所以卡片顯示的是**已學會的最高一段**，
  *    真要顯示「未解鎖 + 等級」只有等級低於第一段（正常存檔不會發生）才看得到。
  *
- * ## 零依賴
+ * ## 依賴（2026-11-26 F-05 起多一條 `cc`）
  *
- * 只 import `MonarchModel`（勢力色板 / 狀態詞 / 帶兵上限）與 `CityModel`（等級口徑），
- * 三者都**不 import 'cc'**，所以 `work/cocos_book/model_assert.mjs` 能直接在 node 裡
- * `require` 編譯後的 JS 跑斷言（不需要 mock 引擎）。面板才碰 `cc`。
+ * `MonarchModel`（勢力色板 / 狀態詞 / 帶兵上限）、`CityModel`（等級口徑）與
+ * `ScenarioLevels`（劇本等級）都是純資料。裝備加成（F-05）要讀 localStorage 的
+ * 物品存檔 / 物品表快照，所以 import `cc` 的 `sys`——`work/cocos_book` 的 node 斷言用
+ * `_sim/node_modules/cc` mock 提供它；沒開過物品頁時兩把 localStorage 鍵都是空的，
+ * 名冊數值與改動前完全一致（不會拋錯，`model_assert` 的 401 行斷言照舊綠）。
+ *
+ * 公式全在 `./core/equip_bonus`（與 web `items_model.js` / `campaign.html` 同源），
+ * 本檔只做「讀存檔 + 逐將套用」，不要在名冊裡另寫一份加成算法。
  */
+import { sys } from 'cc';
 import { cityOf, levelOf as cityLevelOf, type CityGeneral } from './CityModel';
 import { FORCE_COLOR_NEUTRAL, forceColorOf, intOr, num, str, troopCapOf } from './MonarchModel';
 import { scenarioLevelOf } from './ScenarioLevels';
+import {
+  EQUIP_ITEMS_CACHE_KEY,
+  EQUIP_SAVE_KEY,
+  effectiveStatsOf,
+  equipBagFromJson,
+  equipNamesForGeneral,
+  equipRowsFromJson,
+  type EquipItemLike,
+  type EquipStats,
+} from './core/equip_bonus';
 
 /* =====================================================================
  * §0 常量 / 型別
@@ -364,6 +380,56 @@ export function officerIndex(officersByCity: Record<string, unknown> | null | un
  * §3 建表
  * =================================================================== */
 
+/**
+ * 名冊一行的「基礎 + 裝備」有效屬性（F-05）。
+ *
+ * 基礎值先按名冊原本的口徑夾（武力/智力 0..999、生命/技力 0..9999），裝備加成交給
+ * `core/equip_bonus.effectiveStatsOf()`（同 web `campaign.html:combatStatsOf`：trunc +
+ * 下夾 0；上夾留在本檔的 UI 口徑）。`items` 是空陣列（沒開過物品頁 / node 斷言冷啟動）
+ * 就直接回基礎值，不讀任何存檔。
+ */
+function effectiveRowStats(
+  name: string,
+  save: Record<string, unknown>,
+  base: { str: unknown; int: unknown; hp: unknown; mp: unknown },
+  items: readonly EquipItemLike[] | null | undefined,
+  bagSave: unknown,
+): EquipStats {
+  const plain: EquipStats = {
+    str: clampInt(base.str, 0, 999),
+    int: clampInt(base.int, 0, 999),
+    hp: clampInt(base.hp, 0, 9999),
+    mp: clampInt(base.mp, 0, 9999),
+    speed: 0,
+  };
+  if (!Array.isArray(items) || items.length === 0) return plain;
+  const names = equipNamesForGeneral(name, save, items, bagSave);
+  return effectiveStatsOf({ str: plain.str, int: plain.int, hp: plain.hp, mp: plain.mp }, names, items);
+}
+
+/**
+ * 物品表快照（localStorage `sanguo_equip_items_v1`，由 `ItemsPanel.open()` 寫）。
+ *
+ * 名冊是純模型、拿不到 `DataLoader` 的 `data.items`（`GeneralBookPanel` 的 `open()`
+ * 也沒有 items 參數），所以走物品頁留下的快照；跨會話也在。
+ */
+function readEquipItemRows(): EquipItemLike[] {
+  try {
+    return equipRowsFromJson(sys.localStorage.getItem(EQUIP_ITEMS_CACHE_KEY));
+  } catch {
+    return [];
+  }
+}
+
+/** 物品存檔（`sanguo_items_v1`，`{equip:{名:{槽:Sequence}}, bag}`）的已解析物件 */
+function readEquipBagSave(): unknown {
+  try {
+    return equipBagFromJson(sys.localStorage.getItem(EQUIP_SAVE_KEY));
+  } catch {
+    return null;
+  }
+}
+
 /** 把 generals.json 一行 + 存檔/守將表合成名冊一行 */
 export function mergeRow(
   raw: unknown,
@@ -376,6 +442,13 @@ export function mergeRow(
     playerForce?: string;
     /** 劇本號：只影響「守將表反查不到」時取城市欄位的口徑（見 `BookOptions.scenIdx`） */
     scenIdx?: unknown;
+    /**
+     * 物品表（`data/items.json` 的列）：`buildBook` 從物品表快照讀一次、逐行傳進來；
+     * 空陣列 / undefined = 沒有裝備資料（沒開過物品頁、或 node 斷言的冷啟動），走原值。
+     */
+    equipItems?: readonly EquipItemLike[] | null;
+    /** 物品存檔的已解析物件（`sanguo_items_v1`），裝備 Sequence 的權威來源 */
+    equipBagSave?: unknown;
   },
 ): BookGeneral | null {
   const rec = (raw && typeof raw === 'object' ? raw : null) as Record<string, unknown> | null;
@@ -406,14 +479,23 @@ export function mergeRow(
   const tire = finiteOr(mapGet(save.tire, name), 0);
   const mine = !!player && force === player;
 
+  // 有效屬性（F-05）：基礎值照舊夾一次（名冊顯示上夾 999/9999），再加四槽裝備加成；
+  // 公式在 `core/equip_bonus`，這裡只管「哪個將身上有哪四件」。
+  const effective = effectiveRowStats(name, save, {
+    str: officer?.rec.str ?? rec.STR,
+    int: officer?.rec.int ?? rec.INT,
+    hp: rec.BaseHP,
+    mp: rec.BaseMP,
+  }, ctx.equipItems, ctx.equipBagSave);
+
   return {
     id: clampInt(rec.id ?? rec.SEQUENCE, 0, 9999),
     name,
-    str: clampInt(officer?.rec.str ?? rec.STR, 0, 999),
-    int: clampInt(officer?.rec.int ?? rec.INT, 0, 999),
+    str: clampInt(effective.str, 0, 999),
+    int: clampInt(effective.int, 0, 999),
     level,
-    hp: clampInt(rec.BaseHP, 0, 9999),
-    mp: clampInt(rec.BaseMP, 0, 9999),
+    hp: clampInt(effective.hp, 0, 9999),
+    mp: clampInt(effective.mp, 0, 9999),
     troopCap: troopCapOf(level),
     loyal: clampInt(loyal, 0, 999),
     spirit: clampInt(spirit, 0, 999),
@@ -451,6 +533,9 @@ export function buildBook(opts: BookOptions = {}): BookGeneral[] {
   const save = (opts.save && typeof opts.save === 'object' ? opts.save : {}) as Record<string, unknown>;
   const index = officerIndex(opts.officersByCity);
   const playerForce = str(save.force) || str(save.king);
+  // F-05：物品表快照 + 物品存檔只讀一次（401 行逐行查表，不要在迴圈裡重複 JSON.parse）
+  const equipItems = readEquipItemRows();
+  const equipBagSave = readEquipBagSave();
   const rows: BookGeneral[] = [];
   for (const raw of list) {
     const rec = (raw && typeof raw === 'object' ? raw : null) as Record<string, unknown> | null;
@@ -464,6 +549,8 @@ export function buildBook(opts: BookOptions = {}): BookGeneral[] {
       ownerOf: opts.ownerOf ?? null,
       playerForce,
       scenIdx: opts.scenIdx,
+      equipItems,
+      equipBagSave,
     });
     if (row) rows.push(row);
   }

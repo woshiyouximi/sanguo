@@ -63,6 +63,8 @@ import {
   unequipSlot,
 } from './ItemsModel';
 import type { EquipTable, GroupKey, ItemLike, Slot, StatKey } from './ItemsModel';
+// F-05：物品表快照的 localStorage 鍵（算法在 core/equip_bonus，這裡只負責寫快照）
+import { EQUIP_ITEMS_CACHE_KEY } from './core/equip_bonus';
 import { loadPortrait } from './Portrait';
 import type { PortraitResult } from './Portrait';
 import type { General, Item } from './types';
@@ -388,6 +390,22 @@ function writeItemsSave(save: ItemsSave): void {
     sys.localStorage.setItem(ITEM_SAVE_KEY, JSON.stringify(save));
   } catch (err) {
     console.warn(`[ItemsPanel] 寫入 ${ITEM_SAVE_KEY} 失敗：${String(err)}`);
+  }
+}
+
+/**
+ * 寫一份物品表快照（`F-05` 装备加成的共用資料通道）。
+ *
+ * 物品頁是**唯一**手裡有整張 `data/items` 表的地方；名冊（`GeneralBook.ts`）與出征
+ * （`GameState.startBattle`）都是同步模型，拿不到 `DataLoader.loadGameData()` 的
+ * Promise，所以只能讀這份快照 + `sanguo_items_v1` 的裝備紀錄。物品表是靜態設定檔
+ * （77 列、約 35KB），每次開物品頁覆寫一次即可；寫失敗只影響加成顯示，絕不能擋開面板。
+ */
+function writeEquipItemsCache(items: readonly Item[]): void {
+  try {
+    sys.localStorage.setItem(EQUIP_ITEMS_CACHE_KEY, JSON.stringify(items));
+  } catch (err) {
+    console.warn(`[ItemsPanel] 寫入 ${EQUIP_ITEMS_CACHE_KEY} 失敗：${String(err)}`);
   }
 }
 
@@ -913,6 +931,8 @@ export class ItemsPanel extends Component {
   ): void {
     if (!this.built) this.build();
     registerItems(items as readonly unknown[]);
+    // F-05：物品表落地一份快照，供名冊 / 出征算装备加成（兩處都是同步模型、拿不到 bundle）
+    writeEquipItemsCache(items);
     this.generals = generals.slice();
     this.ctx = opts;
     this.save = readItemsSave();
