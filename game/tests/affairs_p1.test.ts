@@ -5,7 +5,7 @@
  * affairs_p1.test.ts — 內政／大地圖 P1 批次（F4/F5/F7/F10/F16/F19/F28）
  *
  * 差異清單：`F:\sanguo\work\flow_audit\内政大地图_差异.md`
- *   行 57  F4  內政終了 = 結束本年窗口 → 大地圖跑一年（advanceMonth(12)），保留 ?adv=1 單月調試
+ *   行 57  F4  內政終了 = 只把 T 重設 3600 回大地圖（原作 0x41BBF5，不跑月份模擬）；保留 ?adv=1 單月調試
  *   行 58  F5  save.startYear 入檔，顯示 startYear + yearOf - 1；yearOf 只做年內換算；舊檔 184 兜底
  *   行 88  F7  內政指令按原作 7 項（指南 L96-105）；移動併入兵團、情報降二級（仍可用、不占令）
  *   行 91  F10 自治每城加一次 search；只有 kind==='talent' 才出日誌（指南 L103-104）
@@ -57,7 +57,7 @@ function fnBody(text, name) {
 const REPEATABLE = ITEMS.filter((it) => String(it.Attrib || '') !== 'ONLYONE');
 
 /* ======================================================================
- * F4 內政終了 → 結束本年窗口並跑完一年
+ * F4 內政終了 → 只把 T 重設 3600 回大地圖（原作 0x41BBF5；逐幀時鐘 T=0 進內政）
  * ==================================================================== */
 test('F4 內政終了：只把 T 重設 3600（原作 0x41BBF5），不跑月份模擬', () => {
   const body = fnBody(CAMPAIGN, 'endMonth');

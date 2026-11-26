@@ -10,7 +10,7 @@
  * 純函數（月份換算、武將上限）另外用「源碼公式 + 期望值」兩段守：公式來自源碼、期望值寫在這裡。
  *
  * 對應的 web 真源（同一個測試檔會一起驗，防止 web 那邊改了而 Cocos 沒跟）：
- *   F4  `web/campaign.html:2517-2533` `endMonth()` → `advanceMonth(12)`
+ *   F4  `web/campaign.html` `endMonth()` → 只把 T 重設 3600 回大地圖（逐幀時鐘 T 一年 3600 tick）
  *   F7  `web/city_model.js:36-68` `CMD_ORDER` 7 項 / `CMD_SECONDARY` 2 項
  *   F10 `web/city_model.js` `runAutonomy()`：quiet 搜索只留人才日誌
  *   F16 `web/city_model.js:786-894` `nationalGold()` / `migrateGold()`

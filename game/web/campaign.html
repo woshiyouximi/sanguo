@@ -266,7 +266,9 @@
       <button class="sbtn" id="btnSave" type="button"><b>存 檔</b><small id="slotBadge">未開局</small></button>
     </div>
     <div class="stats"><span>金 <b id="gold">0</b></span><span>城 <b id="ct">0</b></span>
-      <span>戰績 <b id="rec">0 勝 0 敗</b></span></div>
+      <span>戰績 <b id="rec">0 勝 0 敗</b></span>
+      <!-- 時間：原作大地圖每幀 T−1（一年 3600 tick／一月 300／一日 10），月份現算，年份只在進內政時 +1 -->
+      <span>時間 <b id="clockNow">T=3600</b></span></div>
     <!-- R4 君主：原作開局先選君主，之後「我是誰」由存檔的 monarch 決定（king 是勢力 id） -->
     <div class="stats" id="kingbar">
       <span>君主 <b id="kingName" style="cursor:pointer;text-decoration:underline" title="點擊看君主屬性">未選</b></span>
@@ -469,6 +471,24 @@
     <div class="sheet-ft">
       <div class="grow" id="throneFoot"></div>
       <button class="btn2" type="button" data-close="1">取 消</button>
+    </div>
+  </div>
+
+  <!-- 內政時間到了（原作 T==0 自動切入內政場景 0x41B6C6；內政場景 update 不碰 T，時間凍結、大地圖停更）。
+       刻意沒有 .x / data-close、背景點擊也關不掉：必須按「內 政 終 了」才會把 T 重設 3600 回大地圖
+       （原作 0x41BBF5），而 0x41BBF5 不跑任何月份模擬 —— 月份流水線只在逐幀 T 跨月時跑。 -->
+  <div class="sheet" id="interiorSheet" hidden>
+    <div class="sheet-hd">
+      <div>
+        <div class="ttl" id="intTtl">內 政 時 間 到 了</div>
+        <div class="sub" id="intSub">大地圖時間凍結（原作 T=0 → 內政場景）</div>
+      </div>
+    </div>
+    <div class="sheet-bd"><div id="intBody"></div></div>
+    <div class="sheet-ft">
+      <div class="grow" id="intFoot">處理事務後按「內 政 終 了」：只把 T 重設 3600 回大地圖，不跑任何月份模擬。</div>
+      <button class="btn2" type="button" id="btnInteriorCity" hidden>進 城 內 政</button>
+      <button class="btn2" type="button" id="btnInteriorEnd">內 政 終 了</button>
     </div>
   </div>
 
@@ -994,6 +1014,26 @@ let marchDebug = [];         // ?marchdbg=1 的每月 armies 快照
 let aiDebugLog = [];         // ?aidbg=1 的每月 AI 月報
 let selected = null;
 let snapshotUpgrade = null;   // R70：{from,to,steps} — 讀到舊版快照時記一次，開局後提示
+
+// ---- 大地圖時鐘（原作：每幀 −1 的計數器 T，[0x4C30E0]）----
+// 一年 3600 tick（0x41B849）、一月 300 tick（0x41B855）、一日 10 tick（0x41B879）；
+// 月份現算 floor((3600−T)/300)+1，年份只在「進內政」時 +1（0x4238C3）。
+// T==0（0x41B6C6）→ 自動進內政、大地圖停更、時間凍結；「內政終了」只把 T 重設 3600 回大地圖（0x41BBF5），
+// 不跑任何月份模擬。浮層面板開著時原作也停錶（0x41BEC1）→ overlayDepth。
+const CLOCK_TICKS_PER_YEAR = 3600;
+const CLOCK_TICKS_PER_MONTH = 300;   // 3600 / 12
+const CLOCK_TICKS_PER_DAY = 10;      // 300 / 30
+const CLOCK_STEP = 1 / 60;           // 60Hz 固定步長（原作逐幀 T−1，沒有 timer/VSync；固定步長換穩定性）
+const CLOCK_STORE_KEY = 'sg_campaign_interior';   // 跨 city.html 來回時記住「正在內政」
+let clockT = CLOCK_TICKS_PER_YEAR;
+let clockAcc = 0;
+let clockSpeed = 1;
+let clockPaused = false;     // true＝內政窗口（原作 substate [0x4A6440]）
+let clockInterior = false;   // true＝正在內政浮層
+let clockLastMs = 0;
+let clockVisualAcc = 0;
+let overlayDepth = 0;        // >0＝有浮層/抽屜開著（原作 0x41BEC1 停錶）
+let clockReady = false;      // false＝還沒跟存檔對齊過 T
 
 const storage = (() => { try { return window.localStorage; } catch { return null; } })();
 const scenarioNameOf = (id) => SCEN.find((s) => s.id === Number(id))?.name || '';
@@ -2031,6 +2071,8 @@ function loadSlot(index) {
   selected = null;
   activeSlot = i + 1;
   gameStarted = true;
+  try { if (storage) storage.removeItem(CLOCK_STORE_KEY); } catch { /* ignore */ }
+  clockAttachToSave();   // 逐幀時鐘：T 對齊存檔月份（web 存檔沒有 T，按年內第幾月換算）
   store.last = activeSlot;
   Saves.saveStore(store, storage);
   Saves.writeLegacy(save, storage);
@@ -2060,22 +2102,216 @@ function deleteSlot(index) {
 }
 
 // ---------------------------------------------------------------- 浮層
+// 原作：任一浮層面板開著 → 大地圖時間停（0x41BEC1）⇒ overlayDepth>0 時 clockRunning() 為 false。
 function hideSheets() {
-  document.querySelectorAll('.sheet').forEach((el) => { el.hidden = true; });
-  $('scrim').hidden = true;
+  // 內政浮層是鎖：除了「內 政 終 了」之外，任何 hideSheets 都不能把它關掉（原作內政場景只能走 0x41BBF5）
+  const keepInterior = clockInterior && $('interiorSheet') && !$('interiorSheet').hidden;
+  document.querySelectorAll('.sheet').forEach((el) => {
+    if (keepInterior && el.id === 'interiorSheet') return;
+    el.hidden = true;
+  });
+  $('scrim').hidden = !keepInterior;
+  overlayDepth = keepInterior ? 1 : 0;
 }
 function openSheet(id) {
   // R85：招降面板沒決策完之前，別的抽屜不能來搶（否則點一下「存檔」就把它頂掉了，俘虜永遠待決）
   if (id !== 'surrenderSheet' && !$('surrenderSheet').hidden) return;
+  // 內政期間同理：內政浮層沒按「內政終了」不能被存檔/勢力等抽屜頂掉
+  if (id !== 'interiorSheet' && clockInterior) return;
   hideSheets();
   $('scrim').hidden = false;
   $(id).hidden = false;
+  overlayDepth = 1;
 }
 function closeOverlays() {
   if (!$('surrenderSheet').hidden) return;   // R85：同上，任何 close 路徑都不能把待決面板關掉
+  if (clockInterior && !$('interiorSheet').hidden) return;   // 內政浮層：同 R85，只能按「內政終了」關
   hideSheets();
   confirmAction = null;
   confirmCancel = null;
+}
+
+// ---------------------------------------------------------------- 時鐘（逐幀 T）
+// 見 :996 附近的常量/狀態。這一節是原作 0x41B6C1（T−1）/0x41B6C6（T==0 進內政）/0x4238C3（年份 +1）/
+// 0x41BBF5（內政終了只 T=3600）/0x41BEC1（面板開著停錶）在 web 頁的對應實作。
+function clockSyncFromSave() {
+  // web 存檔只有絕對月序（原作存檔 +0x30 另有 T）：復原時用「年內第幾月」反推 T。
+  const m = Math.max(1, Math.trunc(Saves.num(save?.month) || 1));
+  clockT = CLOCK_TICKS_PER_YEAR - ((m - 1) % 12) * CLOCK_TICKS_PER_MONTH;
+  clockAcc = 0;
+  clockLastMs = 0;
+  clockVisualAcc = 0;
+}
+function syncClockTFromMonth() {
+  // 給「不逐幀流動」的舊路徑用（?adv=N、?auto=1、__r7.advance、__armyUi.adv）：手動推月後把 T 對齊月份
+  if (!save) return;
+  clockSyncFromSave();
+  clockReady = true;
+  clockPaused = false;
+  clockInterior = false;
+  refreshClockText();
+}
+function clockAttachToSave() {
+  // 接上新存檔（新局 / 讀槽 / 首次進頁面）：T 對齊月份、清內政/暫停狀態。
+  // 剛從 city.html 回來時用 localStorage 小旗標恢復內政浮層（web 是多頁面，存檔裡沒有 T/內政旗標）。
+  clockSyncFromSave();
+  clockPaused = false;
+  clockInterior = false;
+  overlayDepth = 0;
+  clockReady = true;
+  let resume = null;
+  try {
+    const raw = storage && storage.getItem(CLOCK_STORE_KEY);
+    if (raw) { resume = JSON.parse(raw); }
+    if (storage) storage.removeItem(CLOCK_STORE_KEY);
+  } catch { resume = null; }
+  const m = Math.max(1, Math.trunc(Saves.num(save?.month) || 1));
+  if (resume && Number(resume.interior) === 1 && Math.trunc(Number(resume.month) || 0) === m) {
+    clockPaused = true;
+    clockInterior = true;
+    clockT = 0;
+    showInteriorSheet();
+  }
+  refreshClockText();
+}
+function clockRunning() {
+  if (!gameStarted || !save || !clockReady) return false;
+  if (clockPaused || clockInterior) return false;
+  if (overlayDepth > 0 || !$('scrim').hidden) return false;   // 面板/抽屜開著 → 停錶（0x41BEC1）
+  if (document.hidden) return false;                          // 切到別的分頁＝不在畫面上
+  if (pickArmyId) return false;                               // 變更目的選點態（Cocos 的 Scrim_ 同理）
+  if ($('stage') && $('stage').classList.contains('pick')) return false;
+  return true;
+}
+function advanceArmiesTick(n) {
+  // 兵團每帧推進（原作 0x41B127→0x41AFAB：與日曆無關，抵達城下就進戰鬥）。
+  // 一個月 300 tick，步長＝「每月的行軍步長 ÷ 300」；Cocos stepArmiesFrame 的 months 換算同款。
+  if (!MARCH_ON || !save) return false;
+  const list = save.armies;
+  if (!Array.isArray(list) || !list.length) return false;
+  let moved = false;
+  for (const it of planArmyMoves(list, (a) => {
+    const step = marchStep(a.pathIndex);
+    const months = Math.max(1, Math.round(1 / Math.max(1e-6, step)));
+    return n / (months * CLOCK_TICKS_PER_MONTH);
+  })) {
+    const a = it.army;
+    const p = Number(it.progress) || 0;
+    if (Number(a.progress) !== p) { a.progress = p; moved = true; }
+  }
+  return moved;
+}
+function armyNeedsEvent() {
+  if (!MARCH_ON || !save) return false;
+  const list = save.armies;
+  if (!Array.isArray(list) || !list.length) return false;
+  for (const a of list) if (Number(a.progress) >= 1) return true;
+  for (let i = 0; i < list.length; i += 1) {
+    for (let j = i + 1; j < list.length; j += 1) {
+      if (armiesIntercept(list[i], list[j])) return true;
+    }
+  }
+  return false;
+}
+function monthTick() {
+  // 跨月一次：走原本的「推進一月」流水線（advanceMonth(1)），但兵團已按 tick 逐幀推進，不再每月跳一次。
+  if (!save) return false;
+  advanceMonth(1, { clock: true });
+  return Boolean(save && clockRunning());
+}
+function stepClock(n) {
+  if (!save) return;
+  const before = clockT;
+  clockT = Math.max(0, clockT - n);   // 0x41B6C1：T = max(0, T−1)
+  advanceArmiesTick(n);
+  if (clockPaused) return;
+  const monthBefore = Math.floor((CLOCK_TICKS_PER_YEAR - before) / CLOCK_TICKS_PER_MONTH);
+  const monthAfter = Math.floor((CLOCK_TICKS_PER_YEAR - clockT) / CLOCK_TICKS_PER_MONTH);
+  for (let m = monthBefore + 1; m <= monthAfter; m += 1) {
+    if (!monthTick()) return;
+  }
+  // 抵達城下／同路相撞：原作進戰鬥時停錶，這裡由 handleMarchEvents 開浮層或跳頁 ⇒ clockRunning() 變 false
+  if (armyNeedsEvent()) {
+    handleMarchEvents(false);
+    if (!clockRunning()) return;
+  }
+  clockVisualAcc += n;
+  if (clockVisualAcc >= 6) { clockVisualAcc = 0; refreshClockVisual(); }   // 10fps：頁頭月份/地圖兵團
+  if (clockT <= 0) enterInterior();   // 0x41B6C6：T==0 → 自動進內政
+}
+function enterInterior() {
+  if (!save || clockPaused) return;
+  clockPaused = true;
+  clockInterior = true;
+  clockAcc = 0;
+  clockLastMs = 0;
+  clockVisualAcc = 0;
+  clockT = 0;
+  // 年份 +1：原作進內政時把年號推進（0x4238C3）；12 次換月已把 month 推到次年正月，ensureYear 只同步 save.year
+  Saves.ensureYear(save);
+  try { if (storage) storage.setItem(CLOCK_STORE_KEY, JSON.stringify({ interior: 1, month: save.month })); } catch { /* ignore */ }
+  pushLog(`內 政 時 間 到 了：${save.month} 月 → ${Era.eraTextOfMonth(save.month)}（原作 T=0 → 內政，0x41B6C6）`, 'info');
+  showInteriorSheet();
+  render();
+  refreshClockText();
+}
+function showInteriorSheet() {
+  const owned = Array.isArray(save?.owned) ? save.owned : [];
+  const home = selected || owned[0] || '';
+  const era = save ? Era.eraTextOfMonth(save.month) : '';
+  $('intTtl').textContent = '內 政 時 間 到 了';
+  $('intSub').textContent = `${era} · 大地圖時間凍結（原作 T=0 → 內政場景）`;
+  $('intBody').innerHTML = [
+    '<div class="s">T 走到 0：原作在這一幀自動切入內政場景（0x41B6C6），大地圖停更、時間凍結；內政場景不再動 T。年份在進內政時 +1（0x4238C3）。</div>',
+    `<div class="s">一年 ${CLOCK_TICKS_PER_YEAR} tick ≈ 60 秒 · 一月 ${CLOCK_TICKS_PER_MONTH} tick ≈ 5 秒 · 一日 ${CLOCK_TICKS_PER_DAY} tick。</div>`,
+    '<div class="s" style="opacity:.8">按「內 政 終 了」＝原作 0x41BBF5：只把 T 重設 3600 回大地圖，<b>不跑任何月份模擬</b>。要進城處理內政可點「進 城 內 政」（回來仍停在內政浮層）。</div>',
+  ].join('');
+  const cityBtn = $('btnInteriorCity');
+  if (cityBtn) {
+    cityBtn.hidden = !home;
+    cityBtn.onclick = () => {
+      if (!home) return;
+      try { if (storage) storage.setItem(CLOCK_STORE_KEY, JSON.stringify({ interior: 1, month: save.month })); } catch { /* ignore */ }
+      location.href = './city.html?city=' + encodeURIComponent(home) + (UNLIMITED ? '&unlimited=1' : '');
+    };
+  }
+  openSheet('interiorSheet');
+}
+function refreshClockText() {
+  const el = $('clockNow');
+  if (!el) return;
+  if (clockInterior) { el.textContent = '內政 · 凍結'; return; }
+  if (!clockReady || !gameStarted) { el.textContent = 'T=' + clockT; return; }
+  el.textContent = 'T=' + clockT + (clockPaused ? ' · 暫停' : ' · 流動');
+}
+function refreshClockVisual() {
+  if (!save || !gameStarted) return;
+  $('ym').textContent = Era.eraTextOfMonth(save.month);
+  refreshClockText();
+  if ($('mapwrap').style.display !== 'none') drawMap();
+}
+function clockFrame(now) {
+  // 60Hz 固定步長（req：clockAcc += min(dt,0.25)，每 tick T−1）。停下時也持續排下一幀，恢復後不會卡住。
+  if (gameStarted && save && !clockReady) clockAttachToSave();   // 舊存檔直接續玩：第一幀對齊 T
+  if (clockT <= 0 && !clockPaused) enterInterior();              // 0x41B6C6：T==0 就先切內政
+  if (!clockRunning()) {
+    clockAcc = 0;
+    clockLastMs = 0;
+    requestAnimationFrame(clockFrame);
+    return;
+  }
+  if (!clockLastMs) clockLastMs = now;
+  const dt = Math.min(Math.max(0, now - clockLastMs) / 1000, 0.25);
+  clockLastMs = now;
+  clockAcc += Math.min(dt, 0.25);
+  let guard = 0;
+  while (clockAcc >= CLOCK_STEP && guard < 240) {
+    clockAcc -= CLOCK_STEP;
+    guard += 1;
+    stepClock(clockSpeed);
+    if (!clockRunning()) break;
+  }
+  requestAnimationFrame(clockFrame);
 }
 
 /**
@@ -2505,34 +2741,36 @@ function openGeneralSheetOf(name) {
 }
 
 /**
- * 內政終了（0x427FE0）：收束本年內政 → **結束窗口並跑完一整年**，明年 1 月再開窗口。
- * [F1/F2] 「內政終了」只在 1 月有效：一年只有一個內政窗口。逐將行動權記在
- * `save.acted`（每將每年一次），不隨窗口結束清零 —— 明年年序一變自然解鎖。
- *
- * [F4] 原作語義：內政點「結束內政」＝**進大地圖跑時間**（指南 L114-116「內政點"结束内政"
- * 就进来了」、L39-41 流程圖「每年 1 月→【內政模式】→【大地圖模式】跑一整年」），
- * 不是「鎖月令等玩家一個月一個月按」。差異清單行 57 指出本作缺的就是這一步：
- * 「『結束內政 → 跑一年』缺位：「內政終了」只鎖月令；推進時間的動作是「推進一月」」。
- * 所以這裡標完月令就 `advanceMonth(12)` —— 一次跑完 12 個月（正月 → 次年 1 月），
- * 行軍/AI/年結算全走 `advanceMonth` 既有流水線（batch 模式＝戰鬥就地結算、不跳守城頁）。
- * 只按一個月仍走「推進一月」與 `?adv=1`（單月調試路徑保留）。
+ * 內政終了（原作 0x427FE0「內政終了」→ 確認 → 0x41BBF5）：只把 T 重設 3600、回大地圖，
+ * **不跑任何月份模擬**。
+ * 原作語義（work/orig_time/REPORT.md §4）：大地圖時間是每幀 −1 的 T（一年 3600／一月 300／一日 10）；
+ * T==0 時自動切入內政場景並把 T 凍結；內政場景按「內政終了」只做 T=3600 + SetScene(大地圖)，
+ * 月份流水線（換月／年結算／年稅）只在 T 逐幀跨月時跑。
+ * 這裡的 gate 對齊 Cocos `doAction('advance')`：時間還在流動（T>0）時按它只提示、不改 T。
+ * 逐幀時鐘見本檔「時鐘」小節（clockFrame/stepClock/enterInterior）。
+ * 舊版「內政終了＝一次推進 12 個月」是對原作的誤讀，已刪。
  */
 function endMonth() {
-  if (!gameStarted) return notice('尚未開局：先選劇本開始新遊戲。');
-  // [F1] 非正月沒有內政窗口可收束（原作 1 月內政月；其餘 11 個月只流動時間）
-  if (Saves.monthOfYear(save.month) !== 1) {
-    notice('非正月：內政窗口只在每年 1 月開（原作 1 月內政月）。');
+  if (!gameStarted || !save) return notice('尚未開局：先選劇本開始新遊戲。');
+  // 原作按鈕只在內政場景出現；大地圖上（T>0、時間流動中）按它不該偷偷推時間
+  if (!clockPaused && !clockInterior) {
+    notice('時間正在流動：等內政時間到了（T=0）再處理內政。');
     return;
   }
-  if (CM.monthLocked(save, UNLIMITED)) {
-    notice(`${CM.LOCK_HINT}：本月已收束，推進一月才會開新令。`);
-    return;
-  }
-  CM.markMonthActed(save, UNLIMITED);
-  pushLog(`內 政 終 了：本年內政窗口收束（原作 0x427FE0 → 0x41BBF5）`, 'info');
-  pushLog(`大 地 圖：結束內政 → 跑完一年（${save.month} 月 → 次年 1 月，原作「結束內政就進大地圖跑時間」）`, 'info');
-  // [F4] 一次跑完一年；advanceMonth 末尾自己 autosave() + render()
-  advanceMonth(12);
+  clockPaused = false;
+  clockInterior = false;
+  clockT = CLOCK_TICKS_PER_YEAR;   // 0x41BBF5：只把 T 重設 3600，回大地圖
+  clockAcc = 0;
+  clockLastMs = 0;
+  clockVisualAcc = 0;
+  try { if (storage) storage.removeItem(CLOCK_STORE_KEY); } catch { /* ignore */ }
+  hideSheets();
+  confirmAction = null;
+  confirmCancel = null;
+  pushLog('內 政 終 了：時間開始流動（原作 0x41BBF5 只把 T 重設 3600，不跑月份模擬）', 'info');
+  notice('內 政 終 了：時間開始流動（一年 3600 tick ≈ 60 秒，一月 ≈ 5 秒）', 5000);
+  render();
+  refreshClockText();
 }
 
 /**
@@ -2665,6 +2903,10 @@ function startNewGame(idx, king) {
   selected = null;
   gameStarted = true;
   activeSlot = slotNo();
+  // 新局從正月開始：T 對齊 3600、時鐘直接流動（Cocos freshRun 先停在內政面板；web 大地圖是新局預設視圖，
+  // 差異見 work/webclock/REPORT.md）
+  try { if (storage) storage.removeItem(CLOCK_STORE_KEY); } catch { /* ignore */ }
+  clockAttachToSave();
   const snap = snapshotForSave();   // R70：新檔也直接落 60 城摘要 + 勢力表
   // 新开局也写自动存档槽：同样走 writeSlotAuto（它会更新 store.last）。
   Saves.writeSlotAuto(store, activeSlot - 1, snap, { scenarioName: scenario.name, ts: save.ts });
@@ -2761,6 +3003,7 @@ function render() {
   // 頂欄紀元：原作是「西元 209年 3月」（A_map_t0130.png 左上匾）。內部資料仍是 year/month
   // （save.month 是絕對月序），只把**顯示**換成 era.js 的一句話，換錨點也只改 era.js。
   $('ym').textContent = Era.eraTextOfMonth(save.month);
+  refreshClockText();   // 頁頭「時間 T=…」跟月份同一支 render 更新
   // [F16] 頂欄「金」＝**國庫 = Σ 我方每城 money**（原作金錢是城 +0x92，沒有勢力錢包）。
   // 以前讀 `save.gold`（單錢包），跟列表行的 `$3,941`（本城金）是同屏兩個數卻看不出區別。
   $('gold').textContent = CM.nationalGold(save, scenario?.cities || ALL).toLocaleString();
@@ -2816,15 +3059,21 @@ function render() {
         ? `目標 ${selected}${g ? ' · 主將 ' + g.name : ''}${MARCH_ON ? '' : ' · 直接野戰'}`
         : (d >= 99 ? '與我方領土不接壤' : `需 ${d} 段路，先打近的`))}</small></div>`);
   }
-  // R15：原作只有每年一次城池稅收（0x423824：每城 人口×75/10000 + 2250），沒有月度收入。
-  const nextMonth = Saves.num(save.month) + 1;
-  const yearIncome = save.owned.reduce((s, n) => {
-    const def = ALL.find((c) => c.NAME === n);
-    if (def && CM.isGate(def)) return s;
-    return s + CM.annualTax(save.cities[n]?.pop || 0);
-  }, 0);
-  acts.push(`<div class="btn full" data-act="advance"><span>推進一月</span><small>${
-    Saves.isYearStart(nextMonth) ? `正月歲入 +${yearIncome}` : '無月稅 · 正月收一年'}</small></div>`);
+  // 原作大地圖沒有「推進一月」指令：時間逐幀自動流動（T−1），T 到 0 才進內政（0x41B6C6）。
+  // 同一顆全寬鈕：內政窗口內＝「內 政 終 了」（0x41BBF5 只重設 T）；窗口外只顯示時間狀態、點擊提示。
+  if (clockPaused) {
+    acts.push('<div class="btn full primary" data-act="advance"><span>內 政 終 了</span><small>回大地圖：只把 T 重設 3600（原作 0x41BBF5）</small></div>');
+  } else {
+    // R15：原作只有每年一次城池稅收（0x423824：每城 人口×75/10000 + 2250），沒有月度收入。
+    const nextMonth = Saves.num(save.month) + 1;
+    const yearIncome = save.owned.reduce((s, n) => {
+      const def = ALL.find((c) => c.NAME === n);
+      if (def && CM.isGate(def)) return s;
+      return s + CM.annualTax(save.cities[n]?.pop || 0);
+    }, 0);
+    acts.push(`<div class="btn full" data-act="advance"><span>時間流動中</span><small>${
+      Saves.isYearStart(nextMonth) ? `下月正月歲入 +${yearIncome} · 自動流動` : '無月稅 · 正月收一年 · 自動流動'}</small></div>`);
+  }
   $('actions').innerHTML = acts.join('');
 
   $('hint').textContent = selected
@@ -3831,13 +4080,10 @@ $('actions').addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act;
   if (act === 'advance') {
-    if (!gameStarted) { advanceMonth(1); return; }
-    advanceMonth(1);
-    // 原作按下月推進會有一句「內政時間到了....」（A_map_monthprompt_t0183.png）。
-    // 字串只在 saves.js 有一份（Saves.advanceNotice），頁面不自己抄。
-    // 放在結算之後並蓋過「自動存到槽 N」那條我們自己加的提示：原作按下去看到的就是這句。
-    // 例外：結算彈了要決策的浮層（抵達城下 / 遭遇戰）就別彈，反正也會被 scrim 蓋住。
-    if ($('confirmSheet').hidden) notice(Saves.advanceNotice, 5000);
+    if (!gameStarted) return notice('尚未開局：先選劇本開始新遊戲。');
+    // 原作大地圖時間自動流動；這顆鈕在內政窗口內＝「內 政 終 了」（0x41BBF5），窗口外只提示。
+    if (!clockPaused) return notice('時間正在流動：等內政時間到了（T=0）再處理內政。');
+    endMonth();
     return;
   }
   // R8 一月一令：本月已下过令 → 開發/出征 拒绝（按钮已置灰，这里兜住键盘与旧 URL）
@@ -4000,6 +4246,8 @@ $('btnForces').addEventListener('click', () => { if (gameStarted) openForceSheet
 // R13 內政三命令：武將資料（全勢力名冊）／內政終了（收束本月令）
 $('btnGenerals').addEventListener('click', () => { if (gameStarted) { genOnly = null; openGeneralSheet(); } });
 $('btnEndMonth').addEventListener('click', () => { if (gameStarted) endMonth(); });
+// 內政浮層的「內 政 終 了」：原作內政場景唯一出口（0x41BBF5：只把 T 重設 3600）
+$('btnInteriorEnd').addEventListener('click', () => { if (gameStarted) endMonth(); });
 // R4 讓位
 $('btnAbdicate').addEventListener('click', () => { closeOverlays(); openThroneSheet(); });
 $('throneRows').addEventListener('click', (ev) => {
@@ -5389,8 +5637,9 @@ $('surAllRecruit').addEventListener('click', () => bulkSurrender('recruit'));
 $('surAllKill').addEventListener('click', () => bulkSurrender('kill'));
 $('surAllRelease').addEventListener('click', () => bulkSurrender('release'));
 
-function advanceMonth(n) {
+function advanceMonth(n, opts = {}) {
   if (!gameStarted) { notice('尚未開局：先選劇本開始新遊戲。'); return; }
+  const clockMode = opts && opts.clock === true;  // true＝逐幀時鐘跨月一次：兵團已按 tick 推進，不再整月跳一步
   const fast = qs.get('auto') === '1';            // ?auto=1：舊的直接結算快進（測試/批量）
   const batch = n > 1 || fast;                    // ?adv=N：批量推进，不跳转
   const force = qs.get('forceatk') === '1';
@@ -5489,9 +5738,12 @@ function advanceMonth(n) {
     for (const line of tailLogs) pushLog(line, 'info');
 
     if (marchMode) {
-      // 先讓已在路上的部隊走一個月；本月新出的兵從 0 起步，不參與本次推進
-      advanceArmies(save.armies);
-      marchSnapshot();
+      // 先讓已在路上的部隊走一個月；本月新出的兵從 0 起步，不參與本次推進。
+      // 逐幀時鐘（clockMode）例外：兵團已在每個 tick 按比例推進過 300 tick＝一個月，這裡不再整月跳一次。
+      if (!clockMode) {
+        advanceArmies(save.armies);
+        marchSnapshot();
+      }
       // R73：每勢力每月一遍四段規劃 → ArgMax(哨兵 800) → 執行（原作 0x40D751）
       const ai = runAiMonth(force);
       if (AI_DBG) aiDebug(ai.lines);
@@ -5524,6 +5776,9 @@ function advanceMonth(n) {
     location.href = defendUrl(atk);
     return;
   }
+  // 手動推月（?adv=N / ?auto=1 / __r7.advance / __armyUi.adv）不經過逐幀時鐘：把 T 對齊到存檔月份，
+  // 避免 debug 快進後頁頭時鐘與月份脫節。逐幀時鐘自己走 T，不需要這一步。
+  if (!clockMode) syncClockTFromMonth();
   autosave();   // 任務 ③：每次推進一月（含批量）自動存到最近使用的槽
   render();
 }
@@ -6068,6 +6323,41 @@ if (SUR_PROBE
     console.warn('[boot] settleBattleReturn 失敗（地圖仍可用）', e);
   }
 }
+
+// ---------------------------------------------------------------- 時鐘啟動（放最後：所有 let/const 都已初始化，避開 TDZ）
+// 原作大地圖逐幀 T−1（沒有 timer/VSync）；這裡用 requestAnimationFrame ＋ 60Hz 固定步長換穩定性。
+requestAnimationFrame(clockFrame);
+// CDP/驗收用探針（與 __r7/__v1 同風格；只讀 + 調試快進，不影響玩法）
+window.__clock = {
+  state: () => ({
+    t: clockT,
+    acc: Number(clockAcc.toFixed(4)),
+    paused: clockPaused,
+    interior: clockInterior,
+    running: clockRunning(),
+    overlayDepth,
+    month: save ? save.month : null,
+    year: save ? save.year : null,
+    ym: $('ym') ? $('ym').textContent : '',
+  }),
+  tick: (n = 1) => {
+    const k = Math.max(1, Math.trunc(Number(n) || 1));
+    for (let i = 0; i < k; i += 1) {
+      if (!clockRunning()) break;
+      stepClock(clockSpeed);
+    }
+    return window.__clock.state();
+  },
+  reset: () => {
+    clockSyncFromSave();
+    clockAcc = 0;
+    clockPaused = false;
+    clockInterior = false;
+    hideSheets();
+    render();
+    return window.__clock.state();
+  },
+};
 </script>
 </body>
 </html>
