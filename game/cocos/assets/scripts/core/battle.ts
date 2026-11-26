@@ -2324,6 +2324,8 @@ function yieldFriend(world: World, other: Unit, mover: Unit, occ: Occ): boolean 
   if (first >= 0) order.push(STEP_DIRS[first]!);
   for (const d of STEP_DIRS) if (!order.includes(d)) order.push(d);
   for (const d of order) {
+    // 主将让位也不许换兵道：只沿 x 前后挪，横向让位会把两将错开、永远对不上
+    if (other.isGeneral && d[1] !== 0) continue;
     const tx = oc.gx + d[0];
     const ty = oc.gy + d[1];
     if (!inGrid(tx, ty)) continue;
@@ -2331,9 +2333,10 @@ function yieldFriend(world: World, other: Unit, mover: Unit, occ: Occ): boolean 
     commitStep(other, { gx: tx, gy: ty }, occ, world.rng);
     return true;
   }
-  // 兵尽单挑：整排都被自己人堵死、没有空格可让时，让友军与主将互换位置。
+  // 兵尽主将索敌：整排都被自己人堵死、没有空格可让时，让友军与主将互换位置。
   // 否则主将永远挤不出自家方阵（R216 实测白等 9170 tick 到 198s 判平手）。
-  if (mover.isGeneral && world.sides[mover.side === 'A' ? 'B' : 'A'].aliveCount === 0) {
+  // 平时也让主将能换位：原作主将是一路压到阵前的，不能因为前排站满就钉在后阵。
+  if (mover.isGeneral) {
     commitStep(other, mc, occ, world.rng);
     return true;
   }
@@ -2436,6 +2439,8 @@ function passBlocked(
 function pullInStep(world: World, u: Unit, occ: Occ, kind?: StepPlanKind): { gx: number; gy: number } | null {
   if (world.blockPass === false) return null;
   if (u.flee) return null;
+  // 主将不换兵道（原作 `0x43D76C` 只打 x+dir、y 不变），所以「斜前插进邻道」对它禁用
+  if (u.isGeneral) return null;
   if (attackRangeOf(u) > 1) return null;
   // 全軍突擊（`kind === 'rush'` 或 `world.rush[side]`）不做「插队贴打」：突擊是**玩家按下
   // 冲锋**的命令，那一步横移会多抽 2 次 `commitStep` 抖动（RNG 流位移），把 `tests/weather.test.ts`
@@ -2529,9 +2534,10 @@ export function generalStepPlan(world: World, u: Unit): StepPlan | null {
   // 决策，等于给全场随机流插了一路新消耗 —— 那些"同一 seed 两世界对比"的确定性测试
   // （cast_autoaim / magic_frame / 606 等）会整体位移。主将就直线压上去，不抽随机。
   const dx = Math.sign(t.gx - c.gx);
-  const dy = dx === 0 ? Math.sign(t.gy - c.gy) : 0;
-  if (dx === 0 && dy === 0) return null;
-  return planDirected(dx, dy, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
+  // 原作主将**不换兵道**（`0x43D76C` 只取 `x+dir`、y 不变）：只沿本车道推进，
+  // 追不上另一条车道上的敌人就等自家士兵把那条道打穿。
+  if (dx === 0) return null;
+  return planDirected(dx, 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
 }
 
 /** 突擊目标缓存（原作 `army+0x38F4` 的敌 unit 指针 + 索引） */

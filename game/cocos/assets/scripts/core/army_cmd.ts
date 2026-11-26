@@ -49,6 +49,7 @@
 import {
   allRush,
   GRID_H,
+  nearestEnemy,
   planDirected,
   requestRetreat,
   retreatStepPlan,
@@ -814,30 +815,56 @@ export function cmdStepPlan(world: World, side: Side, u: Unit, cmd: number): Ste
 }
 
 /**
- * 兵尽后的主将单挑（R216 补丁）。
+ * 本车道是否还有活着的敌人（原作「本兵道没兵」的判定口径）。
+ */
+function laneHasEnemy(world: World, u: Unit): boolean {
+  const gy = unitCell(u).gy;
+  for (const v of world.units) {
+    if (!v.alive || v.side === u.side) continue;
+    if (unitCell(v).gy === gy) return true;
+  }
+  return false;
+}
+
+/**
+ * 本车道已无敌人：士兵跨道寻敌。
+ *
+ * 原作小队走位器 `0x43C888` 可以朝任意格走（`0x43C4C0` 的 8 组格偏移不锁 y），
+ * 所以「这一道打空了就挪到有敌人的道」是允许的；主将不走这条路（`0x43D76C`
+ * 只打 `x+dir`、y 不变）。撤退态（`0x4000`）也不追敌，免得把撤退令走成反冲锋。
+ */
+function seekAcrossLanes(world: World, u: Unit): StepPlan | null {
+  if (u.isGeneral) return null;
+  if (((u.status ?? 0) & 0x4000) !== 0) return null;
+  if (laneHasEnemy(world, u)) return null;
+  const foe = nearestEnemy(world, u);
+  if (!foe) return null;
+  const c = unitCell(u);
+  const t = unitCell(foe);
+  const dx = Math.sign(t.gx - c.gx);
+  const dy = Math.sign(t.gy - c.gy);
+  if (dx === 0 && dy === 0) return null;
+  return planDirected(dx, dy, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
+}
+
+/**
+ * 兵尽后的主将索敌（R216 补丁）。
  *
  * R216 起「士兵清零」不再结束战斗（`checkOver()` 只剩主将阵亡/撤退/时限三条出口），
  * 但 `adjacentEnemy()` 只扫**同一车道**：两将兵尽后各自按旧令走位，永远不会进
  * 对方的扫描行 —— 实测白等 9170 tick（153s）到 198s 判平手。这里让主将主动索敌：
- * 朝敌将斜向逼近；同排相邻时站住交给 `adjacentEnemy()`，正好同排但错开车道时
- * 按本方推进方向侧移一格，避免撞进敌将所在格。
+ * **只在本车道内沿 x 逼近**（原作 `0x43D76C` 取 `u->+0x08 + dir`、y 不变），
+ * 相邻（距离 1）由 `adjacentEnemy()` 接战，距离 2 也能打敌将。
  */
 function closingStepPlan(world: World, u: Unit): StepPlan | null {
   const foe = world.units.find((v) => v.alive && v.isGeneral && v.side !== u.side);
   if (!foe) return null;
   const c = unitCell(u);
   const t = unitCell(foe);
-  const dx = t.gx - c.gx;
-  const dy = t.gy - c.gy;
-  if (dx === 0 && dy === 0) return null;
-  // 同一排且已相邻：站住打（`rowEnemyAt` 能扫到）
-  if (dy === 0 && Math.abs(dx) <= 1) return null;
-  if (dy !== 0) {
-    // 先并道：纵深朝敌将；正好同排时按本方推进方向侧移一格，避免撞进敌将所在格
-    const sx = dx !== 0 ? Math.sign(dx) : u.side === 'A' ? -1 : 1;
-    return planDirected(sx, Math.sign(dy), STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
-  }
-  return planDirected(Math.sign(dx), 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
+  if (t.gy !== c.gy) return null; // 武将不换道
+  const dx = Math.sign(t.gx - c.gx);
+  if (dx === 0) return null;
+  return planDirected(dx, 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
 }
 
 /**
@@ -847,9 +874,12 @@ function closingStepPlan(world: World, u: Unit): StepPlan | null {
  * （原作 8 个槽全 0、`0x43CF07[0]` 的 `0x48E6A0` 权重全 0，见 project/173 Q1）；
  * 一旦下过指令，命令字就是唯一来源 —— 没被 `targets` 覆盖的部队保持旧值（缺省 0）。
  */
-export function armyStepPlan(world: World, u: Unit): StepPlan | null {
+function armyStepPlanRaw(world: World, u: Unit): StepPlan | null {
   if (!world || world.over) return null;
   if (!world.units.includes(u)) return null;
+  // 本车道打空：士兵挪到有敌人的车道（主将不走这条）
+  const seek = seekAcrossLanes(world, u);
+  if (seek) return seek;
   // R216 起兵尽不结束：对面没兵了就由主将互相索敌，避免走位到时限平手
   if (u.isGeneral && world.sides[u.side === 'A' ? 'B' : 'A'].aliveCount === 0) {
     return closingStepPlan(world, u);
@@ -862,6 +892,18 @@ export function armyStepPlan(world: World, u: Unit): StepPlan | null {
   const slot = slotForUnit(st, targetBitsOf(world, u.side, u));
   const cmd = slot > 0 ? (st.cmds[slot] ?? CMD_HOLD) : CMD_HOLD;
   return cmdStepPlan(world, u.side, u, cmd);
+}
+
+/**
+ * 主将**不换兵道**：原作 `0x43D76C` 取 `t = 0x43AF7A(u->+0x08 + dir, u->+0x0c)`，
+ * 只改 x、y 不变；所以命令层算出来的任何侧移分量都要清掉。
+ * 纯侧移（sx==0）就原地不动，等敌人自己走到本车道。
+ */
+export function armyStepPlan(world: World, u: Unit): StepPlan | null {
+  const plan = armyStepPlanRaw(world, u);
+  if (!u.isGeneral || !plan || plan.sy === 0) return plan;
+  if (plan.sx === 0) return null;
+  return { ...plan, sy: 0 };
 }
 
 /**

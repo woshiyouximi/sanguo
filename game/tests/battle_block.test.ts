@@ -115,7 +115,7 @@ describe('R190 不许穿阵：目标格有敌（原作 `0x43B467`/`0x43C20D` 本
 });
 
 describe('R190 不许穿阵：贴侧 / 夹缝 / 斜穿（`[新设计]`，原作无此规则）', () => {
-  it('夹缝：正前方一格两侧都是敌人 ⇒ 主将不许挤进去（改为贴上去打）', () => {
+  it('夹缝：正前方一格两侧都是敌人 ⇒ 主将不挤进去，也不换道（原作主将锁本道）', () => {
     const w = mkWorld(7);
     const me = place(unitOf(w, 'A', true), 50, 6);
     const foeG = unitOf(w, 'B', true);
@@ -125,7 +125,9 @@ describe('R190 不许穿阵：贴侧 / 夹缝 / 斜穿（`[新设计]`，原作�
     driveOnly(w, me, straightAt(-1, 0));
     step(w);
     assert.notDeepEqual(unitCell(me), { gx: 49, gy: 6 }, '不许走进 (49,6) 那条缝');
-    assert.deepEqual(unitCell(me), { gx: 50, gy: 5 }, 'v3：插进敌兵那条车道，下一手同排打得到');
+    // R216：原作主将攻击只取 (x+dir, y)（`0x43D76C`），换道会永远对不上敌将；
+    // 所以夹缝时主将停在原地等正面，不再「插进敌兵那条车道」。
+    assert.deepEqual(unitCell(me), { gx: 50, gy: 6 }, '主将锁本道，原地等正面');
     assert.deepEqual(unitCell(foeG), { gx: 49, gy: 7 }, '敌将原地');
     assert.deepEqual(unitCell(foeS), { gx: 49, gy: 5 }, '敌兵原地');
   });
