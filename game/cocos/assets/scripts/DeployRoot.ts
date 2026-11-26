@@ -289,6 +289,8 @@ export class DeployRoot extends Component {
   private labelSoldier: Label | null = null;
   private labelHint: Label | null = null;
   private genLabels: Label[] = [];
+  /** 候選卡右上角的勾選框（✓ = 已隨軍） */
+  private pickLabels: Label[] = [];
   private troopLabels: Label[] = [];
   private troopLockLabels: Label[] = [];
   private formLabels: Label[] = [];
@@ -423,6 +425,8 @@ export class DeployRoot extends Component {
 
     for (let i = 0; i < 12; i += 1) {
       this.genLabels.push(this.makeLabel('', 0, 0, GEN_W, 16, COLORS.textDim, 'center'));
+      // 勾選框的 ✓（14px 格；drawGenGrid() 裡按 queue 成員設字/色）
+      this.pickLabels.push(this.makeLabel('', 0, 0, 14, 13, COLORS.bgDeep, 'center'));
       // F-07：卡片右上角「前/中/後」角標（12px，右對齊；drawGenGrid() 裡按 colOf() 換字）
       this.genColLabels.push(this.makeLabel('', 0, 0, 30, 12, COLORS.textFaint, 'right'));
       const thumb = new ArtSprite(this.node, `GenThumb_${i}`, { x: 0, y: 0, w: 34, h: GEN_H - 4 }, 'contain');
@@ -1279,8 +1283,17 @@ export class DeployRoot extends Component {
       // w7-cocos-render2：格內四邊暗角 + 底緣一道黑線，讓金屬片有厚度
       this.paintBands(g, edgeBands({ x, y, w: GEN_W, h: GEN_H }, '#000000', 70, 5, 2));
       this.paintBands(g, topSheen(x + 2, y + GEN_H - 2, GEN_W - 4, '#000000', 80));
-      // 已勾選隨軍：右側金條（左側被縮略立繪蓋住）；主將（第 1 槽）金框更亮
-      if (inQueue) this.fillRect(g, x + GEN_W - 6, y, 6, GEN_H, COLORS.gold, selected ? 255 : 160);
+      // 已勾選隨軍：右上角勾選框（原作勾選框口徑），主將（第 1 槽）金框更亮
+      const boxX = x + GEN_W - 17;
+      const boxY = y + 3;
+      this.fillRect(g, boxX, boxY, 14, 14, inQueue ? COLORS.gold : '#12161B', inQueue ? 235 : 180);
+      this.strokeRect(g, boxX, boxY, 14, 14, inQueue ? COLORS.goldLight : COLORS.line, 1);
+      const pickLabel = this.pickLabels[index];
+      if (pickLabel) {
+        pickLabel.string = inQueue ? '✓' : '';
+        pickLabel.color = rgba(COLORS.bgDeep);
+        pickLabel.node.setPosition(boxX + 7 - HALF_W, HALF_H - (boxY + 7), 0);
+      }
       this.strokeRect(g, x, y, GEN_W, GEN_H, selected ? COLORS.gold : inQueue ? COLORS.goldDim : COLORS.line, selected ? 2 : 1);
       const label = this.genLabels[index];
       if (label) {
@@ -1296,7 +1309,7 @@ export class DeployRoot extends Component {
         const col = this.colOf(gen.NAME);
         colLabel.string = COL_LABEL[col];
         colLabel.color = rgba(col === 'mid' ? COLORS.textFaint : COLORS.goldLight);
-        colLabel.node.setPosition(x + GEN_W - 16 - HALF_W, HALF_H - (y + 9), 0);
+        colLabel.node.setPosition(x + GEN_W - 34 - HALF_W, HALF_H - (y + 9), 0);
       }
       const thumb = this.genThumbs[index];
       if (thumb) {
