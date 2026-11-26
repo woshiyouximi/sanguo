@@ -43,7 +43,7 @@ import { WEATHER_NAME } from './core/weather';
 import type { Weather } from './core/weather';
 import { loadGameData } from './DataLoader';
 import { GeneralMarkers } from './GeneralMarkers';
-import { consumeBattleLaunch, loadSave, persistSave, recordBattleResult } from './GameState';
+import { consumeBattleLaunch, loadSave, markGeneralGone, persistSave, recordBattleResult } from './GameState';
 import type { BattleLaunch, DuelCarry } from './GameState';
 import { queuePostBattle } from './SurrenderModel';
 import {
@@ -347,6 +347,28 @@ export class BattleRoot extends Component {
         // 这里按结构互转（SurrenderModel 只读写 captured/executed 两个数组，见 boxOf）。
         queuePostBattle(loadSave() as unknown as Parameters<typeof queuePostBattle>[0], this.settlement.post);
         persistSave();
+        // [R242] 我方战后生死必须落库：旧码只把「败方被俘候选」塞进队列，阵亡的人（alive===false）
+        // 在 `resolvePostBattle()` 里直接 continue，于是君主战死也不写状态、名册永远「在職」、
+        // 失败判定永远不触发（制作人：「这样的话我岂不永远不会触发失败？」）。
+        try {
+          const aSide = this.world.sides.A;
+          const dead: string[] = [];
+          if (aSide.general && aSide.general.alive === false) dead.push(String(aSide.general.name ?? ''));
+          for (const off of aSide.officers ?? []) {
+            const officer = off as { name?: string; alive?: boolean } | undefined;
+            if (officer && officer.alive === false) dead.push(String(officer.name ?? ''));
+          }
+          if (dead.length > 0) markGeneralGone(dead, '死');
+          const post = this.settlement.post;
+          if (this.settlement.winner === 'B' && post) {
+            const captured = (post.captures ?? []).map((c) => String((c as { name?: string } | undefined)?.name ?? ''));
+            if (captured.length > 0) markGeneralGone(captured, '俘');
+            const executed = (post.executed ?? []).map((n) => String(n ?? ''));
+            if (executed.length > 0) markGeneralGone(executed, '死');
+          }
+        } catch {
+          /* 存檔壞掉不該讓戰鬥結算崩掉 */
+        }
       }
       // 结算相：技能格/突擊/撤退不再有战斗语义，触摸只剩「續戰 / 回大地图」
       this.input.setSettled(true);

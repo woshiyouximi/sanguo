@@ -5207,6 +5207,12 @@ export class CampaignRoot extends Component {
     const view = this.syncMonarchState();
     const monarch = M.monarchOf(view);
     if (!monarch) return '';
+    // [R242] 君主战死/被俘：战斗结算时已写 `generalStatus`（见 `BattleRoot`），这里直接采信。
+    // 旧码只从「君主不在任何城的太守位」推断死亡，君主在战场上死了也照样当他还活着 → 永不失败。
+    const fate = (save.generalStatus && typeof save.generalStatus === 'object'
+      ? (save.generalStatus as Record<string, unknown>)[monarch]
+      : '') as unknown;
+    if (String(fate ?? '').trim() === '死' || String(fate ?? '').trim() === '俘') return monarch;
     const owned = save.owned;
     const seat = this.monarchSeat;
     if (seat && owned.indexOf(seat) >= 0) return '';

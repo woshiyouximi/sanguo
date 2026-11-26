@@ -145,6 +145,8 @@ export interface Item {
  * 加上索引签名是为了让 JS 侧多出来的键不至于让类型守卫炸掉。
  */
 export interface CampaignSave {
+  /** [R242] 戰後生死/俘虜：名冊狀態權威（'死' / '俘'），由 `markGeneralGone()` 寫入 */
+  generalStatus?: Record<string, string>;
   gold?: number;
   /** 已占领城池名 */
   owned?: string[];

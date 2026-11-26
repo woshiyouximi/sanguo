@@ -108,6 +108,10 @@ export interface GeneralRecordRow {
 }
 
 export interface CampaignSave {
+  /** [R242] 戰後生死/俘虜：名冊狀態權威（'死' / '俘'），由 `markGeneralGone()` 寫入 */
+  generalStatus?: Record<string, string>;
+  /** 城名 → 在城武將名（`_moved` 另存調動落點）；[R241] 兵團落城要靠它把將放回去 */
+  roster?: Record<string, unknown>;
   owned: string[];
   wins: number;
   losses: number;
@@ -1416,6 +1420,41 @@ export function updateArmy(id: string, patch: Partial<CampaignArmy>): boolean {
  * 呼叫端要先用 `ArmyLayer.armyCanEnterCity()` 判斷「在城上 + 是我方城」——
  * 這裏只做事實檢查（部隊存在、真的在城上、那座城有狀態）。
  */
+/**
+ * [R241] 兵團落城：把主將/隨軍武將還原回 `save.roster[城]`。
+ *
+ * `enterCityWithArmy()` / `occupyCity()` / 戰後清理只搬兵、不搬人，而面板（出征候選、名冊、
+ * 搜索執行人）的唯一來源是 `save.roster` —— 於是「出征到城下→點返回沒打」的將從名冊消失，
+ * 永遠不再出現在出征列表（製作人實機回報）。派兵時 `march()` 已把他們從名冊摘掉，
+ * 所以兵團落城/回城時必須補回去；同時清掉 `_moved` 的調動印記，否則原城仍不列他。
+ */
+function absorbArmyPeople(bag: unknown, army: CampaignArmy, city: string): void {
+  if (!city || !army) return;
+  const save = bag as unknown as { roster?: Record<string, unknown> };
+  const names: string[] = [];
+  if (army.general) names.push(String(army.general));
+  for (const name of army.officers ?? []) {
+    const n = String(name ?? '');
+    if (n && names.indexOf(n) < 0) names.push(n);
+  }
+  if (names.length === 0) return;
+  if (!save.roster || typeof save.roster !== 'object') save.roster = {};
+  const roster = save.roster as Record<string, unknown>;
+  for (const key of Object.keys(roster)) {
+    if (key === '_moved') continue;
+    const list = roster[key];
+    if (!Array.isArray(list)) continue;
+    roster[key] = list.filter((n) => typeof n !== 'string' || names.indexOf(n) < 0);
+  }
+  const cur = Array.isArray(roster[city]) ? (roster[city] as string[]).slice() : [];
+  for (const name of names) if (cur.indexOf(name) < 0) cur.push(name);
+  roster[city] = cur;
+  const moved = roster._moved as Record<string, unknown> | undefined;
+  if (moved && typeof moved === 'object') {
+    for (const name of names) delete moved[name];
+  }
+}
+
 export function enterCityWithArmy(
   id: string,
   cap = CITY_TROOP_CAP,
@@ -1428,6 +1467,8 @@ export function enterCityWithArmy(
   if (!city || !state) return { ok: false };
   const add = Math.max(0, Math.floor(numberOr(army.troops, 0)));
   state.troops = Math.min(Math.max(0, cap), Math.max(0, Math.floor(numberOr(state.troops, 0))) + add);
+  // [R241] 人跟著兵一起落城，否則這批將從名冊消失、再也不出現在出征列表
+  absorbArmyPeople(save, army, city);
   save.armies = save.armies.filter((row) => row.id !== id);
   persistSave();
   return { ok: true, city, troops: state.troops };
@@ -1474,7 +1515,16 @@ export function recordBattleResult(
     // 守城戰輸了要丟城；野戰輸了不掉城（與 web 一致：web 只在 defend 失敗時移除 owned）
     save.owned = save.owned.filter((name) => name !== city);
   }
-  if (armyId) save.armies = save.armies.filter((army) => army.id !== armyId);
+  if (armyId) {
+    const fought = save.armies.find((army) => army.id === armyId);
+    save.armies = save.armies.filter((army) => army.id !== armyId);
+    // [R241] 戰後同樣要把將放回城：贏了進佔下的城，輸了退回出發城（還在手上時）。
+    // 舊碼只清兵團，於是「打輸一仗」= 這批將從名冊人間蒸發（製作人：「戰鬥失敗也是如此」）。
+    if (fought) {
+      const home = won ? city : save.owned.includes(fought.from) ? fought.from : '';
+      if (home) absorbArmyPeople(save, fought, home);
+    }
+  }
   persistSave();
 }
 
@@ -1495,6 +1545,8 @@ export function occupyCity(city: string, armyId?: string | null, cap = CITY_TROO
       const army = save.armies.find((row) => row.id === armyId);
       if (army) {
         state.troops = Math.min(Math.max(0, cap), Math.max(0, Math.floor(numberOr(state.troops, 0))) + Math.max(0, Math.floor(numberOr(army.troops, 0))));
+        // [R241] 佔空城一樣要把將還原進名冊（否則佔完城，這批人從出征列表消失）
+        absorbArmyPeople(save, army, city);
         save.armies = save.armies.filter((row) => row.id !== armyId);
       }
     }
@@ -1504,6 +1556,48 @@ export function occupyCity(city: string, armyId?: string | null, cap = CITY_TROO
   }
   persistSave();
   return { ok: true, troops };
+}
+
+/**
+ * [R242] 戰後生死落庫：`generalStatus[名]` 寫 '死' / '俘'，並從所有城的 `roster` 摘掉。
+ *
+ * 為什麼要兩件事一起做：`generalStatus` 是名冊狀態的權威（`GeneralBook` 優先讀它），
+ * 但「還能不能派出/搜索」看的是 `save.roster`。舊碼兩份都沒寫 —— 於是阵亡/被俘的人
+ * 既不在任何城的守将表里消失、又能被派出去搜索，君主战死也永远不触发灭国
+ * （`CampaignRoot.detectMonarchDeath()` 只从「君主不在任何城的太守位」推断死亡）。
+ */
+export function markGeneralGone(names: readonly string[], status: '死' | '俘'): void {
+  const save = loadSave();
+  const list = (Array.isArray(names) ? names : []).map((n) => String(n ?? '').trim()).filter((n) => !!n);
+  if (list.length === 0) return;
+  if (!save.generalStatus || typeof save.generalStatus !== 'object') save.generalStatus = {} as never;
+  const fate = save.generalStatus as Record<string, string>;
+  for (const name of list) fate[name] = status;
+  const roster = (save.roster && typeof save.roster === 'object' ? save.roster : null) as Record<string, unknown> | null;
+  if (roster) {
+    for (const key of Object.keys(roster)) {
+      if (key === '_moved') continue;
+      const row = roster[key];
+      if (!Array.isArray(row)) continue;
+      roster[key] = row.filter((n) => typeof n !== 'string' || list.indexOf(n) < 0);
+    }
+    const moved = roster._moved as Record<string, unknown> | undefined;
+    if (moved && typeof moved === 'object') for (const name of list) delete moved[name];
+  }
+  persistSave();
+}
+
+/** [R242] 單將狀態寫入（'死' / '俘' / '' 清除），供名冊狀態與失敗判定共用 */
+export function setGeneralStatus(name: string, status: string): void {
+  const save = loadSave();
+  const n = String(name ?? '').trim();
+  if (!n) return;
+  if (!save.generalStatus || typeof save.generalStatus !== 'object') save.generalStatus = {} as never;
+  const fate = save.generalStatus as Record<string, string>;
+  const token = String(status ?? '').trim();
+  if (token) fate[n] = token;
+  else delete fate[n];
+  persistSave();
 }
 
 /** 调试/测试用：清掉内存缓存（不会删除 sys.localStorage 的存档）。 */
