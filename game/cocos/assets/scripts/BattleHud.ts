@@ -187,8 +187,9 @@ export const HUD_UI_DIR = 'ui/battle';
 
 export type HudTex = 'slot' | 'slot_off' | 'cmd_on' | 'cmd_off' | 'port' | 'msg' | 'sep';
 
-/** 开场叫阵台词框：与 web `battleView.ts` 的 `TAUNT_BANNER` 同几何（设计坐标，左上角起） */
-export const TAUNT_BANNER = { x: 40, y: 790, w: 670, h: 138 };
+/** 开场叫阵台词框：几何照 web `battleView.ts`，但全图版把镜头拉远后上移到无人区，
+ *  免得盖住我方主将的头像牌（设计坐标，左上角起） */
+export const TAUNT_BANNER = { x: 40, y: 640, w: 670, h: 138 };
 
 /**
  * 每张图的九宫内缩（= 原图边框宽度，见 `work\battleui\_make.py`）。

@@ -121,7 +121,7 @@ test('R33 邊界：qi_regen / qi_cost / exp_bonus 仍是乘算，沒有被一起
     const w = createWorld({ data, seed: 9, a: { general: { str: 80, int: 80 } }, b: {} });
     w.over = true;
     w.winner = 'A';
-    w.endReason = 'troops';
+    w.endReason = 'retreat';
     return w;
   };
   const plain = settle(mk()).expGain;

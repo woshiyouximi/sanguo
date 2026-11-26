@@ -20,6 +20,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadData } from '../src/data.ts';
 import {
+  BATTLE_TICK_LIMIT,
   cast,
   createWorld,
   mpCapOf,
@@ -315,8 +316,10 @@ test('问题 3 裁决：mpCapOf 与原作公式一致（神鬼亂舞 MP47 是门
 test('R84 settle 的 kills 含法术击杀，spellKills 是同侧法术击杀子集', () => {
   const w = makeWorld({ aSoldiers: 6, bSoldiers: 6, aLevel: 2, bLevel: 2 });
   w.aiSides = { A: false, B: true }; // 让 B 侧 AI 放技，制造法术击杀的可能
-  for (let i = 0; i < 30 * 300 && !w.over; i++) step(w);
-  assert.equal(w.over, true, '300 秒内该打完');
+  // R159：兵尽不结束，最坏情况要跑到 11880 tick 的硬时限平手；
+  // 这里只关心 kills/spellKills 的统计口径，跑满时限保证一定 over。
+  for (let i = 0; i < BATTLE_TICK_LIMIT + 2 && !w.over; i++) step(w);
+  assert.equal(w.over, true, '到硬时限前必须结束（主将阵亡或到点平手）');
   const out = settle(w);
   assert.equal(out.kills, out.killsInf + out.killsCav, '总击杀 = 步/骑 分类击杀之和');
   assert.equal(out.spellKills, w.stats.spellKillsA);

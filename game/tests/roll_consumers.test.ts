@@ -15,7 +15,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadData } from '../src/data.ts';
-import { createWorld, mulberry32, settle, step, TICK_HZ } from '../src/core/battle.ts';
+import { createWorld, mulberry32, settle, step, BATTLE_TICK_LIMIT } from '../src/core/battle.ts';
 import type { World } from '../src/core/battle.ts';
 import { canRecruit, resolvePostBattle, rollDrop } from '../src/core/capture.ts';
 import type { PostBattleState, PostBattleWorld } from '../src/core/capture.ts';
@@ -40,7 +40,7 @@ const noRng = (): number => {
 function mkWorld(over: { name?: string } = {}): PostBattleWorld {
   return {
     winner: 'A',
-    endReason: 'troops',
+    endReason: 'retreat',
     sides: {
       A: {
         start: 100,
@@ -359,11 +359,22 @@ function settleWithRoll(rollSeed: number): { post: ReturnType<typeof settle>['po
       seed: 7,
       roll: sangoRng(rollSeed),
       a: { troop: 4, formation: 0 },
-      b: { troop: 12, formation: 1 },
+      b: {
+        troop: 12,
+        formation: 1,
+        // R159：胜负改成主将生死后，败方主将多半是「阵亡」→ 不进退废名单；
+        // 这里带 3 名副将，保证处置名单非空、且 roll 在招降/斩首上有分叉空间。
+        officers: [
+          { name: '張寶', str: 60, int: 70, level: 4, loyal: 30, constancy: 2 },
+          { name: '張梁', str: 55, int: 60, level: 3, loyal: 30, constancy: 2 },
+          { name: '張飛', str: 88, int: 40, level: 2, loyal: 30, constancy: 2 },
+        ],
+      },
     }),
   );
   let n = 0;
-  while (!world.over && n < 180 * TICK_HZ) {
+  // 主将阵亡会提前结束；最坏情况（双方兵尽）跑到 11880 tick 的硬时限平手。
+  while (!world.over && n < BATTLE_TICK_LIMIT + 2) {
     step(world);
     n += 1;
   }

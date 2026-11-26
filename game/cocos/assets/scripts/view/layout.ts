@@ -5,7 +5,7 @@
  *   HUD 100px（y 0..100） / 战场 900px（y 100..1000） / 控制台 334px（y 1000..1334）
  *
  * 投影口径（R215 起）：**全图战场**。整幅 71 行 × 14 车道一次画进 750×900，
- * 不再有跟随镜头。core 的逻辑坐标一个不改，只把 `worldX` 压进带内 848px：
+ * 不再有跟随镜头 —— 相当于把旧版的镜头拉到最远。core 的逻辑坐标一个不改：
  *
  *   sy = MAP_TOP + (worldX + 0.5) * MAP_ROW_PX   // 行距 ≈ 11.94px
  *   sx = (worldY + 0.5) * LANE_PX                // 车道 53.57px，14 条铺满 750
@@ -36,7 +36,7 @@ export const FIELD_CENTER_Y = FIELD_TOP + FIELD_H / 2;
 export const SAFE_INSET = { top: 88, bottom: 88, left: 0, right: 0 };
 
 /**
- * 全图战场的上下留白：主将标记半径 26px + 名字/行动条，必须完整落在带内。
+ * 全图战场的上下留白：主将头像牌半径 38px + 名字，必须完整落在带内。
  * 71 行铺进 `FIELD_H - 2 * MAP_PAD` 后，每行 11.94px。
  */
 export const MAP_PAD = 26;

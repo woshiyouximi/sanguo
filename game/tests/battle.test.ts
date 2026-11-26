@@ -26,6 +26,7 @@ import {
   expToReach,
   formationCells,
   fxTtlOf,
+  hitChance,
   levelFromExp,
   moraleTerm,
   powerOf,
@@ -98,15 +99,19 @@ test('强克制：大刀 vs 黄巾 胜率 100%（20 局）', () => {
   assert.equal(wins, 20, `大刀 vs 黄巾 胜 ${wins}/20`);
 });
 
-test('完全镜像不会一边倒（胜率在 25%~75%）', () => {
-  let wins = 0;
+test('完全镜像不会一边倒（A/B 胜率各 ≤75%；平手是合法结局）', () => {
+  // R159 起胜负只认主将生死：100v100 镜像常常双方兵尽、两将都活到时限 → 平手（reason 0x10），
+  // 这是原作口径，不是回归。这里只防"系统性偏袒某一侧"，所以分母仍是 N，平手不计给任何人。
+  let aWins = 0;
+  let bWins = 0;
   const N = 20;
   for (let i = 0; i < N; i++) {
     const w = runWorld(createWorld({ data, seed: 500 + i, a: { troop: 0, formation: 0 }, b: { troop: 0, formation: 0 } }));
-    if (w.winner === 'A') wins++;
+    if (w.winner === 'A') aWins++;
+    if (w.winner === 'B') bWins++;
   }
-  const rate = wins / N;
-  assert.ok(rate >= 0.25 && rate <= 0.75, `镜像胜率 ${(rate * 100).toFixed(0)}% 偏离过大`);
+  assert.ok(aWins / N <= 0.75, `A 胜率 ${((aWins / N) * 100).toFixed(0)}% 偏高`);
+  assert.ok(bWins / N <= 0.75, `B 胜率 ${((bWins / N) * 100).toFixed(0)}% 偏高`);
 });
 
 test('投影：纵向 71.43 px/格、横向 53.57 px/车道、我方在下', () => {
@@ -352,21 +357,35 @@ test('地形接入生效：地形 3 让弩兵的胜率上升（200 局，只断�
   assert.equal(terrainBonus(data, 3, aTroop) - terrainBonus(data, 0, aTroop), 10);
   assert.equal(terrainBonus(data, 3, bTroop) - terrainBonus(data, 0, bTroop), 0);
 
-  const N = 200;
-  const winRate = (terrain: number): number => {
-    let wins = 0;
-    for (let i = 0; i < N; i++) {
-      const w = runWorld(
-        createWorld({ data, seed: 4000 + i, terrain, a: { troop: aTroop, soldiers: 40 }, b: { troop: bTroop, soldiers: 40 } }),
-      );
-      if (w.winner === 'A') wins++;
+  // R159：不再拿 200 局胜率当探针 —— 胜负改成主将生死后，40v40 大量对局是「双方兵尽、两将都活」
+  // 的平手，胜率信噪比太低；而且 +10 战力不跨 `power/48` 取整台阶时单次伤害仍是 3（不变），
+  // 真正吃到地形的是命中判定值（兵→兵 p = powerOf，命中率 +10/300）。
+  const mk = (terrain: number): World => {
+    const w = createWorld({
+      data,
+      seed: 4000,
+      terrain,
+      a: { troop: aTroop, soldiers: 40 },
+      b: { troop: bTroop, soldiers: 40 },
+    });
+    step(w);
+    for (const u of w.units) {
+      // 排除 `0x43BE08` 的「本 tick 有位移 → p × 2/3」修正，只比较地形项
+      u.prevX = u.x;
+      u.prevY = u.y;
     }
-    return wins / N;
+    return w;
   };
-  const r0 = winRate(0);
-  const r3 = winRate(3);
-  assert.ok(
-    r3 > r0 + 0.03,
-    `地形 3 应让弩兵更好打：地形 0 ${(r0 * 100).toFixed(1)}% vs 地形 3 ${(r3 * 100).toFixed(1)}%`,
+  const w0 = mk(0);
+  const w3 = mk(3);
+  const a0 = w0.units.find((u) => u.side === 'A' && !u.isGeneral)!;
+  const b0 = w0.units.find((u) => u.side === 'B' && !u.isGeneral)!;
+  const a3 = w3.units.find((u) => u.side === 'A' && !u.isGeneral)!;
+  const b3 = w3.units.find((u) => u.side === 'B' && !u.isGeneral)!;
+  assert.equal(hitChance(w0, a0, b0), powerOf(w0, 'A'), '兵→兵的命中值就是 powerOf');
+  assert.equal(
+    hitChance(w3, a3, b3) - hitChance(w0, a0, b0),
+    10,
+    '地形 3 的 +10 必须真的进到命中判定（不是只写在表里）',
   );
 });

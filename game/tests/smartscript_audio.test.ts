@@ -18,7 +18,7 @@ import test from 'node:test';
 import { loadData } from '../src/data.ts';
 // m4：默认待機后旧测试要显式下令。
 import { engage } from './_engage.ts';
-import { createWorld, requestRetreat, step, type World } from '../src/core/battle.ts';
+import { BATTLE_TICK_LIMIT, createWorld, requestRetreat, step, type World } from '../src/core/battle.ts';
 import { createBattleSysoHost, runSkill } from '../src/core/smartscript/runtime.ts';
 import {
   BATTLE_MAP_AMBIENT,
@@ -419,20 +419,20 @@ test('R80 撤离出场的单位（cullFled）播 horse02', () => {
   assert.deepEqual(namesOf(battleAudioEvents(world, mark)), ['horse02']);
 });
 
-// tick 预算：R158 起移动改成原作「每 40 帧行动一次、一次一格」（`0x43B574`/`0x43BF26`），
-// 60v60 实测要 1397 tick 才打完（旧连续速度模型约 1/3.6）；1200 会截断在战斗中段，
-// 所以放宽到 2600 tick，断言口径不变（六类事件都真的出现过、战场事件不进 sink）。
+// tick 预算：R158 起移动改成原作「每 40 帧行动一次、一次一格」（`0x43B574`/`0x43BF26`）。
+// R159 起兵尽不再结束（胜负只认主将生死）：这一局两将都是 str60、没有兵之后谁也砍不死谁，
+// 最终走 11880 tick 硬时限平手，所以预算放到 BATTLE_TICK_LIMIT + 2；断言口径不变。
 test('R80 真跑一场战斗：六类里至少命中/格挡/阵亡/受击都出现', () => {
   resetAudioBus();
   const sink = fakeSink();
   const world = freshWorld(11, 60);
   const mark = battleAudioMark(world);
   const counts: Record<string, number> = {};
-  for (let i = 0; i < 2600 && !world.over; i++) {
+  for (let i = 0; i < BATTLE_TICK_LIMIT + 2 && !world.over; i++) {
     step(world);
     for (const n of namesOf(battleAudioEvents(world, mark))) counts[n] = (counts[n] ?? 0) + 1;
   }
-  assert.ok(world.over, '战斗应在 2600 tick 内结束（60v60 实测 1397）');
+  assert.ok(world.over, '到硬时限（双方兵尽、两将都活 → 平手）也会结束');
   assert.ok((counts.hit01 ?? 0) > 5, `命中太少：${JSON.stringify(counts)}`);
   assert.ok((counts.defense ?? 0) > 0, `格挡没触发：${JSON.stringify(counts)}`);
   assert.ok((counts.death ?? 0) > 5, `阵亡太少：${JSON.stringify(counts)}`);

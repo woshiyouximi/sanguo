@@ -227,8 +227,10 @@ function newWorld(seed) {
 const slotRect = (i) => layout.skillSlotRect(i);
 const slotCx = (i) => slotRect(i).x + slotRect(i).w / 2;
 const slotCy = (i) => slotRect(i).y + slotRect(i).h / 2;
-const assaultC = { x: layout.BTN_ASSAULT.x + layout.BTN_ASSAULT.w / 2, y: layout.BTN_ASSAULT.y + layout.BTN_ASSAULT.h / 2 };
-const retreatC = { x: layout.BTN_RETREAT.x + layout.BTN_RETREAT.w / 2, y: layout.BTN_RETREAT.y + layout.BTN_RETREAT.h / 2 };
+const CMD_UI = require(path.join(BUILD, 'BattleCmdUi.js'));
+const chipCenter = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+const assaultC = chipCenter(CMD_UI.CHIP_ASSAULT);
+const retreatC = chipCenter(CMD_UI.CHIP_RETREAT);
 const msgC = { x: layout.MESSAGE_BOX.x + layout.MESSAGE_BOX.w / 2, y: layout.MESSAGE_BOX.y + layout.MESSAGE_BOX.h / 2 };
 
 function generalA(world) {
@@ -351,7 +353,8 @@ for (const camX of [5, core.camera(newWorld(11)), 60]) {
   near(`camX=${camX.toFixed(2)} 往返 sy`, back.sy, 550, ROW_PX, 'px');
 }
 near('战场中心 worldY=6.5', BI.screenToWorld(CAM, 375, 550).worldY, 6.5, 1e-9);
-near('战场中心 worldX=camX', BI.screenToWorld(CAM, 375, 550).worldX, CAM, 1e-9);
+// 全图投影（R215）后镜头不参与坐标：屏幕中心恒为 worldX=35（71 行的正中），与 camX 无关
+near('战场中心 worldX=35', BI.screenToWorld(CAM, 375, 550).worldX, 35, 1e-6);
 near('左边缘 worldY=0 线在 sx=LANE_PX/2', BI.screenToWorld(CAM, LANE_PX / 2, 550).worldY, 0, 1e-9);
 
 // ---------------------------------------------------------------------------

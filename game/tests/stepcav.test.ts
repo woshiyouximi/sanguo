@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { loadData } from '../src/data.ts';
 // m4：默认待機后旧测试要显式下令（engage = 原作 AI case2 的两条命令）。
 import { engage } from './_engage.ts';
-import { cavalryCapOf, createWorld, settle, step } from '../src/core/battle.ts';
+import { BATTLE_TICK_LIMIT, cavalryCapOf, createWorld, settle, step } from '../src/core/battle.ts';
 import type { Side, World } from '../src/core/battle.ts';
 import { resolvePostBattle } from '../src/core/capture.ts';
 import type { PostBattleWorld, PostGeneral } from '../src/core/capture.ts';
@@ -45,7 +45,7 @@ function multiWorld(opts: {
 }): PostBattleWorld {
   return {
     winner: opts.winner ?? 'A',
-    endReason: 'troops',
+    endReason: 'retreat',
     sides: {
       A: { start: 100, aliveCount: 80, general: { name: '關羽', str: 97, int: 75, level: 6, alive: true } },
       B: {
@@ -173,7 +173,7 @@ function killAndEnd(w: World, winner: Side, dead: { side: Side; inf?: number; ca
   step(w); // recompute() 在这里把阵亡数记进 stats
   w.over = true;
   w.winner = winner;
-  w.endReason = 'troops';
+  w.endReason = 'retreat';
 }
 
 test('R22 战功分基数：10 步兵×6 + 5 骑兵×12 = 120，mode2 再加敌将等级×34', () => {
@@ -233,8 +233,10 @@ test('R22 真打一局：killsInf + killsCav 恒等于 start − aliveCount（�
     a: { soldiers: 40, general: { str: 97, int: 75, level: 6 } },
     b: { soldiers: 40, cavalry: 20, general: { str: 70, int: 88, level: 25 } },
   }));
-  for (let i = 0; i < 6000 && !w.over; i++) step(w);
-  assert.ok(w.over, '6000 tick 内应该分出胜负');
+  // R159：兵尽不结束，最坏情况是双方兵尽、两将都活到 11880 tick 的硬时限（平手）；
+  // 这里只验击杀统计恒等式，跑到时限保证 over 即可。
+  for (let i = 0; i < BATTLE_TICK_LIMIT + 2 && !w.over; i++) step(w);
+  assert.ok(w.over, '到硬时限前应该结束（主将阵亡或到点平手）');
   assert.equal(w.stats.killsInf + w.stats.killsCav, w.sides.B.start - w.sides.B.aliveCount);
   assert.equal(w.stats.killsInfB + w.stats.killsCavB, w.sides.A.start - w.sides.A.aliveCount);
   const s = settle(w);
@@ -348,7 +350,7 @@ test('R54 与 settle 集成：SideConfig.officers 进战后处置，post 三类�
   for (let i = 0; i < 6000 && !w.over; i++) step(w);
   w.over = true;
   w.winner = 'A';
-  w.endReason = 'troops';
+  w.endReason = 'retreat';
   w.sides.A.aliveCount = 30;
   w.sides.B.aliveCount = 10;
   const post = settle(w).post!;

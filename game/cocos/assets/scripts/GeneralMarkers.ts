@@ -26,11 +26,11 @@ import {
   UITransform,
 } from 'cc';
 import { loadFrameCached } from './ArtLayer';
-import { actionGaugeOf, generalUnitOf } from './BattleCmdUi';
+import { generalUnitOf } from './BattleCmdUi';
 import type { World } from './core/battle';
 import { loadPortrait } from './Portrait';
 import { applyTextRole } from './TextRole';
-import { DESIGN_H, DESIGN_W, LANE_PX, project } from './view/layout';
+import { DESIGN_H, DESIGN_W, FIELD_BOTTOM, LANE_PX, MAP_TOP, project } from './view/layout';
 import { COLORS, FONT_FAMILY, sideColor, sideLight } from './view/theme';
 
 const HALF_W = DESIGN_W / 2;
@@ -39,14 +39,13 @@ const HALF_H = DESIGN_H / 2;
 /** 头像圆牌外径（设计 px）：76px，比一格车道 53.6px 宽一圈，脸能看清。 */
 export const CARD_R = 38;
 /** 牌面从逻辑点往屏幕外侧挪的距离 */
-export const CARD_OFFSET = 54;
+export const CARD_OFFSET = 48;
 const SIDE_R = 38;
 const HP_R = 33.5;
 const HP_W = 5.5;
 const MP_R = 27;
 const MP_W = 4;
 const FACE_R = 21.5;
-const GAUGE_W = 44;
 
 function rgba(hex: string, alpha = 255): Color {
   const n = Number.parseInt(hex.replace('#', ''), 16);
@@ -124,43 +123,52 @@ export class GeneralMarkers {
     return label;
   }
 
-  /** 每帧画：连线 + 圆牌 + 行动条 + 头像位置 + 名字。`world` 只读。 */
+  /** 每帧画：连线 + 圆牌 + 头像位置 + 名字；两将靠近时把牌错开。`world` 只读。 */
   draw(world: World): void {
     const g = this.g;
     g.clear();
-    for (const slot of this.slots) this.drawSide(world, slot);
+
+    for (let i = 0; i < this.slots.length; i += 1) {
+      const slot = this.slots[i];
+      const pose = this.pose(world, slot);
+      if (!pose) {
+        slot.faceNode.active = false;
+        slot.fallback.node.active = false;
+        slot.name.node.active = false;
+        continue;
+      }
+      this.drawPose(pose);
+    }
   }
 
-  private drawSide(world: World, slot: Slot): void {
+  /**
+   * 算出「逻辑点 + 牌心」的位置。牌固定挂在自己一侧：**我方永远在点左边、
+   * 敌方永远在点右边**，不随车道/距离换边，也不因为两将贴身而互相推开 ——
+   * 两个逻辑点该贴多近就贴多近，牌只是两侧的 UI，看起来才是「相持对战」。
+   */
+  private pose(world: World, slot: Slot) {
     const gu = generalUnitOf(world, slot.side);
+    if (!gu || !gu.alive) return null;
     const gen = world.sides[slot.side].general;
-    if (!gu || !gu.alive || !gen) {
-      slot.faceNode.active = false;
-      slot.fallback.node.active = false;
-      slot.name.node.active = false;
-      return;
-    }
-
-    this.ensureFace(slot, gen.name);
-
     const p = project(gu.x, gu.y, 0);
+    const dir = slot.side === 'A' ? -1 : 1;
+    const lo = CARD_R + 6;
+    const hi = DESIGN_W - CARD_R - 6;
+    const cardX = Math.max(lo, Math.min(hi, p.x + dir * CARD_OFFSET));
+    return { slot, gen, px: p.x, py: p.y, dir, cardX, cardY: p.y - 2 };
+  }
+
+  private drawPose(pose: NonNullable<ReturnType<GeneralMarkers['pose']>>): void {
+    const { slot, gen, px, py, cardX, cardY } = pose;
+    this.ensureFace(slot, gen.name);
     const g = this.g;
 
-    // 圆牌挂在逻辑点外侧：左半场往左、右半场往右，并夹在带内
-    let dir = p.x < HALF_W ? -1 : 1;
-    let cardX = p.x + dir * CARD_OFFSET;
-    if (cardX < CARD_R + 6 || cardX > DESIGN_W - CARD_R - 6) {
-      dir = -dir;
-      cardX = p.x + dir * CARD_OFFSET;
-      cardX = Math.max(CARD_R + 6, Math.min(DESIGN_W - CARD_R - 6, cardX));
-    }
-    const cardY = p.y - 2;
-
     // 连线：逻辑点边缘 → 圆牌边缘，说明「这张脸对应这个点」
-    g.strokeColor = rgba(COLORS.gold, 120);
-    g.lineWidth = 1;
-    g.moveTo(p.x + dir * 8, p.y);
-    g.lineTo(cardX - dir * CARD_R, cardY);
+    const d = cardX >= px ? 1 : -1;
+    g.strokeColor = rgba(COLORS.gold, 165);
+    g.lineWidth = 1.2;
+    g.moveTo(px + d * 8, py);
+    g.lineTo(cardX - d * CARD_R, cardY);
     g.stroke();
 
     const cx = cardX - HALF_W;
@@ -200,18 +208,15 @@ export class GeneralMarkers {
     g.circle(cx, cy, FACE_R + 1.5);
     g.stroke();
 
-    // 行动条：挂在牌面上沿（不压逻辑点，免得像一把横着的刀）
-    const gy = cardY - CARD_R - 12;
-    this.gauge(g, cardX - GAUGE_W / 2, gy, gu);
-
     // 头像节点
     slot.faceNode.setPosition(cx, cy, 0);
     slot.faceNode.active = true;
     slot.fallback.node.setPosition(cx, cy, 0);
     slot.fallback.string = (gen.name || '將').slice(0, 1);
 
-    // 名字：牌面下方，避开逻辑点与行动条
-    const ny = cardY + CARD_R + 11;
+    // 名字：牌面下方（贴到底时改到上方）
+    const below = cardY + CARD_R + 11;
+    const ny = below < FIELD_BOTTOM - 12 ? below : cardY - CARD_R - 11;
     slot.name.node.active = true;
     slot.name.node.setPosition(cx, HALF_H - ny, 0);
     slot.name.string = gen.name;
@@ -233,22 +238,6 @@ export class GeneralMarkers {
       else g.lineTo(x, y);
     }
     g.stroke();
-  }
-
-  /** 44×3 的行动条，与 HUD/指令台共用 `BattleCmdUi.actionGaugeOf` 的口径。 */
-  private gauge(g: Graphics, x: number, y: number, gu: World['units'][number]): void {
-    const gauge = actionGaugeOf(gu);
-    g.fillColor = rgba(COLORS.line, 220);
-    g.rect(x - HALF_W, HALF_H - y - 3, GAUGE_W, 3);
-    g.fill();
-    if (gauge.ratio > 0) {
-      g.fillColor = rgba(COLORS.gold, 255);
-      g.rect(x - HALF_W, HALF_H - y - 3, GAUGE_W * gauge.ratio, 3);
-      g.fill();
-    }
-    g.fillColor = rgba(COLORS.white, 200);
-    g.rect(x - HALF_W + GAUGE_W * gauge.mark, HALF_H - y - 4, 1, 5);
-    g.fill();
   }
 
   /** 肖像降级链：full → thumb → hero → 名字首字圆盘。 */

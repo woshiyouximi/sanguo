@@ -85,7 +85,8 @@ export const GRID_H = 14;
  * R192 起 `TICK_HZ = 60`，与原件同频 ⇒ 直接写原作帧数 **11880**（= 198 s），
  * 不再有 `11880 / 2 = 5940` 这道 30 Hz 的折算（那是 R158 为 30 Hz 补的换算，
  * 副作用是整场看着像 198 s，实际每格却慢了一倍）。
- * 到点后由 `checkOver()` 按当前存活兵力判胜负，`endReason='time'`。
+ * 到点后由 `checkOver()` 判：`0x44411B` 的选择器在没有任何结果位（4/8 主将阵亡、1/2 撤退）时
+ * 落到 `else reason=0x10`，即**双方主将都还活着就是平手**，原作不看剩余兵力（`endReason='time'`）。
  */
 export const BATTLE_TICK_LIMIT = 11880;
 /** 一场战斗的硬时限（秒）＝ `BATTLE_TICK_LIMIT / TICK_HZ`；HUD/战功都用它，别再另造常数。 */
@@ -554,9 +555,13 @@ export interface World {
   terrain: number;
   over: boolean;
   /**
-   * 结束原因：`troops` 一方兵尽 / `general` 主将阵亡 / `retreat` 一方全军撤退离场（R38）。
+   * 结束原因（原作 `0x44411B` 的理由码，`[0x4B4C34]` 的 0x1000 位置起后选一档）：
+   *  - `general` = 主将阵亡（A 位 4 / B 位 8）；
+   *  - `retreat` = 一方全军撤退离场（A 位 1 / B 位 2）；
+   *  - `time`    = 硬时限到点、双方主将都还活着（reason 0x10 平手）。
+   * **没有「兵尽」这一档**：`army+0x5c<=0` 只清命令位，战斗要继续到主将分出死活/撤走。
    */
-  endReason: 'troops' | 'general' | 'retreat' | 'time' | null;
+  endReason: 'general' | 'retreat' | 'time' | null;
   winner: Side | 'draw' | null;
   /**
    * 天气（R39）：0 晴 / 1 雨 / 2 雪 / 3 雾，见 `core/weather.ts`。
@@ -758,6 +763,12 @@ export interface SkillMark {
  */
 export interface SettleResult {
   winner: Side | 'draw';
+  /**
+   * 我方是否取胜（= `winner === 'A'`）。
+   * 这是唯一的胜者门信号：web 写 `save.lastBattle.won`、`roster.needSurrenderPanel(cards, {won})`
+   * 与 `settleReport()` 的胜/败/平文案都用它，别另立判据。
+   */
+  won: boolean;
   mode: 1 | 2 | 3 | 4;
   modeName: string;
   /** 战报文案（`0x447037` 的 win/lose/draw 三段字符串 + 本作按模式拼的短句） */
@@ -2921,7 +2932,7 @@ function maybeRetreat(world: World): void {
 }
 
 /** 收尾：写 over/winner/endReason + 两侧战果状态码（`docs/04b:530`） */
-function finish(world: World, winner: Side | 'draw', reason: 'troops' | 'general' | 'retreat' | 'time'): void {
+function finish(world: World, winner: Side | 'draw', reason: 'general' | 'retreat' | 'time'): void {
   world.over = true;
   world.endReason = reason;
   world.winner = winner;
@@ -2938,6 +2949,20 @@ function finish(world: World, winner: Side | 'draw', reason: 'troops' | 'general
   world.status = (winner === 'A' ? { A: 0, B: loserStatus } : { A: loserStatus, B: 0 }) as Record<Side, 0 | 2 | 3>;
 }
 
+/**
+ * 结束判定（原作口径：`[0x4B4C34]` 结果位 + `0x44411B` 理由选择器）。
+ *
+ * 只有三条路能结束战斗，**士兵数不在其中**：
+ *  1. **主将阵亡**：`0x43DB9A` 直接置结果位 4/8，`0x441E61` 见 `[0x4A665C]&1` 就跳过战场更新
+ *     ⇒ 当场结束，不等本回合打完（`docs/04b3_单挑流程.md:26,408-424,462-464`）；
+ *  2. **一方全军离场**（撤退/被俘）：`0x43B50D&0x8000` 后 `unit+0x90` 递减到 0 → 置位 1/2
+ *     ⇒ `0x44411B` 取 reason 1/2（`0x43EAA0`-`0x43EB47`）；
+ *  3. **硬时限到点**（`0x444126` → `0x443CA8(0x1000)`）：没有 4/8/1/2 位时
+ *     `0x44411B` 落到 `else reason=0x10` ⇒ **平手**；原作没有「剩余兵力多者胜」。
+ *
+ * 兵尽只是让该侧命令位失效（`army+0x5c<=0` 清 bit1|2|8 → 不能前進/突擊/撤退），
+ * 主将还活着就继续打（`project/177_战斗行动模型.md:48`；全 EXE 无「士兵为 0 即结束」的写法）。
+ */
 function checkOver(world: World): void {
   const aGen = world.sides.A.general.alive;
   const bGen = world.sides.B.general.alive;
@@ -2945,25 +2970,20 @@ function checkOver(world: World): void {
     finish(world, aGen ? 'A' : bGen ? 'B' : 'draw', 'general');
     return;
   }
-  // R38：一方下令撤退且已经全部离场 → 另一方胜，结束原因是 retreat（不是 troops）
+  // R38：撤退令下达后要等全军走出场地（`0x43BFE7` 退场）才算结束。
   const aLeft = world.units.some((u) => u.side === 'A');
   const bLeft = world.units.some((u) => u.side === 'B');
   if (world.fled.A && !aLeft) {
-    finish(world, 'B', 'retreat');
+    // 两边同时撤光：`0x44411B` 的 `1&&2` 分支 → reason 0x10（平手），不是先到者判负
+    finish(world, world.fled.B && !bLeft ? 'draw' : 'B', 'retreat');
     return;
   }
   if (world.fled.B && !bLeft) {
     finish(world, 'A', 'retreat');
     return;
   }
-  const aN = world.sides.A.aliveCount;
-  const bN = world.sides.B.aliveCount;
-  if (aN === 0 || bN === 0) finish(world, aN > 0 ? 'A' : bN > 0 ? 'B' : 'draw', 'troops');
-  // 硬时限：`[0x4AC35C]` 到 0 → `0x443CA8(0x1000)`。原作到点直接走结算，胜负按剩余兵力判
-  // （与上面的 troops 口径一致；平局也算 draw）。
-  if (!world.over && world.tick >= BATTLE_TICK_LIMIT) {
-    finish(world, aN > bN ? 'A' : bN > aN ? 'B' : 'draw', 'time');
-  }
+  // 到点：能走到这里说明双方主将都活着 ⇒ 平手，不看兵力
+  if (world.tick >= BATTLE_TICK_LIMIT) finish(world, 'draw', 'time');
 }
 
 export function magicBySeq(data: GameData, seq: number): Magic | undefined {
@@ -3491,8 +3511,8 @@ export const MODE_NAME: Record<1 | 2 | 3 | 4, string> = {
 
 /**
  * 战功表四档（`0x41048D` 的 mode 索引，docs/04b §6.2）：
- *  1 歼灭 = 败方主将被歼；2 击退 = 败方兵尽、主将活着撤走；
- *  3 平手 = 双方兵尽（`0x447037` flag 3）；4 大胜 = 歼敌且我方损失极小。
+ *  1 歼灭 = 败方主将被歼；2 击退 = 败方主将活着、全军撤退离场；
+ *  3 平手 = 到点双方主将都活着（`0x44411B` reason 0x10）；4 大胜 = 歼敌且我方损失极小。
  */
 function settleMode(world: World): 1 | 2 | 3 | 4 {
   const a = world.sides.A;
@@ -3501,10 +3521,12 @@ function settleMode(world: World): 1 | 2 | 3 | 4 {
   if (winner === 'draw') return 3;
   const loser = winner === 'A' ? b : a;
   const our = winner === 'A' ? a : b;
-  const enemyGone = !loser.general.alive || loser.aliveCount <= 0;
+  // 「殲敵」= 敗方主將陣亡。兵盡不算殲敵：兵盡之後主將還活著，戰鬥本來就沒結束
+  // （`checkOver()` 只剩 主將陣亡 / 全軍撤退 / 到點 三條出口）。
+  const enemyGeneralDown = !loser.general.alive;
   const keep = our.start > 0 ? our.aliveCount / our.start : 0;
-  if (enemyGone && keep >= GREAT_VICTORY_KEEP) return 4;
-  if (!loser.general.alive) return 1;
+  if (enemyGeneralDown && keep >= GREAT_VICTORY_KEEP) return 4;
+  if (enemyGeneralDown) return 1;
   return 2;
 }
 
@@ -3581,13 +3603,13 @@ export function settle(world: World): SettleResult {
   // 战后处置：招降 / 斩首 / 释放 + 掉落。只看战场已有的敌将/兵力：开了原作乱数流
   // （R115 `world.roll`）时走 roll，否则仍走 `world.rng`；两种模式下同一个 ?seed=
   // settle 的结果（含 post）都完全可复现。
-  // 注意 `capture.ts` 的 `PostBattleWorld.endReason` 只有 'troops'|'general' 两档；
-  // R38 的 'retreat'（撤退离场）在战后处置上与"兵尽"同义，这里折成 'troops' 传过去。
+  // 战后处置只看 `winner` 与两侧主将；`endReason` 原样传给 `capture.ts`
+  // （'general' 主将阵亡 / 'retreat' 全军撤退离场 / 'time' 到点平手），
+  // 不再有 R38 之前「兵尽」那套折档。
   const post = resolvePostBattle(
     {
       winner: world.winner,
-      // 'time'（硬时限到点）在战后处置上与"兵尽"同义，同 'retreat' 一起折成 'troops'。
-      endReason: world.endReason === 'retreat' || world.endReason === 'time' ? 'troops' : world.endReason,
+      endReason: world.endReason,
       sides: world.sides,
     },
     world.data,
@@ -3674,6 +3696,7 @@ export function settle(world: World): SettleResult {
 
   const out: SettleResult = {
     winner,
+    won,
     mode,
     modeName: MODE_NAME[mode],
     report: settleReport(world, mode, post),

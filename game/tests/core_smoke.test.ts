@@ -34,7 +34,7 @@ const SEEDS = [1, 2];
 const MAX_TICKS = 1200;
 const SOLDIERS = 24;
 /** 每场两侧各 24 兵（units≈50）；100 兵一场 456 ms 会让 72 场超出 20 s 预算。 */
-const END_REASONS = new Set(['troops', 'general', 'retreat']);
+const END_REASONS = new Set(['general', 'retreat', 'time']);
 
 /** 1200 tick 或提前结束；返回跑了几 tick。 */
 function run(world: World, maxTicks: number): number {

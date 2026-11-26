@@ -626,8 +626,8 @@ export class BattleRoot extends Component {
 
     // 天气在单位之上（雨雪要落在人身上），但只画在战场带里；初始晴天，boot() 里按地形+月份改
     this.weatherLayer = new BattleWeather(this.node, 0);
-    // 全图视野下雪点/雨点和 2px 的小兵点会抢注意力：天气整体压到 47% 不透明度
-    this.weatherLayer.node.addComponent(UIOpacity).opacity = 120;
+    // 全图视野下雪点/雨点和 2px 的小兵点会抢注意力：天气整体压到 35% 不透明度
+    this.weatherLayer.node.addComponent(UIOpacity).opacity = 90;
 
     // 战场角标：全图没有镜头，靠这两处文字告诉玩家哪边是敌方后场
     this.makeLabel('敵 陣', 12, 112, 80, 11, COLORS.enemy, 'left');
@@ -797,6 +797,7 @@ export class BattleRoot extends Component {
     if (!g) return;
     g.clear();
 
+    // 纵向渐变：上（敌阵）偏红 → 中（无人区）中性 → 下（我阵）偏蓝
     const BANDS = 24;
     const bandH = FIELD_H / BANDS;
     const top = new Color(43, 28, 24, 255);
@@ -821,48 +822,28 @@ export class BattleRoot extends Component {
     this.fillScreenRect(g, 0, FIELD_TOP, DESIGN_W, zoneH, COLORS.enemy, 15);
     this.fillScreenRect(g, 0, FIELD_BOTTOM - zoneH, DESIGN_W, zoneH, COLORS.ours, 17);
 
-    // 车道线（14 条车道、13 条内线）
-    g.strokeColor = rgba(COLORS.line, 58);
-    g.lineWidth = 1;
+    // 车道线（14 条车道、13 条内线）。用 1px 填充矩形而不是 stroke：
+    // 这张图上多段描边在当前 Cocos 版本下会整段丢失，填充矩形是稳的。
     for (let gy = 1; gy < GRID_H; gy += 1) {
-      const sx = gy * LANE_PX - HALF_W;
-      g.moveTo(sx, HALF_H - FIELD_BOTTOM);
-      g.lineTo(sx, HALF_H - FIELD_TOP);
+      this.fillScreenRect(g, gy * LANE_PX, FIELD_TOP, 1, FIELD_H, COLORS.line, 58);
     }
-    g.stroke();
 
     // 行线：每 5 行一条稍亮的，其余更淡
-    g.strokeColor = rgba(COLORS.line, 20);
     for (let gx = 1; gx < GRID_W; gx += 1) {
-      if (gx % 5 === 0) continue;
-      const sy = MAP_TOP + gx * MAP_ROW_PX;
-      g.moveTo(-HALF_W, HALF_H - sy);
-      g.lineTo(HALF_W, HALF_H - sy);
+      this.fillScreenRect(g, 0, MAP_TOP + gx * MAP_ROW_PX, DESIGN_W, 1, COLORS.line, gx % 5 === 0 ? 64 : 24);
     }
-    g.stroke();
-    g.strokeColor = rgba(COLORS.line, 56);
-    for (let gx = 5; gx < GRID_W; gx += 5) {
-      const sy = MAP_TOP + gx * MAP_ROW_PX;
-      g.moveTo(-HALF_W, HALF_H - sy);
-      g.lineTo(HALF_W, HALF_H - sy);
-    }
-    g.stroke();
 
-    // 前线（worldX=35.5，两军中线）：金色虚线，断 6 空 6
+    // 前线（worldX=35.5，两军中线）：金色虚线，断 7 空 7
     const frontY = MAP_TOP + 36 * MAP_ROW_PX;
-    g.strokeColor = rgba(COLORS.gold, 120);
-    g.lineWidth = 1;
-    for (let x = -HALF_W; x < HALF_W; x += 14) {
-      g.moveTo(x, HALF_H - frontY);
-      g.lineTo(Math.min(HALF_W, x + 7), HALF_H - frontY);
+    for (let x = 0; x < DESIGN_W; x += 14) {
+      this.fillScreenRect(g, x, frontY, 7, 1, COLORS.gold, 150);
     }
-    g.stroke();
 
     // 战场边框：把「带」的上下沿收住，避免小兵点飘在渐变里
-    g.strokeColor = rgba(COLORS.gold, 54);
-    g.lineWidth = 1;
-    g.rect(-HALF_W + 0.5, HALF_H - FIELD_BOTTOM + 0.5, DESIGN_W - 1, FIELD_H - 1);
-    g.stroke();
+    this.fillScreenRect(g, 0, FIELD_TOP, DESIGN_W, 1, COLORS.gold, 54);
+    this.fillScreenRect(g, 0, FIELD_BOTTOM - 1, DESIGN_W, 1, COLORS.gold, 54);
+    this.fillScreenRect(g, 0, FIELD_TOP, 1, FIELD_H, COLORS.gold, 54);
+    this.fillScreenRect(g, DESIGN_W - 1, FIELD_TOP, 1, FIELD_H, COLORS.gold, 54);
   }
 
   private fillRoundScreenRect(
@@ -1252,13 +1233,13 @@ export class BattleRoot extends Component {
       return y >= FIELD_TOP && y <= FIELD_BOTTOM;
     };
 
-    // 暗底（主将垫得更宽，金边才有对比）
-    ga.fillColor = new Color(6, 8, 12, 170);
-    gb.fillColor = new Color(6, 8, 12, 170);
+    // 只有主将需要暗底：小兵点本来就压在深色地图上，再垫一圈会让 4px 的点看起来像像素块
+    ga.fillColor = new Color(6, 8, 12, 190);
+    gb.fillColor = new Color(6, 8, 12, 190);
     for (const u of world.units) {
-      if (!visible(u)) continue;
+      if (!visible(u) || !isGeneral(u)) continue;
       const p = project(u.x, u.y, 0);
-      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, isGeneral(u) ? 6.4 : 3.1);
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, 6.4);
     }
     ga.fill();
     gb.fill();
@@ -1269,7 +1250,7 @@ export class BattleRoot extends Component {
     for (const u of world.units) {
       if (!visible(u)) continue;
       const p = project(u.x, u.y, 0);
-      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, dot(u));
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, dot(u));
     }
     ga.fill();
     gb.fill();
@@ -1283,12 +1264,28 @@ export class BattleRoot extends Component {
       if (!u.alive || !isGeneral(u)) continue;
       const p = project(u.x, u.y, 0);
       if (p.y < FIELD_TOP || p.y > FIELD_BOTTOM) continue;
-      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, 6.2);
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, 6.2);
     }
     ga.stroke();
     gb.stroke();
 
     this.markers?.draw(world);
+  }
+
+  /**
+   * 士兵点：不用 `Graphics.circle`，因为半径 2.2px 时三段折线会退化成方块；
+   * 这里显式画十边形，屏幕上看才是「点」而不是「像素块」。
+   */
+  private dotPath(g: Graphics, x: number, y: number, r: number): void {
+    const N = 10;
+    for (let i = 0; i < N; i += 1) {
+      const a = -Math.PI / 2 + (Math.PI * 2 * i) / N;
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.close();
   }
 
   private drawFx(world: World): void {

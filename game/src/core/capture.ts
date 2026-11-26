@@ -124,7 +124,12 @@ export interface PostBattleSideView {
 
 export interface PostBattleWorld {
   winner: Side | 'draw' | null;
-  endReason: 'troops' | 'general' | null;
+  /**
+   * 结束原因，与 `battle.ts` 的 `World.endReason` 同一套（`0x44411B` 的理由码）：
+   * `general` 主将阵亡 / `retreat` 全军撤退离场 / `time` 到点平手。
+   * 本文件只做展示/上报，不据此改处置规则（处置只看 `winner` 与败方主将存活）。
+   */
+  endReason: 'general' | 'retreat' | 'time' | null;
   sides: Record<Side, PostBattleSideView>;
 }
 

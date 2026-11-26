@@ -114,6 +114,15 @@ export default async function steps({ s, evaluate, shot, sleep, log }) {
   out.shots.late = await shot('r215_fullmap_02.png');
   out.late = await ev(SNAP, 'snap');
 
+  // 可选：多等一会儿看接战后的真实状态（红环掉血、小兵点变少、没有动作帧）
+  const fightWait = Number(process.env.FIGHT_WAIT || 0);
+  if (fightWait > 0) {
+    await sleep(fightWait);
+    out.shots.fight = await shot('r215_fight.png');
+    out.fight = await ev(SNAP, 'snap');
+    log('fight', JSON.stringify(out.fight));
+  }
+
   const named = (v) => !!(v && v.active && v.text);
   const ok = out.first.dotsA > 50 && out.first.dotsB > 50
     && out.first.faceA && out.first.faceA.hasFrame && out.first.faceB && out.first.faceB.hasFrame

@@ -114,7 +114,8 @@ test('R23 createWorld 用 generals.json 的 BaseHP/BaseMP，无档案时兜底 1
 test('R23 升级按 0x40F23C 重算上限，不再手调 +6/+3', () => {
   // 让敌方主将 30 级 → 额外经验足够把我方顶上去几级
   const w = createWorld({ data, seed: 3, b: { general: { str: 80, int: 60, level: 30 } } });
-  w.units = w.units.filter((u) => u.side !== 'B' || u.isGeneral); // 敌方兵"消失" → 兵尽判负
+  w.units = w.units.filter((u) => u.side !== 'B' || u.isGeneral); // 敌方兵"消失"
+  w.sides.B.general.alive = false; // R159 起兵尽不结束，要主将阵亡才收尾
   step(w);
   assert.equal(w.over, true);
   const s = settle(w);
@@ -246,6 +247,8 @@ test('R59 settle 的战功分用的就是开战快照 − 战后值', () => {
   const victims = w.units.filter((u) => u.side === 'B' && !u.isGeneral).slice(0, 10);
   for (const u of victims) u.alive = false;
   w.units = w.units.filter((u) => u.side !== 'B' || u.isGeneral);
+  // 原作兵尽不结束（`army+0x5c<=0` 只清命令位），要主将阵亡才收尾
+  w.sides.B.general.alive = false;
   step(w);
   const s = settle(w);
   // 敌方 100 兵全灭（快照 100 → 0），大胜档还会 ×2，所以这里只核对"带兵差"这一项的下限
@@ -282,6 +285,7 @@ test('R63 updateRecord：胜/败/连胜/最高连胜（0x4084C9）', () => {
 test('R63 settle 把战前战绩带进来累加（不是只写 1/0）', () => {
   const w = createWorld({ data, seed: 42, record: { wins: 3, losses: 2, streak: 2, bestStreak: 4 } });
   w.units = w.units.filter((u) => u.side !== 'B' || u.isGeneral);
+  w.sides.B.general.alive = false; // 兵尽不结束（R159），主将阵亡才判负
   step(w);
   const s = settle(w);
   assert.equal(s.winner, 'A');

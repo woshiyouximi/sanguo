@@ -265,7 +265,7 @@ test('军师技 4 个消费点：气力回复 / 气力消耗 / 士兵战力 / �
     const w = createWorld({ data, seed: 9, a: { general: { str: 80, int: 80 } }, b: {} });
     w.over = true;
     w.winner = 'A';
-    w.endReason = 'troops';
+    w.endReason = 'retreat';
     return w;
   };
   const plain = settle(mk());

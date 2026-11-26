@@ -53,7 +53,7 @@ function endWorld(over: {
   w.tick = over.tick ?? 1110; // 37 秒 → 疲劳 +18
   w.over = true;
   w.winner = over.winner;
-  w.endReason = over.aDead || over.bDead ? 'general' : 'troops';
+  w.endReason = over.winner === 'draw' ? 'time' : over.aDead || over.bDead ? 'general' : 'retreat';
   w.sides.A.start = 100;
   w.sides.B.start = 100;
   w.sides.A.aliveCount = over.aAlive;

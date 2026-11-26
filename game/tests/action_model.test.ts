@@ -297,16 +297,25 @@ test('硬时限常量：11880 tick = 198 秒（原作风数，@60Hz 不再除 2�
   assert.equal(BATTLE_SECONDS, 198);
 });
 
-test('硬时限：11879 tick 不结束，11880 tick 到点结束且 endReason=time', () => {
+test('硬时限：11879 tick 还不到点，不结束', () => {
   const w = make({ soldiers: 4 });
-  for (let i = 0; i < BATTLE_TICK_LIMIT - 1; i++) step(w);
-  assert.equal(w.over, false, `${BATTLE_TICK_LIMIT - 1} tick 还不到时限`);
+  // 直接推进到时限前一帧：这一段只验边界，不靠长时间对打（对打可能先把主将打死）
+  w.tick = BATTLE_TICK_LIMIT - 2;
   step(w);
+  assert.equal(w.tick, BATTLE_TICK_LIMIT - 1);
+  assert.equal(w.over, false, `${BATTLE_TICK_LIMIT - 1} tick 还不到时限`);
+});
+
+test('硬时限：11880 tick 到点结束且 endReason=time', () => {
+  const w = make({ soldiers: 4 });
+  w.tick = BATTLE_TICK_LIMIT - 1;
+  step(w);
+  assert.equal(w.tick, BATTLE_TICK_LIMIT);
   assert.equal(w.over, true, `${BATTLE_TICK_LIMIT} tick 必须结束`);
   assert.equal(w.endReason, 'time', "endReason 该是 'time'");
 });
 
-test('硬时限胜负：按当前存活兵力判（A 4 vs B 2 → A 胜；B 记 3=被俘）', () => {
+test('硬时限到点：双方主将都活着 ⇒ 平手，不看剩余兵力（0x44411B 的 reason 0x10）', () => {
   const w = createWorld({
     data,
     seed: 9,
@@ -314,18 +323,10 @@ test('硬时限胜负：按当前存活兵力判（A 4 vs B 2 → A 胜；B 记 
     b: { soldiers: 2, troop: 0, formation: 0 },
     aiSides: { A: false, B: false },
   });
-  for (let i = 0; i < BATTLE_TICK_LIMIT && !w.over; i++) step(w);
+  w.tick = BATTLE_TICK_LIMIT - 1;
+  step(w);
   assert.equal(w.over, true);
   assert.equal(w.endReason, 'time');
-  assert.equal(w.winner, 'A', '4 兵 > 2 兵，A 该胜');
-  assert.equal(w.status.B, 3, '败方状态码沿用 finish()：未撤退全灭=3');
-  assert.equal(w.status.A, 0);
-});
-
-test('硬时限：双方兵力相同 → draw（不硬判一方胜）', () => {
-  const w = make({ soldiers: 4 });
-  for (let i = 0; i < BATTLE_TICK_LIMIT && !w.over; i++) step(w);
-  assert.equal(w.over, true);
-  assert.equal(w.endReason, 'time');
-  assert.equal(w.winner, 'draw');
+  assert.equal(w.winner, 'draw', 'A 4 兵 > B 2 兵也不判 A 胜：原作到点只按主将死活开理由码');
+  assert.deepEqual(w.status, { A: 0, B: 0 });
 });

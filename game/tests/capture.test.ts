@@ -42,7 +42,7 @@ function mkWorld(over: {
   const name = over.name ?? '張角';
   return {
     winner: over.winner ?? 'A',
-    endReason: 'troops',
+    endReason: 'retreat',
     sides: {
       A: {
         start: 100,
