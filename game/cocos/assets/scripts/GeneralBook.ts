@@ -53,7 +53,7 @@
  * 本檔只做「讀存檔 + 逐將套用」，不要在名冊裡另寫一份加成算法。
  */
 import { sys } from 'cc';
-import { cityOf, levelOf as cityLevelOf, type CityGeneral } from './CityModel';
+import { cityOf, levelOf as cityLevelOf, statusOf, type CityGeneral } from './CityModel';
 import { FORCE_COLOR_NEUTRAL, forceColorOf, intOr, num, str, troopCapOf } from './MonarchModel';
 import { scenarioLevelOf } from './ScenarioLevels';
 import {
@@ -462,9 +462,16 @@ export function mergeRow(
   // 所屬城：存檔運行時守將表反查 → 本局劇本 `city_by_times[scenIdx]` → 靜態 `CITY`（未登場）。
   // 舊碼只吃靜態 `CITY`（劇本 0 的所屬城），《討伐董卓》名冊會把所有人都標到 184 年的城。
   const city = officer && officer.city ? officer.city : str(cityOf(rec as unknown as CityGeneral, intOr(ctx.scenIdx, 0, 0))).trim();
+  // 狀態：存檔 `generalStatus`（web 檔）→ 該城守將表的運行時 status → 本局劇本 `status_by_times[scenIdx]`。
+  // 舊碼兜底用靜態 `rec.Status`（劇本 0 的狀態），《討伐董卓》會把淳于瓊（status_by_times[1]='野'）算成
+  // 「在職」，與 `OfficersOfCity` 的運行時口徑不一致（P1-6）。`statusOf` 與 `cityOf` 同源、無新依賴。
   const liveStatus = mapGet(save.generalStatus, name);
   const status = normBookStatus(
-    liveStatus !== undefined && str(liveStatus) ? liveStatus : officer ? officer.rec.status : rec.Status,
+    liveStatus !== undefined && str(liveStatus)
+      ? liveStatus
+      : officer
+        ? officer.rec.status
+        : statusOf(rec as unknown as CityGeneral, intOr(ctx.scenIdx, 0, 0)),
   );
   // 有城但沒人認領 = 在野；連城都沒有 = 未登場。兩個都不是「勢力 ''」的同一件事，
   // 所以這裡先算 forceLabel，再由呼叫端決定分組鍵（見 groupByForce）。

@@ -46,6 +46,7 @@ import {
 import * as M from './MonarchModel';
 import { DESIGN_H, DESIGN_W, toLocal } from './view/layout';
 import { COLORS, FONT, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -361,13 +362,13 @@ export class MonarchPanel extends Component {
 
   private registerTouch(): void {
     if (this.registered) return;
-    input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'MonarchPanel'), this);
     this.registered = true;
   }
 
   private unregisterTouch(): void {
     if (!this.registered) return;
-    input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'MonarchPanel'), this);
     this.registered = false;
   }
 

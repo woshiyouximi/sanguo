@@ -505,9 +505,11 @@ test('R13：三條命令都有入口（武將資料 / 勢力地圖 / 內政終�
   assert.match(CAMPAIGN, /function openGeneralSheet\(\)/, '缺 openGeneralSheet');
   assert.match(CAMPAIGN, /function renderGeneralSheet\(\)/, '缺 renderGeneralSheet');
   assert.match(CAMPAIGN, /function generalRowsAll\(\)/, '缺 generalRowsAll（全勢力武將表）');
-  // 內政終了 = 收束本月令（原作 0x427FE0 → 0x41BBF5：清逐將行動權、回地圖；不推進月份）
+  // 內政終了 = 只把 T 重設 3600、回大地圖（原作 0x427FE0 → 0x41BBF5；不推進月份）
   assert.match(CAMPAIGN, /function endMonth\(\)/);
-  assert.match(fnBody(CAMPAIGN, 'endMonth'), /CM\.markMonthActed\(save, UNLIMITED\)/, '內政終了要收月令');
+  const endMonthBody = fnBody(CAMPAIGN, 'endMonth');
+  assert.match(endMonthBody, /clockT = CLOCK_TICKS_PER_YEAR;/, '內政終了要把 T 重設 3600');
+  assert.doesNotMatch(endMonthBody, /advanceMonth\(/, '內政終了不得推進月份（原作 0x41BBF5）');
   // 接線
   assert.match(CAMPAIGN, /\$\('btnGenerals'\)\.addEventListener\('click'/, 'btnGenerals 沒接線');
   assert.match(CAMPAIGN, /\$\('btnEndMonth'\)\.addEventListener\('click'/, 'btnEndMonth 沒接線');

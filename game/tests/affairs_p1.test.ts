@@ -59,24 +59,27 @@ const REPEATABLE = ITEMS.filter((it) => String(it.Attrib || '') !== 'ONLYONE');
 /* ======================================================================
  * F4 內政終了 → 結束本年窗口並跑完一年
  * ==================================================================== */
-test('F4 內政終了：結束窗口後一次 advanceMonth(12)，不是只鎖月令', () => {
+test('F4 內政終了：只把 T 重設 3600（原作 0x41BBF5），不跑月份模擬', () => {
   const body = fnBody(CAMPAIGN, 'endMonth');
-  assert.match(body, /advanceMonth\(12\)/, '內政終了要一次跑完一年（差異行 57）');
-  assert.match(body, /Saves\.monthOfYear\(save\.month\) !== 1/, '非正月仍要拒絕（內政窗口只在 1 月）');
-  assert.match(body, /CM\.markMonthActed\(save, UNLIMITED\);/, '本月令收束那行不能動（rows85 釘死）');
+  assert.doesNotMatch(body, /advanceMonth\(/, '內政終了不得跑月份模擬（原作 0x41BBF5 只重設 T）');
+  assert.match(body, /clockT = CLOCK_TICKS_PER_YEAR;/, '要重設 T=3600');
+  assert.match(body, /clockAcc = 0;/, '要清 clockAcc');
   assert.match(body, /內 政 終 了/, '要有「內政終了」這筆日誌');
-  assert.match(body, /大地圖|大 地 圖/, '日誌要說明接著進大地圖跑時間');
+  assert.match(body, /時間正在流動/, '時間流動中按它只提示（對齊 Cocos doAction）');
 });
 
-test('F4 保留單月調試路徑：?adv=1 與「推進一月」都只走 1 個月', () => {
+test('F4 保留單月調試路徑：?adv=N 仍走 advanceMonth(N)，主玩法改逐幀時鐘', () => {
   assert.match(CAMPAIGN, /const bootAdv = Number\(qs\.get\('adv'\) \|\| 0\);/);
   assert.match(CAMPAIGN, /if \(bootAdv > 0 && gameStarted\) advanceMonth\(bootAdv\);/);
-  // 推進一月按鈕仍是 advanceMonth(1)
-  assert.match(CAMPAIGN, /advanceMonth\(1\);/);
+  // 大地圖時間：requestAnimationFrame 裡按 60Hz 固定步長 T−1
+  assert.match(CAMPAIGN, /requestAnimationFrame\(clockFrame\);/, '要有逐幀時鐘');
+  assert.match(CAMPAIGN, /clockAcc \+= Math\.min\(dt, 0\.25\);/, '固定步長累加器');
+  assert.match(CAMPAIGN, /clockT = Math\.max\(0, clockT - n\);/, '每 tick T−1');
   // 批量與行軍的閘門：n>1 → batch（整年就地在结算，不逐月跳守城页）
   const body = fnBody(CAMPAIGN, 'advanceMonth');
   assert.match(body, /const batch = n > 1 \|\| fast;/, '批量闸门');
   assert.match(body, /const marchMode = MARCH_ON && !fast;/, '行軍模式只看 ?auto=1，不看批量');
+  assert.match(body, /if \(!clockMode\) syncClockTFromMonth\(\);/, '手動推月後鐘要對齊月份');
 });
 
 test('F4 年推進的月份算術：12 個月正好回到次年 1 月（Saves 年內換算）', () => {

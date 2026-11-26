@@ -33,6 +33,7 @@ import { addOutline, addVeil, ArtBg, loadFrame } from './ArtLayer';
 import { Band, doubleEdge, edgeBands, hBands, innerEdge, lightGrid, topSheen, vBands, WARM, wash } from './Draw';
 import { CityPanel, CITY_EXTRAS_KEY } from './CityPanel';
 import { latchTap, tapLatched } from './InputLatch';
+import { guardTouch, installInputResilience } from './InputGuard';
 import { loadGameData } from './DataLoader';
 import { resolveEnemyIntel } from './EnemyIntel';
 import type { EnemyIntel } from './EnemyIntel';
@@ -1685,6 +1686,7 @@ export class CampaignRoot extends Component {
   private readonly arrivedNoticed = new Set<string>();
 
   onLoad(): void {
+    installInputResilience();
     // 底图先建，siblingIndex 0/1/2 → 永远在 Graphics 和 Label 之下（不用改别人的节点顺序）
     this.buildArt();
     this.gBase = this.makeGraphics('CampaignBase');
@@ -4350,8 +4352,10 @@ export class CampaignRoot extends Component {
     let arrivedNew: CampaignArmy | null = null;
     for (const army of res.arrived) {
       if (army.side !== 'A' || this.arrivedNoticed.has(army.id)) continue;
-      this.arrivedNoticed.add(army.id);
+      // [R228] 先不標記：等真的處理成功（佔城/開戰/進城）再把 id 寫進 arrivedNoticed，
+      // 否則一次失敗（例如存檔還沒載好）就永遠不再重試，部隊會停在城下不動。
       arrivedNew = army;
+      break;
     }
     if (arrivedNew) {
       const target = armyAtCity(arrivedNew);
@@ -4360,13 +4364,29 @@ export class CampaignRoot extends Component {
         // [R227] 不再複用 `doAction('march')`：那條路有「必須接壤」守衛（distanceFromOwned === 1），
         // 多段行軍的部隊走到遠城會被判「不接壤」→ 部隊被撤掉、也不進戰鬥（用戶實測）。
         this.selected = target;
+        // [R228] 真空城（沒有守將、守軍 0）沒有攻城戰可打：直接接收，部隊併入守軍。
+        const intel = this.enemyIntelOf(target);
+        const emptyCity = !intel || (!String(intel.name ?? '').trim() && Math.floor(Number(intel.troops) || 0) <= 0);
+        if (emptyCity) {
+          const out = GameState.occupyCity(target, arrivedNew.id);
+          this.save = GameState.loadSave();
+          this.arrivedNoticed.add(arrivedNew.id);
+          this.pushBattleLog([
+            battleLogLine(this.save.month, `兵 團 進 城：${arrivedNew.general ?? '我軍'} ${arrivedNew.troops} 兵 接 收 ${target}（守軍 ${out.troops ?? 0}）`, 'win'),
+          ]);
+          this.hintText = this.clampHint(`佔 領 ${target}：${arrivedNew.general ?? '我軍'} ${arrivedNew.troops} 兵 入城。`, 160);
+          this.refresh();
+          return;
+        }
         this.startArrivalSiege(arrivedNew, target);
+        this.arrivedNoticed.add(arrivedNew.id);
         return;
       }
       if (target) {
         // 到自家城（增援/回防）：直接併入守軍，不回大地圖等手點。
         const out = GameState.enterCityWithArmy(arrivedNew.id);
         this.save = GameState.loadSave();
+        this.arrivedNoticed.add(arrivedNew.id);
         this.hintText = this.clampHint(
           `兵 團 進 城：${arrivedNew.general ?? '我軍'} ${arrivedNew.troops} 兵 入 ${out.city}（守軍 ${out.troops}）。`,
           160,
@@ -5200,10 +5220,10 @@ export class CampaignRoot extends Component {
 
   // 注册/注销放在 onEnable/onDisable，避免场景切换后野指针
   onEnable(): void {
-    input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'CampaignRoot'), this);
   }
 
   onDisable(): void {
-    input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'CampaignRoot'), this);
   }
 }

@@ -61,6 +61,7 @@ import { forceColorOf } from './MonarchModel';
 import { loadPortrait } from './Portrait';
 import { makeNineSlice } from './UiSkin';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -636,7 +637,7 @@ export class GeneralBookPanel extends Component {
     this.opened = true;
     this.node.active = true;
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'GeneralBookPanel'), this);
       this.listening = true;
     }
     this.refresh();
@@ -650,7 +651,7 @@ export class GeneralBookPanel extends Component {
     if (this.cardRoot) this.cardRoot.active = false;
     this.selected = null;
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'GeneralBookPanel'), this);
       this.listening = false;
     }
     const cb = this.onCloseCb;

@@ -37,6 +37,7 @@ import { makeBtn, makeNineSlice, makePanel, placeDesign } from './UiSkin';
 import type { GameData } from './types';
 import { DESIGN_H, DESIGN_W } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -136,7 +137,7 @@ export class TitlePanel extends Component {
     this.opened = true;
     this.build();
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'TitlePanel'), this);
       this.listening = true;
     }
   }
@@ -145,7 +146,7 @@ export class TitlePanel extends Component {
   close(): void {
     this.opened = false;
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'TitlePanel'), this);
       this.listening = false;
     }
     if (this.node.parent) this.node.parent.removeChild(this.node);
@@ -154,7 +155,7 @@ export class TitlePanel extends Component {
 
   onDestroy(): void {
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'TitlePanel'), this);
       this.listening = false;
     }
     this.opened = false;
@@ -293,7 +294,7 @@ export class TitlePanel extends Component {
     const maxForces = cards.reduce((max, card) => Math.max(max, card.forceCount), 0);
     const cityCount = cards.length ? cards[0].cityCount : 60;
 
-    this.header('三國群英傳 2 · 豎版', `${firstYear} — ${lastYear} · 5 套劇本 · 直屏 750×1334`);
+    this.header('三國群英傳 2 · 豎版', `${firstYear} — ${lastYear} · ${cards.length || 5} 套劇本`);
 
     const panel = makePanel(this.node, 'frame_panel', 630, 300, { fillAlpha: 150 });
     panel.name = 'TitleEmblem';
@@ -310,16 +311,16 @@ export class TitlePanel extends Component {
     // x 是设计坐标左边界（不是中心）：750 宽里 700 宽的文本要居中，左边界必须是 25。
     // 旧值 375 会让文本从屏幕中线开始、右侧被裁掉（r90 截图可见）。
     this.label('TitleLead', '擇劇本 · 選君主 · 入大地圖', 25, 508, 700, 32, FONT_BODY, COLORS.textDim, 'center');
-    this.label('TitleHint', '每月：內政 → 出征 → 結算；戰鬥 60Hz 邏輯', 25, 544, 700, 32, FONT_BODY, COLORS.textFaint, 'center');
+    this.label('TitleHint', '每月：內政 → 出征 → 結算；戰鬥即時進行', 25, 544, 700, 32, FONT_BODY, COLORS.textFaint, 'center');
 
     // 中段資訊卡（r90 起）：填掉 590–940 之間的空黑，並把「資料來源 / 操作 / 存檔 / 聲明」講清楚。
     const info = makePanel(this.node, 'frame_panel', 630, 300, { fillAlpha: 130 });
     info.name = 'TitleInfo';
     placeDesign(info, 60, 606, 630, 300);
     const rows: [string, string][] = [
-      ['資 料', '劇本 5 · 城池 60 · 武將 401 · 法術 110（原作 INI 轉出）'],
+      ['資 料', '劇本 · 城池 · 武將 · 兵種 · 法術（資料取自原作）'],
       ['操 作', '點城選中 → 底部按鈕；己城開內政，敵城可出征'],
-      ['存 檔', '10 槽 · 與網頁版互通（sanguo_*_v1）'],
+      ['存 檔', '10 槽 · 讀檔會替換目前進度'],
       ['聲 明', '研究／移植用途，素材與數值版權歸原權利人'],
     ];
     for (let i = 0; i < rows.length; i += 1) {
@@ -371,32 +372,33 @@ export class TitlePanel extends Component {
   /* ---------------------------- 說明頁 ------------------------------ */
 
   private buildHelp(): void {
-    this.header('說 明', '豎版重製 · 操作與資料來源');
-    const panel = makePanel(this.node, 'frame_panel', 670, 880, { fillAlpha: 150 });
+    // 正式版說明頁：只留玩家需要的玩法／操作／存檔／資料來源。舊版把畫面規格（750×1334、頁頭
+    // 0–124）、九宮圖元、內部存檔鍵名寫給玩家看，是開發者口吻（P2-1）。
+    this.header('說 明', '玩法與資料來源');
+    const panel = makePanel(this.node, 'frame_panel', 670, 640, { fillAlpha: 150 });
     panel.name = 'HelpBody';
-    placeDesign(panel, 40, 150, 670, 880);
+    placeDesign(panel, 40, 260, 670, 640);
 
     const lines: [string, number, string][] = [
-      ['【畫面】', FONT_HEAD, COLORS.goldLight],
-      ['750 × 1334 直屏，左上原點；頁頭 0–124、按鈕區底邊 1248（距底 86）。', FONT_BODY, COLORS.text],
-      ['所有面板共用 26 張九宮圖元；圖沒載到就畫 Graphics 描邊，不會白屏。', FONT_BODY, COLORS.textDim],
-      ['【節奏】', FONT_HEAD, COLORS.goldLight],
-      ['大地圖以「月」推進：內政 → 出征 → 月結；戰鬥邏輯 60Hz。', FONT_BODY, COLORS.text],
-      ['【流程】', FONT_HEAD, COLORS.goldLight],
-      ['開始新局 → 選劇本（184 黃巾之亂 … 219 三國鼎立，共 5 套）', FONT_BODY, COLORS.text],
-      ['→ 選君主（該劇本城池的 KING，含旗下城數；0 城勢力不可選）→ 大地圖。', FONT_BODY, COLORS.text],
-      ['【資料】', FONT_HEAD, COLORS.goldLight],
-      ['玩法與數值沿用原作 INI：data/*.json 的劇本、城池、武將、兵種、法術。', FONT_BODY, COLORS.text],
-      ['存檔 10 槽，鍵名 sanguo_*_v1，可與網頁版互通；讀檔會整組替換目前進度。', FONT_BODY, COLORS.textDim],
-      ['【說明】', FONT_HEAD, COLORS.goldLight],
-      ['本版為研究／移植用途；原作素材與數值版權歸原權利人。', FONT_BODY, COLORS.textFaint],
+      ['【入 門】', FONT_HEAD, COLORS.goldLight],
+      ['開始新局 → 選劇本 → 選君主 → 大地圖。', FONT_BODY, COLORS.text],
+      ['【節 奏】', FONT_HEAD, COLORS.goldLight],
+      ['大地圖以「月」推進：內政 → 出征 → 月結；戰鬥即時進行。', FONT_BODY, COLORS.text],
+      ['【操 作】', FONT_HEAD, COLORS.goldLight],
+      ['點城池看詳情；己方城池可進內政，敵方城池可出征。', FONT_BODY, COLORS.text],
+      ['【存 檔】', FONT_HEAD, COLORS.goldLight],
+      ['10 個存檔位 · 讀檔會替換目前進度。', FONT_BODY, COLORS.text],
+      ['【資 料】', FONT_HEAD, COLORS.goldLight],
+      ['劇本、城池、武將、兵種、法術皆取自原作；素材與數值版權歸原權利人，本版僅供研究、移植。', FONT_BODY, COLORS.textDim],
     ];
-    let cursor = 380;
+    // 640 高的卡片裡放 10 行：標題行 → 文句行間距 50、文句行 → 下一標題 70，
+    // 內容鋪滿整張卡（舊版 880 高面板只寫到卡片下半，留下近 300px 純色空白）。
+    let cursor = 270;
     for (let i = 0; i < lines.length; i += 1) {
       const [text, size, color] = lines[i];
       const h = size === FONT_HEAD ? 40 : 34;
       this.labelOn(panel, `HelpLine_${i}`, text, 0, cursor, 610, h, size, color, 'left');
-      cursor -= size === FONT_HEAD ? 46 : 38;
+      cursor -= size === FONT_HEAD ? 50 : 70;
     }
 
     this.button('Btn_返回', '返 回', BACK, 'back', false);

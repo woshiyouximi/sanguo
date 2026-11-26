@@ -195,14 +195,22 @@ same('2.6 總頁數', 2, debug0.pages);
 same('2.7 當前頁畫了 5 張', 5, debug0.visible.length);
 same('2.8 第一頁的名單', ['張遼', '程昱', '守將', '華佗', '死士'], debug0.visible);
 same('2.9 待決張數', 6, debug0.left);
-same('2.10 標題逐字（web 抓 到 敵 將）', '抓 到 敵 將', debug0.title);
+// 標題被 R180 那輪（project/180_战斗HUD对齐.md：逐字照原作「武 將 招 降」）取代：
+// SurrenderPanel.ts:69-75 的 PANEL_TITLE_TEXT 是本视图侧覆盖（SurrenderModel.PANEL_TITLE
+// 仍是 web 共用的「抓 到 敵 將」）。旧断言抄的是 web 文案，已过期。
+same('2.10 標題逐字（原作「武 將 招 降」）', '武 將 招 降', debug0.title);
 includes('2.11 副標寫回城名 + 三個處置', '逐將詢問：招降的進 許昌 武將池，斬首的出池永不復活，釋放的放回原勢力', debug0.sub);
 includes('2.12 底部提示寫待決數', '剩 6 位待決', debug0.msg);
 same('2.13 批量鍵可用', true, debug0.bulkEnabled);
 same('2.14 還沒落庫（沒有完成鍵）', false, debug0.canFinish);
 
 // 節點樹
-same('2.15 面板子節點數（1 蒙版 + 1 Graphics + 5 表頭 + 5×9 卡 + 1 提示 + 3 批量 + 1 完成）', 57, panel.node.children.length);
+// 節點數被 R196/R197 的「招降十欄」取代：每張卡多 10 個 SurFieldK* + 10 個 SurFieldV*
+// （SurrenderPanel.ts:422-450，SUR_FIELD_KEYS 見 :91-102），舊「5×9 卡」已不成立。
+// 152 = 1 蒙版 + 1 Graphics + 5 表头（SurTitle/SurSub/SurPrev/SurPage/SurNext）
+//     + 5×(1 头像 + 1 名 + 1 档位 + 10 键 + 10 值 + 1 理由 + 1 取舍 + 3 按钮 = 28)
+//     + 1 提示（SurMsg）+ 3 批量 + 1 完成（SurFinish）。
+same('2.15 面板子節點數（1 蒙版 + 1 Graphics + 5 表頭 + 5×28 卡〔含十欄〕 + 1 提示 + 3 批量 + 1 完成）', 152, panel.node.children.length);
 ok('2.16 蒙版存在', child(panel, 'SurVeil') !== null);
 ok('2.17 Graphics 畫布存在', child(panel, 'SurFrame') !== null);
 const g = child(panel, 'SurFrame').getComponent('Graphics');
@@ -226,7 +234,20 @@ console.log('── 3. 逐將一張卡：頭像 / 名 / 數值 / 檔位 / 三顆
 {
   same('3.1 第 1 張名字', '張遼', labelText(panel, 'SurName0'));
   same('3.2 第 1 張檔位（roll）', '需 再 戰', labelText(panel, 'SurTier0'));
-  same('3.3 第 1 張數值行（web 逐字）', '武 92 · 智 78 · 忠誠 40 · 義理 4', labelText(panel, 'SurStat0'));
+  // 舊「武 92 · 智 78 · 忠誠 40 · 義理 4」一行是 project/120 的单行數值；已被
+  // R196/R197「招降十欄」取代（SurrenderPanel.ts:91-102 SUR_FIELD_KEYS、
+  // :698-708 由 surFieldCells() 填键/值，null → 灰「—」）。逐欄斷言：
+  const fieldKeys = [];
+  const fieldVals = [];
+  for (let k = 0; k < 10; k += 1) {
+    fieldKeys.push(labelText(panel, `SurFieldK0_${k}`));
+    fieldVals.push(labelText(panel, `SurFieldV0_${k}`));
+  }
+  same('3.3 第 1 張十欄的鍵（web surFields 順序）', ['等級', '士氣', '疲勞', '武力', '智力', '忠誠', '武器', '物品', '勝場數', '敗場數'], fieldKeys);
+  same('3.3a 第 1 張武力/智力/忠誠真值', ['92', '78', '40'], [fieldVals[3], fieldVals[4], fieldVals[5]]);
+  // 敗場數：面板是「戰後處置」，這一場被俘先現算 1 敗（SurrenderPanel.ts:136-138
+  // lossNow；落帳時 finishOf() 再寫進 save.generalRecord）。沒有的欄位才畫「—」。
+  same('3.3b 存檔沒有的欄位畫「—」不冒充 0，敗場數現算 1 敗', ['—', '—', '—', '—', '—', '—', '1'], [fieldVals[0], fieldVals[1], fieldVals[2], fieldVals[6], fieldVals[7], fieldVals[8], fieldVals[9]]);
   same('3.4 第 2 張檔位（must）', '可 降', labelText(panel, 'SurTier1'));
   same('3.5 第 4 張檔位（refuse）', '拒 降', labelText(panel, 'SurTier3'));
   ok('3.6 理由畫出來了', labelText(panel, 'SurReason3').includes('0x13'), labelText(panel, 'SurReason3'));

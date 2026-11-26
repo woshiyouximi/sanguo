@@ -38,6 +38,7 @@ import {
 } from 'cc';
 import * as GameState from './GameState';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -947,7 +948,7 @@ export class SaveSlotsPanel extends Component {
     if (legacy.reason === 'ok') this.flashText = `已從 web 舊存檔遷移 ${legacy.slots} 格（舊鍵保留只讀）`;
     else if (legacy.reason === 'bad-json') this.flashText = 'web 舊存檔已損壞，已回退空檔';
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'SaveSlotsPanel'), this);
       this.listening = true;
     }
     this.refresh();
@@ -956,7 +957,7 @@ export class SaveSlotsPanel extends Component {
   /** 關面板 */
   close(): void {
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'SaveSlotsPanel'), this);
       this.listening = false;
     }
     this.opened = false;

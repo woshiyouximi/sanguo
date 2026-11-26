@@ -76,19 +76,28 @@ function evalFn(
 /* ======================================================================
  * F4 內政終了 = 推進一年
  * ==================================================================== */
-test('[F4] web 真源仍是 endMonth() → advanceMonth(12)', () => {
+/*
+ * F4 內政終了 = 原作 0x41BBF5：大地圖時間逐幀流動（T 一年 3600 tick），
+ * T==0 進內政；「內政終了」只把 T 重設 3600 回大地圖，不跑月份模擬。
+ */
+test('[F4] web 真源：endMonth() 只把 T 重設 3600（與 Cocos endInterior 同語義）', () => {
   const html = web('campaign.html');
   const body = fnBody(html, 'endMonth');
-  assert.ok(body.length > 200, 'campaign.html 找不到 endMonth()');
-  assert.match(body, /advanceMonth\(12\)/);
-  assert.match(body, /markMonthActed\(save,\s*UNLIMITED\)/);
+  assert.ok(body.length > 100, 'campaign.html 找不到 endMonth()');
+  assert.doesNotMatch(body, /advanceMonth\(/, '原作 0x41BBF5 不跑任何月份模擬');
+  assert.match(body, /clockT = CLOCK_TICKS_PER_YEAR;/);
+  assert.match(body, /clockAcc = 0;/);
   assert.match(body, /內 政 終 了/);
+  // 大地圖時間：requestAnimationFrame + 60Hz 固定步長（原作每幀 T−1）
+  assert.match(html, /requestAnimationFrame\(clockFrame\);/);
+  assert.match(html, /CLOCK_TICKS_PER_YEAR = 3600;/);
+  assert.match(html, /CLOCK_TICKS_PER_MONTH = 300;/);
 });
 
 test('[F4] Cocos GameState：正月→次年正月的月數公式 + 單月調試開關', () => {
   const src = cocos('GameState.ts');
 
-  // 公式本體（web `endMonth()` 的 `advanceMonth(12)`；Cocos 要能從任意月份跑到次年正月）
+  // 公式本體（web 逐幀時鐘：T 走滿 3600 tick＝一年；Cocos 要能從任意月份跑到次年正月）
   const fn = fnBody(src, 'monthsToNextJanuary');
   assert.ok(fn.length > 0, 'GameState.ts 缺 monthsToNextJanuary()');
   assert.match(fn, /return 12 - \(\(m - 1\) % 12\);/);

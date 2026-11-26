@@ -45,6 +45,7 @@ import { makeBtn, makePanel, placeDesign } from './UiSkin';
 import type { GameData } from './types';
 import { DESIGN_H, DESIGN_W } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -173,7 +174,7 @@ export class ScenarioSelect extends Component {
     this.opened = true;
     this.build();
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ScenarioSelect'), this);
       this.listening = true;
     }
   }
@@ -181,7 +182,7 @@ export class ScenarioSelect extends Component {
   close(): void {
     this.opened = false;
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ScenarioSelect'), this);
       this.listening = false;
     }
     if (this.node.parent) this.node.parent.removeChild(this.node);
@@ -190,7 +191,7 @@ export class ScenarioSelect extends Component {
 
   onDestroy(): void {
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ScenarioSelect'), this);
       this.listening = false;
     }
     this.opened = false;

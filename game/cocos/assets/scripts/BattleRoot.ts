@@ -70,6 +70,7 @@ import type { BattleEffect, FloatTone } from './BattleInput';
 import type { CmdBg, CmdText } from './BattleCmdUi';
 import { applyTextRole } from './TextRole';
 import { makeNineSlice, makePanel, placeDesign } from './UiSkin';
+import { guardTouch, installInputResilience } from './InputGuard';
 
 const { ccclass, property } = _decorator;
 
@@ -266,18 +267,19 @@ export class BattleRoot extends Component {
   private gChrome: Graphics | null = null;
 
   onLoad(): void {
+    installInputResilience();
     this.buildUi();
     // TOUCH_END = 真正的"点"（选技/施放/撤退/重开）；START/MOVE 只喂瞄准预览，
     // 这样拖动手指瞄半径不会误触施放，也保证"结算后点一下重开"只在抬手时发生一次。
-    input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
-    input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-    input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.on(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'BattleRoot'), this);
+    input.on(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'BattleRoot'), this);
+    input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'BattleRoot'), this);
   }
 
   onDestroy(): void {
-    input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
-    input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-    input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.off(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'BattleRoot'), this);
+    input.off(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'BattleRoot'), this);
+    input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'BattleRoot'), this);
     this.audio?.uninstall();
     this.audio?.dispose();
     this.audio = null;

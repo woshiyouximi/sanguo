@@ -77,6 +77,7 @@ import { applyTextRole, applyTextRoles } from './TextRole';
 import { makeNineSlice, placeDesign } from './UiSkin';
 // 漸層近似（w5-render）：Cocos 沒有 CSS gradient，用多段色帶逼近
 import { Band, doubleEdge, edgeBands, hBands, innerEdge, lightGrid, topSheen, vBands, WARM, wash } from './Draw';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -815,6 +816,13 @@ export class ItemsPanel extends Component {
     this.labelUnlockMain.node.active = this.devTools;
     this.labelUnlockSub = this.makeLabel('ItemsUnlockSub', '補滿背包', this.unlockSubRect(), 11, COLORS.textFaint, 'center');
     this.labelUnlockSub.node.active = this.devTools;
+    // R224：詳情卡下半的「原作欄位」除錯表也是 web 調試台設施（原始 Sequence / WeaponObject / Rate…），
+    // 正式包（原生 / `?rel=1`）整塊收起：標題、兩欄、註記一起藏，畫框那幾條線在 drawFrame 裡同樣受
+    // `devTools` 門控。headless / 預覽沒有 cc.sys.isNative，devToolsOn() 仍回 true，校驗腳本不受影響。
+    if (this.labelSectField) this.labelSectField.node.active = this.devTools;
+    if (this.labelFieldKeys) this.labelFieldKeys.node.active = this.devTools;
+    if (this.labelFieldVals) this.labelFieldVals.node.active = this.devTools;
+    if (this.labelDetNote) this.labelDetNote.node.active = this.devTools;
     this.labelBack = this.makeLabel('ItemsBack', '返 回', LAYOUT.backBtn, 15, COLORS.textDim, 'center');
     this.labelHint = this.makeLabel('ItemsHint', '', LAYOUT.hint, 11, COLORS.textFaint, 'center', Label.Overflow.CLAMP);
     this.labelHint.lineHeight = 17;
@@ -993,9 +1001,9 @@ export class ItemsPanel extends Component {
     this.opened = true;
     this.node.active = true;
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
-      input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'ItemsPanel'), this);
+      input.on(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'ItemsPanel'), this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ItemsPanel'), this);
       this.listening = true;
     }
     this.refresh();
@@ -1007,9 +1015,9 @@ export class ItemsPanel extends Component {
     this.opened = false;
     this.node.active = false;
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
-      input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'ItemsPanel'), this);
+      input.off(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'ItemsPanel'), this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ItemsPanel'), this);
       this.listening = false;
     }
     this.persist();
@@ -1416,21 +1424,21 @@ export class ItemsPanel extends Component {
     const groups: GroupKey[] = this.filter === 'all' ? GROUP_ORDER.slice() : [this.filter];
     const out: ListEntry[] = [];
     for (const group of groups) {
+      // R228b：列表只列「背包裡真的有的」（使用者口径）——整类目录不再混进来。
       const rows = allItems()
         .filter((item) => groupOf(item) === group)
+        .filter((item) => {
+          const seq = seqOf(item);
+          return seq !== null && this.bag.has(seq);
+        })
         .sort(bySortAsc);
       if (rows.length === 0) continue;
-      let owned = 0;
-      for (const item of rows) {
-        const seq = seqOf(item);
-        if (seq !== null && this.bag.has(seq)) owned += 1;
-      }
       out.push({
         kind: 'head',
         group,
-        label: `${GROUP_LABELS[group]} ${rows.length} 件 · 已擁有 ${owned}`,
+        label: `${GROUP_LABELS[group]} ${rows.length} 件`,
         total: rows.length,
-        owned,
+        owned: rows.length,
         height: HEAD_H,
       });
       for (const item of rows) out.push({ kind: 'row', item, height: ROW_H });
@@ -1746,8 +1754,14 @@ export class ItemsPanel extends Component {
       // 現在：原作欄位照樣鋪 12 行「欄名 + —」（唯讀表的空行是真實內容，不是畫上去的灰條）。
       if (this.labelDetName) this.labelDetName.string = '未選擇物品';
       if (this.labelDetType) this.labelDetType.string = '點左邊清單任一行';
-      if (this.labelDetFoot) this.labelDetFoot.string = '選中後顯示加成與原作欄位';
-      if (this.labelDesc) this.labelDesc.string = '這張卡會列出：名稱 · 類型 · 十項加成 · 說明 ·\n裝上後差異 · 原作欄位（唯讀）。';
+      if (this.labelDetFoot) {
+        this.labelDetFoot.string = this.devTools ? '選中後顯示加成與原作欄位' : '選中後顯示加成與說明';
+      }
+      if (this.labelDesc) {
+        this.labelDesc.string = this.devTools
+          ? '這張卡會列出：名稱 · 類型 · 十項加成 · 說明 ·\n裝上後差異 · 原作欄位（唯讀）。'
+          : '這張卡會列出：名稱 · 類型 · 十項加成 · 說明 ·\n裝上後差異。';
+      }
       if (this.labelPreview) this.labelPreview.string = '裝上後：—';
       if (this.labelFieldKeys) {
         this.labelFieldKeys.string = FIELD_ROWS.map((row) => row.key).join('\n');
@@ -2089,13 +2103,14 @@ export class ItemsPanel extends Component {
     this.strokeRect(g, LAYOUT.bigFrame, COLORS.goldDim, 220, 2);
     this.paintBands(g, topSheen(LAYOUT.bigFrame.x + 2, LAYOUT.bigFrame.y + 2, LAYOUT.bigFrame.w - 4, '#F2DCA8', 40));
     this.hline(g, LAYOUT.sectBonus.y + LAYOUT.sectBonus.h, LAYOUT.det.x + 6, LAYOUT.det.w - 12, COLORS.line, 200);
-    this.hline(g, LAYOUT.sectField.y + LAYOUT.sectField.h, LAYOUT.det.x + 6, LAYOUT.det.w - 12, COLORS.line, 200);
+    // R224：原作欄位除錯表的分隔線只在調試台（devTools）畫；正式包連同下方 Label 一起收起。
+    if (this.devTools) {
+      this.hline(g, LAYOUT.sectField.y + LAYOUT.sectField.h, LAYOUT.det.x + 6, LAYOUT.det.w - 12, COLORS.line, 200);
+    }
 
-    // 無選中態的兩個「空帶」補丁（w12-render）：
+    // 無選中態的「空帶」補丁（w12-render）：
     // 1) 大圖框：126×126 只剩漸層 + 一圈 2px 金線，縱向 126px 沒有任何結構；
     //    這裡補一層內縮雙線 + 斜十字（純 Graphics，不新增節點、不動 LAYOUT）。
-    // 2) 原作欄位表底下的 1040→1142：一整條 100px 純色。補一條註記帶（帶底 + 雙線 + 分隔），
-    //    文字由 labelDetNote 提供；兩者都只在 det 矩形內部畫。
     if (this.selectedSeq === null) {
       const bf = LAYOUT.bigFrame;
       this.paintBands(g, doubleEdge(bf, '#000000', 120, COLORS.goldDim, 52, 1, 9));
@@ -2112,22 +2127,28 @@ export class ItemsPanel extends Component {
       // 有選中時大圖框由 bigSprite 撐住，只把內縮雙線留下當圖框的第二道邊
       this.paintBands(g, doubleEdge(LAYOUT.bigFrame, '#000000', 90, COLORS.goldDim, 40, 1, 9));
     }
-    const noteRect = { x: LAYOUT.det.x + 6, y: 1042, w: LAYOUT.det.w - 12, h: 1142 - 2 - 1042 };
-    this.paintBands(g, vBands(noteRect.x, noteRect.y, noteRect.w, noteRect.h, '#241E18', '#14110C', 8, 226, 226));
-    this.paintBands(g, doubleEdge(noteRect, '#000000', 110, COLORS.goldDim, 46, 1, 2));
-    this.paintBands(g, topSheen(noteRect.x + 2, noteRect.y + 2, noteRect.w - 4, '#F2DCA8', 22));
-    this.hline(g, noteRect.y, noteRect.x, noteRect.w, COLORS.gold, 70);
-    // 註記帶裡再加兩條分隔（文字在 1046..1086，線壓在文字下面），讓 98px 內不再出現
-    // 超過 30px 的無墨縱帶
-    this.hline(g, noteRect.y + 50, noteRect.x + 4, noteRect.w - 8, COLORS.line, 120);
-    this.hline(g, noteRect.y + 51, noteRect.x + 4, noteRect.w - 8, COLORS.gold, 26);
-    this.hline(g, noteRect.y + 72, noteRect.x + 4, noteRect.w - 8, COLORS.line, 90);
+    // 2) 原作欄位表底下的 1040→1142：一整條 100px 純色。補一條註記帶（帶底 + 雙線 + 分隔），
+    //    文字由 labelDetNote 提供；兩者都只在 det 矩形內部畫。正式包（devTools=false）連註記帶一起收，
+    //    避免頁面下半留一塊只有裝飾線、卻沒有字的空帶。
+    if (this.devTools) {
+      const noteRect = { x: LAYOUT.det.x + 6, y: 1042, w: LAYOUT.det.w - 12, h: 1142 - 2 - 1042 };
+      this.paintBands(g, vBands(noteRect.x, noteRect.y, noteRect.w, noteRect.h, '#241E18', '#14110C', 8, 226, 226));
+      this.paintBands(g, doubleEdge(noteRect, '#000000', 110, COLORS.goldDim, 46, 1, 2));
+      this.paintBands(g, topSheen(noteRect.x + 2, noteRect.y + 2, noteRect.w - 4, '#F2DCA8', 22));
+      this.hline(g, noteRect.y, noteRect.x, noteRect.w, COLORS.gold, 70);
+      // 註記帶裡再加兩條分隔（文字在 1046..1086，線壓在文字下面），讓 98px 內不再出現
+      // 超過 30px 的無墨縱帶
+      this.hline(g, noteRect.y + 50, noteRect.x + 4, noteRect.w - 8, COLORS.line, 120);
+      this.hline(g, noteRect.y + 51, noteRect.x + 4, noteRect.w - 8, COLORS.gold, 26);
+      this.hline(g, noteRect.y + 72, noteRect.x + 4, noteRect.w - 8, COLORS.line, 90);
+    }
 
     // 底欄
     const actItem = this.selectedSeq === null ? null : itemOf(this.selectedSeq);
     const actSlot = slotOf(actItem);
     const primary = Boolean(actItem) && Boolean(actSlot);
-    // 底欄三顆鈕：上亮下暗的金屬片 + 頂部高光（w5-render，對齊 web `.btn` 的漸層）
+    // 底欄＝裝備（主鈕）+ 返回；中間的「全部解鎖」只在調試台（devTools）出現。
+    // R224：正式包以前連底板都畫（Label/Skin 已藏 → 留下一個沒有字的空按鈕位），現在底板與命中一起收。
     this.paintBands(
       g,
       vBands(
@@ -2144,12 +2165,14 @@ export class ItemsPanel extends Component {
     );
     if (primary) this.paintBands(g, topSheen(LAYOUT.actBtn.x + 2, LAYOUT.actBtn.y + 2, LAYOUT.actBtn.w - 4, '#FBEBBE', 74));
     this.strokeRect(g, LAYOUT.actBtn, primary ? COLORS.gold : COLORS.line, 255, 2);
-    this.paintBands(
-      g,
-      vBands(LAYOUT.unlockBtn.x, LAYOUT.unlockBtn.y, LAYOUT.unlockBtn.w, LAYOUT.unlockBtn.h, '#2A251E', '#14110C', 8, 232, 232),
-    );
-    this.paintBands(g, topSheen(LAYOUT.unlockBtn.x + 1, LAYOUT.unlockBtn.y + 1, LAYOUT.unlockBtn.w - 2, '#C9B99A', 26));
-    this.strokeRect(g, LAYOUT.unlockBtn, COLORS.line, 255, 1);
+    if (this.devTools) {
+      this.paintBands(
+        g,
+        vBands(LAYOUT.unlockBtn.x, LAYOUT.unlockBtn.y, LAYOUT.unlockBtn.w, LAYOUT.unlockBtn.h, '#2A251E', '#14110C', 8, 232, 232),
+      );
+      this.paintBands(g, topSheen(LAYOUT.unlockBtn.x + 1, LAYOUT.unlockBtn.y + 1, LAYOUT.unlockBtn.w - 2, '#C9B99A', 26));
+      this.strokeRect(g, LAYOUT.unlockBtn, COLORS.line, 255, 1);
+    }
     this.paintBands(
       g,
       vBands(LAYOUT.backBtn.x, LAYOUT.backBtn.y, LAYOUT.backBtn.w, LAYOUT.backBtn.h, '#2A251E', '#14110C', 8, 232, 232),

@@ -52,6 +52,8 @@ export class EventTouch {}
 export const input = { on: () => {}, off: () => {} };
 export const Input = { EventType: {} };
 export const director = { loadScene: () => {} };
+export const game = { on: () => {}, off: () => {} };
+export class Game { static EVENT_SHOW = 'game-show'; static EVENT_HIDE = 'game-hide'; static EVENT_HIDDEN = 'game-hidden'; static EVENT_GAME_INITED = 'game-inited'; }
 export const sys = { localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} } };
 `;
 const CC_URL = 'data:text/javascript;charset=utf-8,' + encodeURIComponent(CC_STUB);

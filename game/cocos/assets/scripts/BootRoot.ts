@@ -38,6 +38,7 @@ import { TitlePanel } from './TitlePanel';
 import type { GameData } from './types';
 import { DESIGN_H, DESIGN_W } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch, installInputResilience } from './InputGuard';
 
 const { ccclass, property } = _decorator;
 
@@ -65,12 +66,13 @@ export class BootRoot extends Component {
   private select: ScenarioSelect | null = null;
 
   onLoad(): void {
+    installInputResilience();
     this.buildUi();
-    input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'BootRoot'), this);
   }
 
   onDestroy(): void {
-    input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'BootRoot'), this);
   }
 
   protected async start(): Promise<void> {

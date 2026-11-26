@@ -20,8 +20,25 @@ export function latchTap(): void {
   latchedFrame = director ? director.getTotalFrames() : -1;
 }
 
+/**
+ * [R228] 清掉同帧闩锁 —— 切后台/回前台时必须调。
+ *
+ * 闩锁记的是 `director.getTotalFrames()`：進后台后引擎不 tick，帧号停在原处；
+ * 如果闩锁正好记的是「隐藏前那一帧」，回前台后 `tapLatched()` 会一直是 true，
+ * 大地图/面板的所有点击都被当成「本帧已消费」直接 return（= 界面还在但点不动）。
+ */
+export function resetTapLatch(): void {
+  latchedFrame = -1;
+}
+
 /** 本帧的点击是否已被别人认领（同帧的其它监听器应当直接返回）。 */
 export function tapLatched(): boolean {
   if (!director || latchedFrame < 0) return false;
-  return director.getTotalFrames() === latchedFrame;
+  const frame = director.getTotalFrames();
+  // 帧号往回跳（场景重载/引擎重置计数器）时清闩锁，否则会永久 true。
+  if (frame < latchedFrame) {
+    latchedFrame = -1;
+    return false;
+  }
+  return frame === latchedFrame;
 }

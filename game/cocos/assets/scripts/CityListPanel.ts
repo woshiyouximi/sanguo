@@ -43,6 +43,7 @@ import {
 } from './CityList';
 import { makeBtn, makeNineSlice, placeDesign } from './UiSkin';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -440,7 +441,7 @@ export class CityListPanel extends Component {
 
     this.footLabel = this.makeLabel(
       'CityListFoot',
-      '點一行選城 · 回大地圖即可查看　[新設計]',
+      '點一行選城 · 回大地圖即可查看',
       CITY_LIST_LAYOUT.foot,
       16,
       COLORS.textFaint,
@@ -470,7 +471,7 @@ export class CityListPanel extends Component {
     this.refresh();
     if (!this.opened) {
       this.opened = true;
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'CityListPanel'), this);
     }
     return this;
   }
@@ -478,7 +479,7 @@ export class CityListPanel extends Component {
   close(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'CityListPanel'), this);
     }
     this.node.active = false;
     this.onCloseCb?.();
@@ -487,7 +488,7 @@ export class CityListPanel extends Component {
   onDestroy(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'CityListPanel'), this);
     }
   }
 

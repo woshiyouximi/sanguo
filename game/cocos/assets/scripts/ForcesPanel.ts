@@ -45,6 +45,7 @@ import { FORCE_COLOR_NEUTRAL, forceColorOf, forceIdOf, forceRoster, monthTag, nu
 import type { ForceRow } from './MonarchModel';
 import { makeNineSlice } from './UiSkin';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -753,7 +754,7 @@ export class ForcesPanel extends Component {
     this.opened = true;
     this.node.active = true;
     if (!this.listening) {
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ForcesPanel'), this);
       this.listening = true;
     }
     this.refresh();
@@ -765,7 +766,7 @@ export class ForcesPanel extends Component {
     this.opened = false;
     this.node.active = false;
     if (this.listening) {
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ForcesPanel'), this);
       this.listening = false;
     }
     const cb = this.onCloseCb;

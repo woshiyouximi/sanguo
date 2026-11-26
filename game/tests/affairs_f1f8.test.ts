@@ -39,10 +39,12 @@ test('F1 大地圖：內政鍵按月份分流（正月=內政，其餘=只讀查
   );
 });
 
-test('F1 內政終了：非正月不能收束窗口，正月那行 markMonthActed 仍在', () => {
+test('F1 內政終了：時間流動中只提示；真正重置 T 只走時鐘', () => {
   const body = fnBody(campaign, 'endMonth');
-  assert.match(body, /Saves\.monthOfYear\(save\.month\) !== 1/, '非正月要直接拒絕');
-  assert.match(body, /CM\.markMonthActed\(save, UNLIMITED\);/, 'rows85 釘死的收束行不能動');
+  assert.match(body, /if \(!clockPaused && !clockInterior\)/, '大地圖時間流動中按它＝只提示（按鈕屬內政場景）');
+  assert.match(body, /時間正在流動/, '提示「時間正在流動」');
+  assert.match(body, /clockT = CLOCK_TICKS_PER_YEAR;/, '只把 T 重設 3600（原作 0x41BBF5）');
+  assert.doesNotMatch(body, /advanceMonth\(/, '不得再跑月份模擬');
 });
 
 test('F1 城內頁：?view=1 / 非正月 / 窗口已終了 → readOnly', () => {

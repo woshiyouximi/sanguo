@@ -187,7 +187,7 @@ console.log('── 4. saveToSlot');
   same('4.1 先刷盤', 1, persisted);
   same('4.2 回傳的記錄時間戳', 1700000000000, record.at);
   same('4.3 meta 君主', '曹操', record.meta.monarch);
-  same('4.4 active 指向剛存的槽', 2, S.readIndex().active);
+  same('4.4 手動存檔不改 active（F-10，R221 取代舊「存哪格跟到哪格」）', 1, S.readIndex().active);
   same('4.5 索引裡有 2 號槽', true, S.slotRecord(S.readIndex(), 2) !== null);
 
   const payload = S.readPayload(storage, 2);
@@ -294,8 +294,11 @@ console.log('── 7. 面板文案');
 {
   resetStorage();
   const emptyLine = S.slotLines(null, 2, 1);
-  same('7.1 空槽第一行', '槽 2', emptyLine.l1);
-  same('7.2 空槽第二行', '空槽 · 可存入目前進度', emptyLine.l2);
+  // 文案口徑被 R187–R190 批次（Cocos 大地图部队层，project/186 §5）取代：
+  // 槽標題由「槽 N」改成原作幀 A_save_t0035 的「記錄NN」（SaveSlots.ts:671 SLOT_LABEL、
+  // :702 slotTitle）；空槽第二行只剩「空 · 可存入目前進度」（SaveSlots.ts:722）。
+  same('7.1 空槽第一行（記錄NN）', '記錄02', emptyLine.l1);
+  same('7.2 空槽第二行（空 · 可存入目前進度）', '空 · 可存入目前進度', emptyLine.l2);
   same('7.3 空槽第三行空白', '', emptyLine.l3);
 
   set('sanguo_campaign_v1', GAME_A);
@@ -303,14 +306,18 @@ console.log('── 7. 面板文案');
   S.renameSlot(2, '官渡');
   const index = S.readIndex();
   const filledLine = S.slotLines(S.slotRecord(index, 2), 2, 2);
-  same('7.4 有檔第一行（槽名 + 使用中）', '槽 2 · 官渡 · 使用中', filledLine.l1);
-  includes('7.5 第二行有年月/城/勝敗', '第10年10月 · 城2 · 7勝2敗', filledLine.l2);
-  includes('7.6 第二行有時間', '20', filledLine.l2);
-  same('7.7 第三行君主 + 將數', '君主曹操 · 將3', filledLine.l3);
+  // 有檔三行也是原作口徑（SaveSlots.ts:715-738）：l1=記錄NN+槽名+使用中，
+  // l2=君主 ｜ 城數NN ｜ 武將NNN ｜ 時間NNN年（西元年，AD_ANCHOR=184），
+  // l3=存於 存檔時間。舊「第10年10月 · 城2 · 7勝2敗」「君主曹操 · 將3」是
+  // project/120:160 的舊 Cocos 文案，已被 project/186 §5 取代。
+  same('7.4 有檔第一行（記錄NN + 槽名 + 使用中）', '記錄02 · 官渡 · 使用中', filledLine.l1);
+  includes('7.5 第二行是 4 段：君主｜城數｜武將｜時間（西元年）', '曹操 ｜ 城數02 ｜ 武將003 ｜ 時間193年', filledLine.l2);
+  includes('7.6 第二行時間寫西元年（不寫「第N年」）', '時間193年', filledLine.l2);
+  same('7.7 第三行存檔時間', '存於 2023-11-15 06:13', filledLine.l3);
 
   const notActive = S.slotLines(S.slotRecord(index, 2), 2, 5);
-  same('7.8 不是使用中就不加 tag', '槽 2 · 官渡', notActive.l1);
-  same('7.9 副標寫目標槽與已用數', true, S.subText(index).includes('槽 2') && S.subText(index).includes('1 / 10'));
+  same('7.8 不是使用中就不加 tag', '記錄02 · 官渡', notActive.l1);
+  same('7.9 副標寫目標槽與已用數', true, S.subText(index).includes('記錄01') && S.subText(index).includes('1 / 10'));
   same('7.10 副標提到切換', true, S.subText(index).includes('切換'));
 }
 
@@ -343,10 +350,10 @@ console.log('── 8. 面板');
   same('8.4 空盤：已用 0 槽', 0, panel.debug().filled);
   same('8.5 預設目標槽 1', 1, panel.debug().active);
   includes('8.6 底部說明是操作提示', '存＝寫入該槽', panel.debug().msg);
-  includes('8.7 副標寫目標槽', '存檔目標：槽 1', panel.debug().sub);
+  includes('8.7 副標寫目標槽（記錄NN 口徑）', '存檔目標：記錄01', panel.debug().sub);
   same('8.8 十行都在', 10, panel.debug().rows.length);
-  same('8.9 第一行沒有檔', '槽 1', panel.debug().rows[0]);
-  same('8.10 第十行沒有檔', '槽 10', panel.debug().rows[9]);
+  same('8.9 第一行沒有檔', '記錄01', panel.debug().rows[0]);
+  same('8.10 第十行沒有檔', '記錄10', panel.debug().rows[9]);
 
   const frame = panel.node.getChildByName('SlotFrame').getComponent('Graphics');
   ok('8.11 有畫圓角矩形', frame.calls.roundRect >= 20, frame.calls.roundRect);
@@ -364,7 +371,7 @@ console.log('── 8. 面板');
   cc.__emitTouch(footSave.rect.x + footSave.rect.w / 2 - 375, 667 - (footSave.rect.y + footSave.rect.h / 2));
   same('8.18 存成功：已用 1 槽', 1, panel.debug().filled);
   includes('8.19 提示條回報槽號與年月', '已存入當前槽 1 · 第10年10月', panel.debug().msg);
-  same('8.20 第 1 行變有檔', true, panel.debug().rows[0].startsWith('槽 1'));
+  same('8.20 第 1 行變有檔', true, panel.debug().rows[0].startsWith('記錄01'));
   includes('8.21 使用中 tag 出現', '使用中', panel.debug().rows[0]);
   same('8.22 有檔的列多出讀/刪命中（存/讀/刪 + 整列 = 4）', 24, panel.hitList.length);
   same('8.23 存檔本體真的寫進 storage', true, typeof get(S.payloadKey(1)) === 'string');
@@ -400,14 +407,15 @@ console.log('── 8. 面板');
   cc.__emitTouch(del1.rect.x + del1.rect.w / 2 - 375, 667 - (del1.rect.y + del1.rect.h / 2));
   same('8.37 刪完變 0 槽', 0, again.debug().filled);
   includes('8.38 提示條說刪了槽 1', '已刪除槽 1', again.debug().msg);
-  same('8.39 刪完那行回到空槽', '槽 1', again.debug().rows[0]);
+  same('8.39 刪完那行回到空槽', '記錄01', again.debug().rows[0]);
   same('8.40 本體鍵也清了', null, get(S.payloadKey(1)));
 
   // 存到槽 2（用列上的「存」鍵）
   const save2 = again.hitList.find((hit) => hit.label === 'slot:2:save');
   cc.__emitTouch(save2.rect.x + save2.rect.w / 2 - 375, 667 - (save2.rect.y + save2.rect.h / 2));
   same('8.41 槽 2 存好', true, S.slotRecord(S.readIndex(), 2) !== null);
-  same('8.42 active 跟到槽 2', 2, again.debug().active);
+  // F-10（R221）：手動存檔只寫該槽、不改 active；active 只由「讀檔/點列換槽」改。
+  same('8.42 存槽 2 不改 active（F-10，仍停在槽 1）', 1, again.debug().active);
   includes('8.43 提示條寫槽 2 與年月', '已存入槽 2 · 第10年10月', again.debug().msg);
 
   // 關閉

@@ -44,6 +44,7 @@ import {
 } from './EndingModel';
 import { makeBtn, makeNineSlice, makePanel, placeDesign } from './UiSkin';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -407,7 +408,7 @@ export class EndingPanel extends Component {
     this.refresh();
     if (!this.opened) {
       this.opened = true;
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'EndingPanel'), this);
     }
     return this;
   }
@@ -415,7 +416,7 @@ export class EndingPanel extends Component {
   close(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'EndingPanel'), this);
     }
     this.node.active = false;
     this.onCloseCb?.();
@@ -424,7 +425,7 @@ export class EndingPanel extends Component {
   onDestroy(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'EndingPanel'), this);
     }
   }
 
@@ -464,7 +465,7 @@ export class EndingPanel extends Component {
         : `後世修史，書曰：某年某月，${state.monarch}之國亡。\n其地入於他人，其民改奉新主。`;
     }
     if (this.footLabel) {
-      this.footLabel.string = '此局已結 · 重新開始將清除本局進度　[新設計]';
+      this.footLabel.string = '此局已結 · 重新開始將清除本局進度';
     }
     if (this.statLabels.length === 4 && this.statValues.length === 4) {
       this.statLabels[0].string = '用時';

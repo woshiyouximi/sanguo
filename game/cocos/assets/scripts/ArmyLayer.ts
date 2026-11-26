@@ -39,6 +39,7 @@ import {
 import { addVeil, HALF_H, HALF_W } from './ArtLayer';
 import { makeBtn, makeNineSlice, placeDesign } from './UiSkin';
 import { COLORS, FONT_FAMILY } from './view/theme';
+import { guardTouch } from './InputGuard';
 
 const { ccclass } = _decorator;
 
@@ -1148,7 +1149,7 @@ export class ArmyMenu extends Component {
     this.refresh();
     if (!this.opened) {
       this.opened = true;
-      input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ArmyMenu'), this);
     }
     return this;
   }
@@ -1170,7 +1171,7 @@ export class ArmyMenu extends Component {
   close(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ArmyMenu'), this);
     }
     this.node.active = false;
     this.options?.onClose?.();
@@ -1179,7 +1180,7 @@ export class ArmyMenu extends Component {
   onDestroy(): void {
     if (this.opened) {
       this.opened = false;
-      input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+      input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'ArmyMenu'), this);
     }
   }
 

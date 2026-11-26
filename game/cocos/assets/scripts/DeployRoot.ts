@@ -42,6 +42,7 @@ import {
 } from 'cc';
 import { addOutline, addVeil, ArtBg, ArtSprite, loadFrame } from './ArtLayer';
 import { latchTap } from './InputLatch';
+import { guardTouch, installInputResilience } from './InputGuard';
 import { isGate } from './CityModel';
 import { loadGameData } from './DataLoader';
 // 漸層近似（w5-render）：Cocos 沒有 CSS gradient，用多段色帶逼近
@@ -388,6 +389,7 @@ export class DeployRoot extends Component {
   private selWise: Node | null = null;
 
   onLoad(): void {
+    installInputResilience();
     // 底图/蒙版先建 → siblingIndex 0/1，永远在 Graphics 与 Label 之下
     this.buildArt();
     this.gBase = this.makeGraphics('DeployBase');
@@ -639,15 +641,15 @@ export class DeployRoot extends Component {
   }
 
   onEnable(): void {
-    input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);
-    input.on(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-    input.on(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.on(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'DeployRoot'), this);
+    input.on(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'DeployRoot'), this);
+    input.on(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'DeployRoot'), this);
   }
 
   onDisable(): void {
-    input.off(Input.EventType.TOUCH_START, this.onTouchStart, this);
-    input.off(Input.EventType.TOUCH_MOVE, this.onTouchMove, this);
-    input.off(Input.EventType.TOUCH_END, this.onTouch, this);
+    input.off(Input.EventType.TOUCH_START, guardTouch(this, 'onTouchStart', 'DeployRoot'), this);
+    input.off(Input.EventType.TOUCH_MOVE, guardTouch(this, 'onTouchMove', 'DeployRoot'), this);
+    input.off(Input.EventType.TOUCH_END, guardTouch(this, 'onTouch', 'DeployRoot'), this);
   }
 
   // -------------------------------------------------------------------------
@@ -973,7 +975,7 @@ export class DeployRoot extends Component {
       const runtime = O.cityMajorNameOf(save, this.home, ctx);
       if (runtime) return runtime;
     } catch (err) {
-      console.warn('[DeployRoot] 出發城太守讀取失敗，退回 garrison.json', err);
+      console.warn('[DeployRoot] 出發城太守讀取失敗，退回劇本表', err);
     }
     try {
       // 太守只有 garrison.json 里有；缺表时为空串，排序自然退回 STR+INT。
@@ -1144,7 +1146,7 @@ export class DeployRoot extends Component {
       const head = defending
         ? `敵 將 ${enemyName}（武 ${intel?.str ?? 0} / 智 ${intel?.int ?? 0}）· 敵軍 ${troops} 兵`
         : gateHere
-          ? `守 將 無（關卡：garrison.json 沒有守將）· 守軍 ${troops} 兵`
+          ? `守 將 無（此關卡未配置守將）· 守軍 ${troops} 兵`
           : `敵 將 ${enemyName}（武 ${intel?.str ?? 0} / 智 ${intel?.int ?? 0}）· 守軍 ${troops} 兵`;
       const note = intel?.fallback && !gateHere ? ' · 無守將（守備隊·城防折算）' : '';
       this.labelIntel.string =

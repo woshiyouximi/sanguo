@@ -401,11 +401,18 @@ section('7. 我方自己的人 / 我方君主 / 非君主守將');
 
   const rosterMine = freshSave();
   rosterMine.captured = ['夏侯惇', '張遼'];
+  // R221 F-01（俘虜勝者門）取代舊斷言：無 lastBattle 時 SurrenderModel 走
+  // decideBattleWon() 兜底，captured 裡有 ourForceNames()（roster 名單，許昌有夏侯惇）
+  // 的人 ⇒ 判我方敗 ⇒ openOf() 直接 null（core/roster.ts:1129-1142、
+  // SurrenderModel.ts:328-330/:356）。舊斷言假定預設 opts 一定開得了面板，已過期。
+  // 這裡顯式傳 won:true 才談得上「自己人不出卡」；不傳 won 的勝者門另立 7.5b。
   same(
-    '7.5 自己在職的將被俘也不算俘虜',
+    '7.5 自己在職的將被俘也不算俘虜（顯式 won:true 下的 mine 過濾）',
     false,
-    open(rosterMine).cards.some((c) => c.name === '夏侯惇'),
+    open(rosterMine, { won: true }).cards.some((c) => c.name === '夏侯惇'),
   );
+  same('7.5b 勝者門：我方將在處置名單且無 lastBattle → 判敗，不彈面板', null, open(rosterMine));
+  same('7.5c 勝者門顯式 won:false 也不彈面板', null, open(rosterMine, { won: false }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -461,18 +468,23 @@ section('9. queuePostBattle（把戰報寫進存檔）');
     executed: [{ name: '華佗' }],
   };
   const added = M.queuePostBattle(M.saveOf(save), post);
-  same('9.1 寫回的名字（預判失敗的不算俘虜）', ['張遼', '華佗'], added);
-  same('9.2 captured', ['張遼'], save.captured);
+  // 舊斷言「預判失敗的不算俘虜」是 project/120:222 的舊語義（captures 只收
+  // recruited===true）。該語義會讓面板永不彈（節操≥3 且原勢力健在恒「寧死不降」），
+  // 已被 P1 修復取代：SurrenderModel.ts:676-681 明文「所有俘虜（不論戰場預判成敗）
+  // 都進 captured，逐將檔位留到面板再算」，與 web main.js:845-853 一致；
+  // 修復記錄見 project/132:144（P1）→ project/37a:494（已修）。
+  same('9.1 寫回的名字（所有俘虜都進 captured，不論預判成敗）', ['張遼', '程昱', '華佗'], added);
+  same('9.2 captured', ['張遼', '程昱'], save.captured);
   same('9.3 executed', ['華佗'], save.executed);
   same('9.4 重放去重', [], M.queuePostBattle(M.saveOf(save), post));
-  same('9.5 兩次寫回結果不變', ['張遼'], save.captured);
+  same('9.5 兩次寫回結果不變', ['張遼', '程昱'], save.captured);
   throwsNot('9.6 null 安全', () => M.queuePostBattle(M.saveOf(save), null));
   same('9.7 hasPending 認 captured', true, M.hasPending(M.saveOf(save)));
   same('9.8 空 post 不炸', [], M.queuePostBattle(M.saveOf({ ...freshSave(), captured: [], executed: [] }), {}));
 
   const queueState = open(save);
   same('9.9 寫回後面板能開', true, queueState !== null);
-  same('9.10 寫回後的卡數', 2, queueState.cards.length);
+  same('9.10 寫回後的卡數', 3, queueState.cards.length);
 }
 
 /* ------------------------------------------------------------------ */

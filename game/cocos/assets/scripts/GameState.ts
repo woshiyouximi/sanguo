@@ -1350,6 +1350,34 @@ export function recordBattleResult(
   persistSave();
 }
 
+/**
+ * [R228] 兵團抵達空城：直接把城收進 `owned`，部隊併入守軍。
+ *
+ * 與 `recordBattleResult()` 的「勝則佔城」分開，是因為空城沒有戰鬥可打：
+ * 原作大地圖走過去就是接收（沒有守軍就沒有攻城戰）。
+ */
+export function occupyCity(city: string, armyId?: string | null, cap = CITY_TROOP_CAP): { ok: boolean; troops?: number } {
+  const save = loadSave();
+  if (!city) return { ok: false };
+  if (!save.owned.includes(city)) save.owned.push(city);
+  const state = save.cities[city];
+  let troops: number | undefined;
+  if (state) {
+    if (armyId) {
+      const army = save.armies.find((row) => row.id === armyId);
+      if (army) {
+        state.troops = Math.min(Math.max(0, cap), Math.max(0, Math.floor(numberOr(state.troops, 0))) + Math.max(0, Math.floor(numberOr(army.troops, 0))));
+        save.armies = save.armies.filter((row) => row.id !== armyId);
+      }
+    }
+    troops = state.troops;
+  } else if (armyId) {
+    save.armies = save.armies.filter((row) => row.id !== armyId);
+  }
+  persistSave();
+  return { ok: true, troops };
+}
+
 /** 调试/测试用：清掉内存缓存（不会删除 sys.localStorage 的存档）。 */
 export function resetCache(): void {
   cached = null;
