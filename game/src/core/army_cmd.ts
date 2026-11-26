@@ -814,6 +814,33 @@ export function cmdStepPlan(world: World, side: Side, u: Unit, cmd: number): Ste
 }
 
 /**
+ * 兵尽后的主将单挑（R216 补丁）。
+ *
+ * R216 起「士兵清零」不再结束战斗（`checkOver()` 只剩主将阵亡/撤退/时限三条出口），
+ * 但 `adjacentEnemy()` 只扫**同一车道**：两将兵尽后各自按旧令走位，永远不会进
+ * 对方的扫描行 —— 实测白等 9170 tick（153s）到 198s 判平手。这里让主将主动索敌：
+ * 朝敌将斜向逼近；同排相邻时站住交给 `adjacentEnemy()`，正好同排但错开车道时
+ * 按本方推进方向侧移一格，避免撞进敌将所在格。
+ */
+function closingStepPlan(world: World, u: Unit): StepPlan | null {
+  const foe = world.units.find((v) => v.alive && v.isGeneral && v.side !== u.side);
+  if (!foe) return null;
+  const c = unitCell(u);
+  const t = unitCell(foe);
+  const dx = t.gx - c.gx;
+  const dy = t.gy - c.gy;
+  if (dx === 0 && dy === 0) return null;
+  // 同一排且已相邻：站住打（`rowEnemyAt` 能扫到）
+  if (dy === 0 && Math.abs(dx) <= 1) return null;
+  if (dy !== 0) {
+    // 先并道：纵深朝敌将；正好同排时按本方推进方向侧移一格，避免撞进敌将所在格
+    const sx = dx !== 0 ? Math.sign(dx) : u.side === 'A' ? -1 : 1;
+    return planDirected(sx, Math.sign(dy), STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
+  }
+  return planDirected(Math.sign(dx), 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'default');
+}
+
+/**
  * 本作给 `battle.ts step()` 装的计划提供者（`world.armyStepPlan`）。
  *
  * 主将读槽 0，士兵按五军投影读槽 1..5。**没有任何指令时返回 null = 待機**
@@ -823,6 +850,10 @@ export function cmdStepPlan(world: World, side: Side, u: Unit, cmd: number): Ste
 export function armyStepPlan(world: World, u: Unit): StepPlan | null {
   if (!world || world.over) return null;
   if (!world.units.includes(u)) return null;
+  // R216 起兵尽不结束：对面没兵了就由主将互相索敌，避免走位到时限平手
+  if (u.isGeneral && world.sides[u.side === 'A' ? 'B' : 'A'].aliveCount === 0) {
+    return closingStepPlan(world, u);
+  }
   const st = armyOrderOf(world, u.side);
   // 命令系统装着但**一条令都没下过** ⇒ 待機（原作 8 个槽全 0、`0x43CF07[0]` 权重全 0）。
   // 旧代码退回 `defaultStepPlan()` 自动前压，是 [新设计]，见 project/173 Q1。

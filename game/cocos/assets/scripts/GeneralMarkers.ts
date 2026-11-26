@@ -128,23 +128,60 @@ export class GeneralMarkers {
     const g = this.g;
     g.clear();
 
-    for (let i = 0; i < this.slots.length; i += 1) {
-      const slot = this.slots[i];
-      const pose = this.pose(world, slot);
-      if (!pose) {
-        slot.faceNode.active = false;
-        slot.fallback.node.active = false;
-        slot.name.node.active = false;
-        continue;
-      }
-      this.drawPose(pose);
+    const poses = this.slots.map((slot) => this.pose(world, slot));
+    for (let i = 0; i < poses.length; i += 1) {
+      if (!poses[i]) this.hideSlot(this.slots[i]);
+    }
+    const live = poses.filter((p): p is NonNullable<typeof p> => !!p);
+    if (live.length === 2) this.spread(live[0], live[1]);
+    for (const pose of live) this.drawPose(pose);
+  }
+
+  private hideSlot(slot: Slot): void {
+    slot.faceNode.active = false;
+    slot.fallback.node.active = false;
+    slot.name.node.active = false;
+  }
+
+  private cardXAt(px: number, dir: number): number {
+    const lo = CARD_R + 6;
+    const hi = DESIGN_W - CARD_R - 6;
+    return Math.max(lo, Math.min(hi, px + dir * CARD_OFFSET));
+  }
+
+  /**
+   * 两张牌靠得太近时改挂到「这对将的外侧」：A 朝远离 B 的一边、B 朝远离 A 的一边。
+   * 正常情况仍是我方左、敌方右；只有车道相邻（两点只差 53px）时默认方向会让两张牌
+   * 都挤进两将中间的缝里，这时才翻到外侧，保证 76px 的圆牌不互相压住。
+   */
+  private spread(a: NonNullable<ReturnType<GeneralMarkers['pose']>>, b: NonNullable<ReturnType<GeneralMarkers['pose']>>): void {
+    const minGap = CARD_R * 2 + 10;
+    if (Math.abs(a.cardX - b.cardX) >= minGap) return;
+
+    const order = a.px < b.px ? -1 : a.px > b.px ? 1 : 0;
+    const aDefault = a.slot.side === 'A' ? -1 : 1;
+    const bDefault = b.slot.side === 'A' ? -1 : 1;
+    if (order === 0) {
+      a.cardX = this.cardXAt(a.px, aDefault);
+      b.cardX = this.cardXAt(b.px, bDefault);
+    } else {
+      a.cardX = this.cardXAt(a.px, order);
+      b.cardX = this.cardXAt(b.px, -order);
+    }
+
+    // 横向仍被边界夹住时（例如两将都贴边），上下错开一半差额
+    if (Math.abs(a.cardX - b.cardX) < minGap) {
+      const need = (minGap - Math.abs(a.cardX - b.cardX)) / 2 + 2;
+      const lo = MAP_TOP + CARD_R + 2;
+      const hi = FIELD_BOTTOM - CARD_R - 16;
+      a.cardY = Math.max(lo, Math.min(hi, a.cardY - need));
+      b.cardY = Math.max(lo, Math.min(hi, b.cardY + need));
     }
   }
 
   /**
-   * 算出「逻辑点 + 牌心」的位置。牌固定挂在自己一侧：**我方永远在点左边、
-   * 敌方永远在点右边**，不随车道/距离换边，也不因为两将贴身而互相推开 ——
-   * 两个逻辑点该贴多近就贴多近，牌只是两侧的 UI，看起来才是「相持对战」。
+   * 算出「逻辑点 + 牌心」的位置。默认挂在自己一侧（我方左、敌方右），
+   * 两将贴到相邻车道时由 `spread()` 改挂到这对将的外侧。
    */
   private pose(world: World, slot: Slot) {
     const gu = generalUnitOf(world, slot.side);
@@ -152,10 +189,12 @@ export class GeneralMarkers {
     const gen = world.sides[slot.side].general;
     const p = project(gu.x, gu.y, 0);
     const dir = slot.side === 'A' ? -1 : 1;
-    const lo = CARD_R + 6;
-    const hi = DESIGN_W - CARD_R - 6;
-    const cardX = Math.max(lo, Math.min(hi, p.x + dir * CARD_OFFSET));
-    return { slot, gen, px: p.x, py: p.y, dir, cardX, cardY: p.y - 2 };
+    const cardX = this.cardXAt(p.x, dir);
+    const cardY = Math.max(
+      MAP_TOP + CARD_R + 2,
+      Math.min(FIELD_BOTTOM - CARD_R - 16, p.y - 2),
+    );
+    return { slot, gen, px: p.x, py: p.y, dir, cardX, cardY };
   }
 
   private drawPose(pose: NonNullable<ReturnType<GeneralMarkers['pose']>>): void {

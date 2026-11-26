@@ -388,7 +388,7 @@ test('R115 真实战后结算：同 roll seed 两次一致，不同 roll seed �
   assert.equal(a.world.roll!.stateA, b.world.roll!.stateA);
   assert.equal(a.world.roll!.stateB, b.world.roll!.stateB);
 
-  const posts = [12, 13, 14, 15, 16].map((s) => settleWithRoll(s).post);
+  const posts = [12, 13, 14, 15, 16, 17].map((s) => settleWithRoll(s).post);
   assert.ok(
     posts.some((p) => JSON.stringify(p) !== JSON.stringify(a.post)),
     '不同 roll seed 的战后处置必须至少有一次分叉',

@@ -2331,6 +2331,12 @@ function yieldFriend(world: World, other: Unit, mover: Unit, occ: Occ): boolean 
     commitStep(other, { gx: tx, gy: ty }, occ, world.rng);
     return true;
   }
+  // 兵尽单挑：整排都被自己人堵死、没有空格可让时，让友军与主将互换位置。
+  // 否则主将永远挤不出自家方阵（R216 实测白等 9170 tick 到 198s 判平手）。
+  if (mover.isGeneral && world.sides[mover.side === 'A' ? 'B' : 'A'].aliveCount === 0) {
+    commitStep(other, mc, occ, world.rng);
+    return true;
+  }
   return false;
 }
 
