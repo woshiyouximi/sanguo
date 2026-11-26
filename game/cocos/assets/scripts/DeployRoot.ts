@@ -2050,9 +2050,10 @@ export class DeployRoot extends Component {
       .map((slot) => slot.general)
       .filter((name): name is string => !!name);
     if (rosterA.length === 0) rosterA.push(gen.NAME);
-    const rosterB = [intel?.name ?? '守備隊', ...(intel?.officers ?? []).map((o) => o.name)]
-      .filter((name, i, all) => !!name && all.indexOf(name) === i)
-      .slice(0, 4);
+    // [R244] 敵方名冊：守城戰的敵人＝**來犯兵團**，不是本城守軍快照。
+    // 舊碼一律用 `intel`（本城 `garrison.json`），守城時就把自己城的守將當成敵人，
+    // 於是「守城隊伍是袁紹的」「輪戰第二個上場的卻是關羽」（製作人七條回報之⑤⑥⑦）。
+    const rosterB = this.enemyRoster(intel);
     const loadout: BattleLoadout = {
       gen: gen.NAME,
       genStr: gen.STR,
@@ -2141,6 +2142,29 @@ export class DeployRoot extends Component {
    *   - `armyId` = 快照部隊 id：戰後 `recordBattleResult()` 據此清部隊（已不在存檔時是 no-op），
    *     不設 `defend`（我方進攻，輸了不掉城）。
    */
+  /**
+   * [R244] 敵方車輪戰名冊。
+   *
+   * 守城戰的敵人＝**來犯兵團**（`this.defenseArmyId` 指向的那支 AI 部隊），
+   * 不是本城的守軍快照（`this.intel` 是本城 `garrison.json`，那是**我們自己的人**）。
+   * 舊碼兩條路徑都拿 `intel` 當敵人，於是守城戰名單冒出自己城的前主人，
+   * 玩家還能勾選他們出戰（製作人七條回報之⑤⑥⑦）。
+   */
+  private enemyRoster(intel: EnemyIntel | null): string[] {
+    if (this.defenseArmyId) {
+      const army = GameState.armies().find((row) => row.id === this.defenseArmyId) as
+        | { general?: string; officers?: string[] }
+        | undefined;
+      const names = [army?.general ?? '', ...(army?.officers ?? [])]
+        .map((name) => String(name ?? '').trim())
+        .filter((name, i, all) => !!name && all.indexOf(name) === i);
+      if (names.length > 0) return names.slice(0, 4);
+    }
+    return [intel?.name ?? '守備隊', ...(intel?.officers ?? []).map((o) => o.name)]
+      .filter((name, i, all) => !!name && all.indexOf(name) === i)
+      .slice(0, 4);
+  }
+
   private fight(): void {
     const siege = this.siege;
     if (!siege) return;
@@ -2158,9 +2182,7 @@ export class DeployRoot extends Component {
       .map((slot) => slot.general)
       .filter((name): name is string => !!name);
     if (rosterA.length === 0) rosterA.push(genName);
-    const rosterB = [intel?.name ?? '守備隊', ...(intel?.officers ?? []).map((o) => o.name)]
-      .filter((name, i, all) => !!name && all.indexOf(name) === i)
-      .slice(0, 4);
+    const rosterB = this.enemyRoster(intel);
     const loadout: BattleLoadout = {
       gen: genName,
       genStr: gen?.STR ?? 80,

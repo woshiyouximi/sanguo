@@ -409,9 +409,25 @@ function scenarioNamesOfCity(save: unknown, city: string, ctx: OfficersCtx, excl
  *   2. roster 沒有名字、且這座城劇本開局屬於玩家 → 劇本表播種（排除野將，內政口徑）。
  *   3. roster 沒有名字、且是占領來的城 → `[]`（不拿原守將冒充自己的武將）。
  */
+/**
+ * [R244] 這座城是不是我方打下來的（`save.takenOver` 有記錄就認，月份 0 也算）。
+ *
+ * 與「我方起始城」相對：起始城的將由劇本表播種（`initCampaign()` 不寫 `roster`），
+ * 打下來的城則只有真的還活著、還在城的將（`roster`）才算數。
+ */
+function takenOverOf(save: unknown, city: string): boolean {
+  const bag = save as { takenOver?: Record<string, unknown> } | null | undefined;
+  const table = bag && bag.takenOver;
+  if (!table || typeof table !== 'object') return false;
+  return Object.prototype.hasOwnProperty.call(table, city);
+}
+
 function ownedCityNames(save: unknown, city: string, ctx: OfficersCtx): string[] {
   const fromRoster = rosterNamesOfCity(save, city, ctx);
   if (fromRoster.length > 0) return sortNames(fromRoster, statsOf(ctx));
+  // [R244] 我方打下來的城（`takenOver` 有記錄）只認名冊：劇本表裏的駐將是**前主人**的，
+  // 回落過去就會讓袁紹的將成為我方守將（守城戰名單冒出敵人、還能勾選出戰）。
+  if (takenOverOf(save, city)) return [];
   if (!isScenarioHome(city, ctx)) return [];
   return scenarioNamesOfCity(save, city, ctx, true);
 }

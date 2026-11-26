@@ -43,7 +43,7 @@ import { WEATHER_NAME } from './core/weather';
 import type { Weather } from './core/weather';
 import { loadGameData } from './DataLoader';
 import { GeneralMarkers } from './GeneralMarkers';
-import { consumeBattleLaunch, loadSave, markGeneralGone, persistSave, recordBattleResult } from './GameState';
+import { consumeBattleLaunch, loadSave, markGeneralGone, persistSave, recordBattleResult, returnGeneralsToCity } from './GameState';
 import type { BattleLaunch, DuelCarry } from './GameState';
 import { queuePostBattle } from './SurrenderModel';
 import {
@@ -359,6 +359,18 @@ export class BattleRoot extends Component {
             if (officer && officer.alive === false) dead.push(String(officer.name ?? ''));
           }
           if (dead.length > 0) markGeneralGone(dead, '死');
+          // [R244] 活著的參戰將要還回城：攻城戰的兵團抵達時已被 removeArmy()，
+          // recordBattleResult 的 armyId 找不到兵團 ⇒ 不打這一步，這批將打完就人間蒸發。
+          const deadSet = new Set(dead.map((n) => n.trim()).filter((n) => !!n));
+          const party = (this.launch?.rosterA ?? []).map((n) => String(n ?? '').trim()).filter((n) => !!n);
+          const alive = party.filter((n) => !deadSet.has(n));
+          if (alive.length > 0) {
+            const won = this.settlement.winner === 'A';
+            const target = won
+              ? String(this.launch?.city ?? '')
+              : String(this.launch?.home ?? '');
+            if (target && this.launch?.defend !== true) returnGeneralsToCity(target, alive);
+          }
           const post = this.settlement.post;
           if (this.settlement.winner === 'B' && post) {
             const captured = (post.captures ?? []).map((c) => String((c as { name?: string } | undefined)?.name ?? ''));

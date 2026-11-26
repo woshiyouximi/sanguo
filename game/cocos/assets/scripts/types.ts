@@ -147,6 +147,8 @@ export interface Item {
 export interface CampaignSave {
   /** [R242] 戰後生死/俘虜：名冊狀態權威（'死' / '俘'），由 `markGeneralGone()` 寫入 */
   generalStatus?: Record<string, string>;
+  /** [R244] 城名 → 被我方接管的月份（我方打下來的城不再回落劇本表找人） */
+  takenOver?: Record<string, number>;
   gold?: number;
   /** 已占领城池名 */
   owned?: string[];

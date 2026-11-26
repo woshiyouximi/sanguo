@@ -110,6 +110,16 @@ export interface GeneralRecordRow {
 export interface CampaignSave {
   /** [R242] 戰後生死/俘虜：名冊狀態權威（'死' / '俘'），由 `markGeneralGone()` 寫入 */
   generalStatus?: Record<string, string>;
+  /**
+   * [R244] 城名 → 被我方接管的月份。
+   *
+   * 為什麼需要：`OfficersOfCity.ownedCityNames()` 在 `roster[城]` 為空時會**回落劇本表**，
+   * 那是新局首播的必要保底（`initCampaign()` 只發 `owned/cities`、不寫 `roster`）。
+   * 但一座被我方打下來的城（例如袁紹的樂陵）若也走這條保底，就會把**前主人的駐將**
+   * 當成我方守將 —— 守城戰名單冒出袁紹的人、還能勾選出戰（製作人實機回報）。
+   * 有了這個標記就能區分「我方起始城（該回落）」與「我方打下來的城（只認 roster）」。
+   */
+  takenOver?: Record<string, number>;
   /** 城名 → 在城武將名（`_moved` 另存調動落點）；[R241] 兵團落城要靠它把將放回去 */
   roster?: Record<string, unknown>;
   owned: string[];
@@ -1511,6 +1521,8 @@ export function recordBattleResult(
   }
   if (won) {
     if (!save.owned.includes(city)) save.owned.push(city);
+    // [R244] 打下來的城：記接管月份並清掉前主人守將，否則守城戰名單會冒出敵人
+    markCityTaken(save, city);
   } else if (defend) {
     // 守城戰輸了要丟城；野戰輸了不掉城（與 web 一致：web 只在 defend 失敗時移除 owned）
     save.owned = save.owned.filter((name) => name !== city);
@@ -1520,10 +1532,18 @@ export function recordBattleResult(
     save.armies = save.armies.filter((army) => army.id !== armyId);
     // [R241] 戰後同樣要把將放回城：贏了進佔下的城，輸了退回出發城（還在手上時）。
     // 舊碼只清兵團，於是「打輸一仗」= 這批將從名冊人間蒸發（製作人：「戰鬥失敗也是如此」）。
-    if (fought) {
+    // [R244] **只還我方兵團的人**：守城戰的 `armyId` 指向來犯的敵軍，
+    // 若照樣 absorb，就會把敵將寫進我方城的守将表（製作人：「守城隊伍是袁紹的」）。
+    if (fought && fought.side === 'A') {
       const home = won ? city : save.owned.includes(fought.from) ? fought.from : '';
       if (home) absorbArmyPeople(save, fought, home);
     }
+  }
+  // [R244] 取證用：製作人回報「打輸了城卻變我的」，這條日誌能對出是 winner 參數還是別的路徑
+  try {
+    console.log('[R244] battle result', { city, winner, defend, armyId: armyId ?? null, owned: save.owned.includes(city) });
+  } catch {
+    /* 日誌失敗不影響結算 */
   }
   persistSave();
 }
@@ -1538,6 +1558,8 @@ export function occupyCity(city: string, armyId?: string | null, cap = CITY_TROO
   const save = loadSave();
   if (!city) return { ok: false };
   if (!save.owned.includes(city)) save.owned.push(city);
+  // [R244] 接收（不管空城還是有守軍打完）都要記接管、清前主人守將
+  markCityTaken(save, city);
   const state = save.cities[city];
   let troops: number | undefined;
   if (state) {
@@ -1556,6 +1578,64 @@ export function occupyCity(city: string, armyId?: string | null, cap = CITY_TROO
   }
   persistSave();
   return { ok: true, troops };
+}
+
+/**
+ * [R244] 接管一座城：記「已接管」月份，並清掉前主人的守將名單。
+ *
+ * 兩件事都必要：
+ *   - `takenOver[城]` 讓 `OfficersOfCity.ownedCityNames()` 知道「這城是我打下來的」，
+ *     不再回落劇本表（否則樂陵會冒出袁紹的將，守城戰能勾選敵人出戰）；
+ *   - `cities[城].officers` 是舊主的守將快照（`garrison.json` 寫進來的），不清掉的話
+ *     地圖/城情面板仍會顯示他們，戰後編成也可能把他們當自己人。
+ *
+ * 新局的我方起始城不在 `takenOver` 裏，所以 `ownedCityNames()` 對它們仍走劇本表保底
+ * （`initCampaign()` 不寫 `roster`，那條保底不能刪）。
+ */
+function markCityTaken(bag: unknown, city: string): void {
+  const save = bag as unknown as {
+    takenOver?: Record<string, number>;
+    cities?: Record<string, CityRuntime>;
+    roster?: Record<string, unknown>;
+    month?: number;
+  };
+  const name = String(city ?? '').trim();
+  if (!name) return;
+  if (!save.takenOver || typeof save.takenOver !== 'object') save.takenOver = {};
+  save.takenOver[name] = Math.max(0, Math.floor(numberOr(save.month, 0)));
+  const state = save.cities ? save.cities[name] : null;
+  if (state) state.officers = [];
+  // [R244] 名冊裏這座城的舊主名單同樣要清：AI 月結會把各城守將寫進 `roster`，
+  // 打下樂陵卻留著袁紹的人 ⇒ 守城戰候選池是袁紹、還能勾選出戰（製作人實測）。
+  // 我們的將由隨後的 `absorbArmyPeople()` 補進來，順序不能反。
+  const roster = save.roster;
+  if (roster && typeof roster === 'object' && Object.prototype.hasOwnProperty.call(roster, name)) {
+    delete roster[name];
+  }
+}
+
+/** [R244] 對外版本：接管後立即落盤（測試與其他模組用） */
+export function noteCityTakenOver(city: string): void {
+  const save = loadSave();
+  markCityTaken(save, city);
+  persistSave();
+}
+
+/**
+ * [R244] 戰後把一批將寫回某城的名冊。
+ *
+ * 為什麼需要：攻城戰的兵團在抵達時已被 `removeArmy()` 移出 `save.armies`，
+ * `recordBattleResult()` 的 `armyId` 找不到兵團 ⇒ 那批將打完一仗就人間蒸發
+ * （`roster` 裏沒有、`armies` 裏也沒有）。這裡由 `BattleRoot` 把**還活著的參戰將**
+ * 直接寫回「贏了＝打下的城 / 輸了＝出發城」。
+ */
+export function returnGeneralsToCity(city: string, names: readonly string[]): void {
+  const target = String(city ?? '').trim();
+  const list = (Array.isArray(names) ? names : []).map((n) => String(n ?? '').trim()).filter((n) => !!n);
+  if (!target || list.length === 0) return;
+  const save = loadSave();
+  absorbArmyPeople(save, { general: list[0], officers: list.slice(1) } as unknown as CampaignArmy, target);
+  persistSave();
 }
 
 /**
