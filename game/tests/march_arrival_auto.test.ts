@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'cocos/assets/scripts/CampaignRoot.ts'), 'utf8');
 
-/** 抽出 stepArmiesFrame() 的本文（大括號配對） */
+/** 抽出某个方法的本文（大括號配對） */
 function bodyOf(src: string, name: string): string {
   const at = src.indexOf(name);
   if (at < 0) return '';
@@ -25,14 +25,26 @@ function bodyOf(src: string, name: string): string {
 }
 
 const FRAME = bodyOf(SRC, 'private stepArmiesFrame(n: number): void');
+const SIEGE = bodyOf(SRC, 'private startArrivalSiege(army: Army, target: string): void');
 
-test('[R226] 兵團抵達敵城 → 自動進編成/戰鬥（原作行為），不再等玩家點城', () => {
+test('[R226/R227] 兵團抵達敵城 → 直接進編成（不等玩家點城、也不受「必須接鄰」守衛阻擋）', () => {
   assert.ok(FRAME.length > 200, '找不到 stepArmiesFrame()');
-  // 到敵城：復用 doAction('march')（撤隊 → 落 deploy 快照 → 切 Deploy 編成屏）
-  assert.ok(FRAME.includes("this.doAction('march')"), "抵達敵城要自動 doAction('march')");
-  assert.ok(FRAME.includes('this.selected = target'), '要先選中目標城，doAction 才認得');
-  // 只對「不是自家城」觸發戰鬥
-  assert.ok(FRAME.includes("this.save?.owned.includes(target)"), '沒判是否自家城');
+  assert.ok(
+    FRAME.includes('this.startArrivalSiege(arrivedNew, target)'),
+    '抵達敵城要走 startArrivalSiege（R227：doAction(\'march\') 會被「不接壤」守衛擋掉）',
+  );
+  assert.ok(FRAME.includes('this.selected = target'), '要先選中目標城，刷新與 HUD 才對得上');
+  assert.ok(FRAME.includes('this.save?.owned.includes(target)'), '沒判是否自家城');
+});
+
+test('[R227] startArrivalSiege：撤隊 → 寫 deploy 快照 → 切 Deploy，且不檢查接鄰', () => {
+  assert.ok(SIEGE.length > 200, '找不到 startArrivalSiege()');
+  assert.ok(SIEGE.includes('GameState.removeArmy(army.id)'), '要先把兵團從地圖撤掉（避免同一支部隊打兩次）');
+  assert.ok(SIEGE.includes('GameState.setDeployMarch('), '要寫出征快照（from/target/pathIndex）');
+  assert.ok(SIEGE.includes('GameState.setDeployTarget('), '要寫目標城');
+  assert.ok(SIEGE.includes('this.enemyIntelOf(target)'), '要帶敵情，編成屏才顯示守軍');
+  assert.ok(SIEGE.includes("director.loadScene('Deploy')"), '要切到編成屏');
+  assert.ok(!SIEGE.includes('distanceFromOwned'), '不能檢查接鄰：多段行軍的部隊走到遠城也要能打');
 });
 
 test('[R226] 兵團抵達自家城 → 自動進城併入守軍', () => {
@@ -42,4 +54,11 @@ test('[R226] 兵團抵達自家城 → 自動進城併入守軍', () => {
 
 test('[R226] 抵達提示仍去重（不逐幀刷）', () => {
   assert.ok(FRAME.includes('arrivedNoticed'), '缺 arrivedNoticed 去重');
+});
+
+test('[R227] 兵團圖標不擋城：停在敵城上的部隊，點擊優先給城', () => {
+  assert.ok(
+    SRC.includes("picked.a.progress >= 1 && !(this.save?.owned.includes(best) ?? false)"),
+    '地圖點擊要讓「已抵達敵城的兵團」把點擊讓給城（否則兵圖標蓋住城，永遠開不了戰）',
+  );
 });

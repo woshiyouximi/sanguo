@@ -502,6 +502,26 @@ export const BATTLE_LOG_MAX = 8;
 
 /** 戰報落盤鍵（GameState 是白名單存檔，加不了欄位；換場景後戰報要還在） */
 export const BATTLE_LOG_KEY = 'sanguo_battlelog_v1';
+
+/**
+ * [R227] 這些面板一開，大地圖時鐘必須停（玩家在用界面，不能被時間偷走內政機會）。
+ * 名字取自各面板的 `*_NODE_NAME` 常量：ForcesPanel / GeneralBookPanel / ItemsPanel /
+ * MonarchPanel / CityListPanel / SaveSlotsPanel / EndingPanel。
+ */
+export const UI_PANEL_NODES = new Set<string>([
+  'ForcesPanel',
+  'GeneralBookPanel',
+  'ItemsPanel',
+  'MonarchPanel',
+  'CityListPanel',
+  'SaveSlotsPanel',
+  'EndingPanel',
+]);
+
+/** 我方城名兜底（兵團的 `from` 可能已易手，落到第一個自有城）。 */
+export function saveOwnedOr(save: { owned: string[] }, from: string): string {
+  return save.owned.includes(from) ? from : (save.owned[0] ?? from);
+}
 /** 君主座位（garrison.json 的 major === 君主那座城） */
 export const MONARCH_SEAT_KEY = 'sanguo_monarch_seat_v1';
 /** 玩家勢力已滅亡（1 = 死了；新開局清掉） */
@@ -2546,6 +2566,12 @@ export class CampaignRoot extends Component {
         // 關面板時把兩份名單與 `cities[城].officers` 同步一次，物品頁/名冊頁立刻同口徑。
         this.seedRuntimeOfficers();
         this.cityPanel?.hide();
+        // [R227] 原作「離開內政」＝ T 重設 3600（0x41BBF5）；玩家用「返回」關掉城內頁時同樣處理，
+        // 否則 T=0 會立刻再把內政頁彈回來。
+        if (this.clockT <= 0) {
+          this.clockT = 3600;
+          this.clockAcc = 0;
+        }
         this.clockPaused = false;
         this.hintText = `${cityName}：內政已更新（國庫 ${GameState.nationalGold()} 金）。`;
         this.refresh();
@@ -2585,7 +2611,13 @@ export class CampaignRoot extends Component {
    *   - 「內 政 終 了」只把 `T` 重设 3600 并恢复时钟（原作 `0x41BBF5`），不做模拟。
    */
   update(dt: number): void {
-    if (!this.save || !this.clockRunning()) return;
+    if (!this.save) return;
+    // [R227] T 已歸零但還沒進內政（例如上一步被 UI 暫停）：先補這一步，別讓玩家「錯過」內政。
+    if (this.clockT <= 0 && !this.clockPaused) {
+      this.enterInterior();
+      return;
+    }
+    if (!this.clockRunning()) return;
     // 60Hz 固定步长：原作逐帧减 1，60fps ≈ 一秒 60 tick（一年 60 秒、一月 5 秒）
     const step = 1 / 60;
     this.clockAcc += Math.min(dt, 0.25);
@@ -2605,6 +2637,9 @@ export class CampaignRoot extends Component {
     if (this.clockPaused) return false;
     if (this.cityPanel?.isOpen()) return false;
     if (this.node.children.some((c) => c.name.startsWith('Scrim_'))) return false;
+    // [R227] 原作打開任何界面時，大地圖場景仍在跑，但玩家的「內政/操作」機會不能被時間吃掉：
+    // 這裡把「面板開著就停錶」當成硬規則（用戶實測：開著界面時間照跑，回來已經過了好幾個月）。
+    if (this.node.children.some((c) => c.active && UI_PANEL_NODES.has(c.name))) return false;
     return true;
   }
 
@@ -3663,6 +3698,11 @@ export class CampaignRoot extends Component {
     }
     if (hit.kind === 'army') {
       const picked = this.armyScreen[hit.armyIndex];
+      // [R227] 兵團已停在敵城下時，兵圖標會蓋住城：此時點擊優先給城（否則永遠點不到城、開不了戰）。
+      if (picked && best && picked.a.progress >= 1 && !(this.save?.owned.includes(best) ?? false)) {
+        this.select(best);
+        return;
+      }
       if (picked) this.openArmyMenu(picked.a.id);
       return;
     }
@@ -4317,9 +4357,10 @@ export class CampaignRoot extends Component {
       const target = armyAtCity(arrivedNew);
       if (target && !(this.save?.owned.includes(target) ?? false)) {
         // [R226] 原作：兵團走到敵城下就進戰鬥，不是等玩家再點一次城、再點「攻城戰」。
-        // 這裡復用大地圖既有的 `doAction('march')`：撤隊 → 落 deploy 快照 → 切 Deploy 編成屏。
+        // [R227] 不再複用 `doAction('march')`：那條路有「必須接壤」守衛（distanceFromOwned === 1），
+        // 多段行軍的部隊走到遠城會被判「不接壤」→ 部隊被撤掉、也不進戰鬥（用戶實測）。
         this.selected = target;
-        this.doAction('march');
+        this.startArrivalSiege(arrivedNew, target);
         return;
       }
       if (target) {
@@ -4336,6 +4377,38 @@ export class CampaignRoot extends Component {
       this.hintText = this.clampHint('部隊已抵達目的地。', 160);
       this.refresh();
     }
+  }
+
+  /**
+   * [R227] 兵團抵達敵城 → 直接進編成屏（原作：走到城下就開打，不需要玩家再點城）。
+   * 不復用 `doAction('march')`：那裡有「必須接鄰」守衛，多段行軍會被判不接壤而白撤隊。
+   */
+  private startArrivalSiege(army: Army, target: string): void {
+    if (!this.save) return;
+    const from = saveOwnedOr(this.save, army.from);
+    GameState.removeArmy(army.id);
+    this.save = GameState.loadSave();
+    GameState.setDeployMarch({ from, target, pathIndex: army.pathIndex });
+    GameState.setDeployFrom(from);
+    GameState.setDeployTarget(target);
+    GameState.setDeployArmy(null);
+    const intel = this.enemyIntelOf(target);
+    GameState.setDeployEnemy(
+      intel
+        ? {
+            name: intel.name,
+            str: intel.str,
+            int: intel.int,
+            troops: intel.troops,
+            defense: intel.defense,
+            fallback: intel.fallback,
+            owner: intel.owner ?? '',
+          }
+        : null,
+    );
+    this.hintText = this.clampHint(`兵 臨 城 下：${army.general ?? '我軍'} ${army.troops} 兵 抵 ${target}，進入編成。`, 160);
+    this.refresh();
+    director.loadScene('Deploy');
   }
 
   /** 舊入口（測試與對照用）：按月推進一步。正式流程已改成逐幀，見 `stepArmiesFrame()`。 */
