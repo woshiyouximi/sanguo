@@ -554,7 +554,11 @@ export function planArmyMoves(
         blocker = other;
       }
     }
-    const next = want > limit ? Math.max(p, limit) : want;
+    const rawNext = want > limit ? Math.max(p, limit) : want;
+    // [R229] 浮點累加永遠差一點點（1/300 累加 300 次 = 0.9999999999999994）→
+    // 兵團會卡在「已走 100% 但仍在路上」，`armyAtCity()` 永遠回空字串、不觸發抵達。
+    // 沒有被駐紮兵團擋住時，貼到 1 就當作真的到了。
+    const next = rawNext < want ? rawNext : rawNext >= 1 - 1e-6 ? 1 : rawNext;
     moves.push({
       a: army,
       from: p,

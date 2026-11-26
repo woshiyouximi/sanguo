@@ -215,6 +215,8 @@ export interface CityPanelOptions {
   openCmd?: string;
   /** 關閉面板：由 `CampaignRoot` 負責隱藏 + 刷新大地圖 */
   onClose: () => void;
+  /** 左上角按钮文案：正月內政裡 = 結束內政；年中查看 = 返回 */
+  backLabel?: string;
   /** 出征：把目標城交回 `CampaignRoot` 走既有的 `doAction('march')` */
   onDeploy?: (target: string) => void;
 }
@@ -353,7 +355,7 @@ export class CityPanel extends Component {
     this.buildSkin();
 
     // 2) 標題列
-    this.lblBack = this.makeLabel('← 返回', R_BACK, 24, COLORS.text, 'center');
+    this.lblBack = this.makeLabel(this.backText(), R_BACK, 24, COLORS.text, 'center');
     this.lblTitle = this.makeLabel('', R_TITLE, FONT.title, COLORS.goldLight, 'left');
     this.lblMonth = this.makeLabel('', R_MONTH, 22, COLORS.textDim, 'right');
     if (this.lblTitle) addOutline(this.lblTitle, rgba(COLORS.black, 210), 1);
@@ -1207,6 +1209,12 @@ export class CityPanel extends Component {
     ];
   }
 
+  /** [R229] 原作沒有「返回」：城内頁的離開鍵就是「內政終了」。 */
+  private backText(): string {
+    const label = this.opts?.backLabel;
+    return typeof label === 'string' && label.trim().length > 0 ? label : '← 返回';
+  }
+
   private refresh(): void {
     const save = this.save;
     const def = this.def();
@@ -1230,7 +1238,7 @@ export class CityPanel extends Component {
     // [F19] 武將數／上限（10）—— 超編只標紅、不裁切（web `officerCapState`）。
     const officer = M.officerCapState(roster.length);
 
-    this.setLabel(this.lblBack, '← 返回');
+    this.setLabel(this.lblBack, this.backText());
     this.setLabel(this.lblTitle, this.cityName || '（無城）');
     this.setLabel(this.lblMonth, M.monthLabel(save.month));
 

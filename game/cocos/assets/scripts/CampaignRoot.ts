@@ -2552,6 +2552,9 @@ export class CampaignRoot extends Component {
     const garrisonRaw = (this.data as unknown as { garrison?: unknown }).garrison;
     const garrison = Array.isArray(garrisonRaw) ? (garrisonRaw as GarrisonScenario[]) : null;
     this.clockPaused = true;
+    // [R229] 原作沒有「返回」：正月內政裡離開城内頁 = 內政終了（T 重設 3600、時間開始流動），
+    // 年中只能查看，所以按鉅仍叫「返回」。
+    const inInterior = this.clockPaused && this.clockT <= 0;
     this.cityPanel.open({
       cityName,
       data: this.data,
@@ -2561,6 +2564,7 @@ export class CampaignRoot extends Component {
       garrison,
       // [F12/F15] 大地圖「徵兵」「開發」按鈕：進城後直接開對應抽屜
       openCmd,
+      backLabel: inInterior ? '內 政 終 了' : '← 返 回',
       onClose: () => {
         // 面板已把 gold / 城況 / 內政欄位寫回存檔；這裡只重新讀一次並刷新大地圖
         this.save = GameState.loadSave();
