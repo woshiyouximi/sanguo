@@ -67,8 +67,12 @@ const LEVEL_SRC = slice(
   'private armyWiseSeq(name: string): number {',
 );
 
-/** `MonarchModel.troopCapOf()` 的實際回傳（取整、至少 1），= 主將等級決定的帶兵上限 */
-const capOfLevel = (level) => Math.max(1, Math.round(MM.troopCapOf(level)));
+/** 原作總兵力上限 = 步兵欄 `min(5L,100)` + 騎兵欄 `clamp((L−20)×5,0,100)`（project/170） */
+const capOfLevel = (level) => {
+  const lv = Math.max(1, Math.round(level));
+  const cav = Math.max(0, Math.min(100, (lv - 20) * 5));
+  return Math.max(1, Math.round(MM.troopCapOf(lv) + cav));
+};
 
 /** `CampaignRoot.dispatchArmyTo()` 修好後的出兵數公式：min(上限, 城兵)，沒兵回 0 */
 const dispatchTroops = (cityTroops, level) =>
@@ -133,7 +137,7 @@ test('armyGeneralLevel 走 scenarioLevelOf，不再直接回 core 的 1', () => 
  * ④ dispatchArmyTo：troops = min(cap, 城兵)，城兵不足全帶，只有 0 兵才拒絕
  * ========================================================================== */
 test('dispatchArmyTo：帶兵 = min(上限, 城兵)，扣兵/戰報都用實際帶走的 taken', () => {
-  assert.match(DISPATCH_SRC, /const cap = Math\.max\(1, Math\.round\(M\.troopCapOf\(this\.armyGeneralLevel\(leader\)\)\)\);/);
+  assert.match(DISPATCH_SRC, /const cap = Math\.max\(1, Math\.round\(troopCapSumOf\(this\.armyGeneralLevel\(leader\)\)\)\);/);
   assert.match(DISPATCH_SRC, /const taken = Math\.min\(cap, Math\.max\(0, Math\.round\(garrison\)\)\);/);
   assert.match(DISPATCH_SRC, /if \(taken < 1\) \{/, '只有真的沒兵才拒絕出征');
   assert.match(DISPATCH_SRC, /troops: taken,/, '部隊兵力是 taken，不是上限 cap');
@@ -159,10 +163,12 @@ test('數字口徑：244 兵 + Lv2 ⇒ 10 兵（不是 5）；城兵不足全帶
   assert.equal(dispatchTroops(CITY_TROOPS, 2), Math.min(CITY_TROOPS, MM.troopCapOf(2)));
   assert.notEqual(dispatchTroops(CITY_TROOPS, 2), 5);
 
-  // 等級越高帶越多，上限 100（原作 min(等級×5,100)）
+  // 等級越高帶越多；20 級後騎兵欄另加（原作兩欄互不包含）
   assert.equal(dispatchTroops(CITY_TROOPS, 10), 50);
   assert.equal(dispatchTroops(CITY_TROOPS, 20), 100);
-  assert.equal(dispatchTroops(CITY_TROOPS, 99), 100);
+  assert.equal(dispatchTroops(CITY_TROOPS, 25), 125, 'Lv25 = 步 100 + 騎 25');
+  assert.equal(dispatchTroops(CITY_TROOPS, 40), 200, 'Lv40 = 步 100 + 騎 100');
+  assert.equal(dispatchTroops(CITY_TROOPS, 99), 200);
 
   // 城兵不足上限 → 全帶（web 會直接禁用出征；本作改成寬容版）
   assert.equal(dispatchTroops(7, 2), 7);

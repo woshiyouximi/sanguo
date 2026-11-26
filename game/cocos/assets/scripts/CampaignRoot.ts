@@ -40,6 +40,8 @@ import { defendersOf, garrisonOf } from './core/garrison';
 import type { GarrisonData } from './core/garrison';
 import { pathBetween, posOf } from './core/march';
 import type { Army } from './core/march';
+// 上陣總兵力 = 步兵欄 + 騎兵欄（原作 unit+0x58 / +0x5C，project/170）
+import { troopCapSumOf } from './core/levels';
 // 部隊的完整欄位（officers/advisor/stationed）在 GameState 的 CampaignArmy 上
 import type { CampaignArmy } from './GameState';
 import * as GameState from './GameState';
@@ -2650,9 +2652,10 @@ export class CampaignRoot extends Component {
           return;
         }
         const leader = this.leaderOf(from);
-        const cap = Math.max(1, Math.round(M.troopCapOf(this.armyGeneralLevel(leader))));
+        // 原作兩欄相加才是上陣總數（步 min(5L,100) + 騎 clamp((L-20)*5,0,100)）
+        const cap = Math.max(1, Math.round(troopCapSumOf(this.armyGeneralLevel(leader))));
         if (this.troopsOf(from) < 1) {
-          this.hintText = `${from} 沒有兵可出征（主將帶兵上限 ${cap}），先徵兵再出征。`;
+          this.hintText = `${from} 沒有兵可出征（主將步+騎上限 ${cap}），先徵兵再出征。`;
           this.refresh();
           return;
         }
@@ -3813,8 +3816,9 @@ export class CampaignRoot extends Component {
   /**
    * 出征 = 派出一支 A 方部隊（web `dispatchArmy()`，campaign.html:2829）。
    *
-   * 出兵數 = **min(出發城現有守軍, 出發城主將帶兵上限)**；上限 `troopCapOf(等級)`
-   * = `min(等級×5, 100)`，與 web `dispatchCapOf()` 同一條公式。
+   * 出兵數 = **min(出發城現有守軍, 出發城主將「步+騎」總上限)**；總上限
+   * = `troopCapSumOf(等級)` = `min(等級×5, 100)` 步 + `clamp((等級−20)×5, 0, 100)` 騎，
+   * 與原作 `unit+0x58/+0x5C`（project/170）及 web `dispatchCapOf()` 同一條口徑。
    *
    * 舊碼兩個坑（實機回報「城 244 兵只帶 5 兵」）：
    *  1. 等級走 `core/wises.generalLevel()`，但 `generals.json` 沒有 `level` 欄位 →
@@ -3836,12 +3840,13 @@ export class CampaignRoot extends Component {
       return;
     }
     const leader = this.leaderOf(from);
-    const cap = Math.max(1, Math.round(M.troopCapOf(this.armyGeneralLevel(leader))));
+    // 原作兩欄相加才是上陣總數（步 + 騎）；舊碼只取步兵欄，Lv20+ 會少帶騎兵
+    const cap = Math.max(1, Math.round(troopCapSumOf(this.armyGeneralLevel(leader))));
     const garrison = this.troopsOf(from);
     // 城兵不足上限 → 全帶；只有真的沒兵才拒絕（不再要求「守軍 >= 上限」）
     const taken = Math.min(cap, Math.max(0, Math.round(garrison)));
     if (taken < 1) {
-      this.hintText = `${from} 沒有兵可出征（主將帶兵上限 ${cap}），先徵兵再出征。`;
+      this.hintText = `${from} 沒有兵可出征（主將步+騎上限 ${cap}），先徵兵再出征。`;
       this.refresh();
       return;
     }
