@@ -45,6 +45,8 @@ import { Band, doubleEdge, edgeBands, innerEdge, lightGrid, topSheen, vBands, WA
 import { ItemsPanel } from './ItemsPanel';
 import * as GameState from './GameState';
 import * as M from './CityModel';
+// 城市駐將的唯一入口（純邏輯、零 cc 依賴）：物品頁武將池從存檔運行時人事取。
+import * as O from './OfficersOfCity';
 // 文字層級（w5-cocos-skin）：卡片標題 / 正文 / 數值統一走 role 表
 import { applyTextRole, applyTextRoles } from './TextRole';
 import type { GameData } from './types';
@@ -1705,8 +1707,27 @@ export class CityPanel extends Component {
         });
         this.itemsPanel = panel;
       }
+      // [ROSTER_SRC] 物品頁武將池的資料源是存檔運行時人事（我方城現在的駐將），
+      // 不是 `generals.json` 的靜態 `CITY`（劇本 0）——2026-11-26 用戶反饋的張角卡。
+      const gs = GameState.loadSave();
       const owned = (this.save as { owned?: unknown } | null)?.owned;
-      panel.open(data.generals ?? [], data.items, Array.isArray(owned) ? (owned as string[]) : []);
+      const saveRoster = (this.save as { roster?: unknown } | null)?.roster;
+      const gsRoster = (gs as unknown as { roster?: unknown }).roster;
+      const gsKing = (gs as unknown as { king?: unknown }).king;
+      const playerForce = typeof gsKing === 'string' ? gsKing.trim() : '';
+      const def = this.def();
+      panel.open(data.generals ?? [], data.items, Array.isArray(owned) ? (owned as string[]) : [], {
+        save: gs,
+        generals: data.generals,
+        scenIdx: M.intOr(this.opts?.scenIdx, 0, 0),
+        cityName: this.cityName,
+        // 默認選將：當前城太守（內政任命名單）→ 君主 → 池首
+        preferName: this.save && def ? M.majorOf(this.save, def) || '' : '',
+        king: playerForce || '',
+        roster: O.mergeRosters(saveRoster, gsRoster),
+        playerForce,
+        scenarioCities: this.opts?.scenario?.cities ?? null,
+      });
       return;
     }
     const rows: SheetRow[] = bag

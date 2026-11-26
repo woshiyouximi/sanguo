@@ -32,7 +32,7 @@ import {
 import { addOutline, addVeil, ArtBg, loadFrame } from './ArtLayer';
 // 漸層近似（w5-render）：Cocos 沒有 CSS gradient，用多段色帶逼近
 import { Band, doubleEdge, edgeBands, hBands, innerEdge, lightGrid, topSheen, vBands, WARM, wash } from './Draw';
-import { CityPanel } from './CityPanel';
+import { CityPanel, CITY_EXTRAS_KEY } from './CityPanel';
 import { loadGameData } from './DataLoader';
 import { resolveEnemyIntel } from './EnemyIntel';
 import type { EnemyIntel } from './EnemyIntel';
@@ -45,6 +45,8 @@ import type { CampaignArmy } from './GameState';
 import * as GameState from './GameState';
 import { hasPendingCaptures, healStaleQueue } from './core/run_scoped';
 import { ItemsPanel } from './ItemsPanel';
+// 城市駐將的唯一入口（純邏輯、零 cc 依賴）：存檔運行時人事優先，劇本表只作播種。
+import * as O from './OfficersOfCity';
 import * as M from './MonarchModel';
 import { MonarchPanel } from './MonarchPanel';
 import { SurrenderPanel } from './SurrenderPanel';
@@ -1394,6 +1396,11 @@ export class CampaignRoot extends Component {
       // 君主/勢力：GameState 是白名單存檔，君主欄位走補丁鍵（見 syncMonarchState 註釋）
       this.syncMonarchState();
       this.selected = this.save.owned[0] ?? null;
+      // 運行時人事播種（2026-11-26）：劇本表只是「開局快照」，這一步把「我方每座城有誰」
+      // 寫進存檔（`save.roster[城]` + `save.cities[城].officers`），敵城補劇本表守將。
+      // 之後所有面板（物品/武將名冊/勢力/君主/城池列表）都從存檔讀運行時人事，
+      // 不再吃 `garrisonOf(data, 0, 城)` 或 `general.CITY` 這種劇本 0 的靜態表。
+      this.seedRuntimeOfficers();
       this.buildCityLabels();
       // 城名 Label 是在 start() 才建的，siblingIndex 比 onLoad 建的戰報 Label 大 → 會蓋住戰報，
       // 這裡把戰報整組提回最上層。
@@ -1454,7 +1461,12 @@ export class CampaignRoot extends Component {
           atCity,
           king: monarchName,
           mine: this.myOfficerNames(),
-          onDone: () => this.refresh(),
+          // 招降/斬首/釋放會改 `save.roster`（`core/roster.applyPostBattle`）：面板關掉後
+          // 把運行時人事同步回兩份名單，物品頁/名冊頁立刻看到新名單。
+          onDone: () => {
+            this.seedRuntimeOfficers();
+            this.refresh();
+          },
         });
       }
       // R214c：按 PDF《三国群英传2 全界面按键说明》的大循环「内政(1 月) → 大地图(11 月) → 战斗」，
@@ -2077,6 +2089,9 @@ export class CampaignRoot extends Component {
       onClose: () => {
         // 面板已把 gold / 城況 / 內政欄位寫回存檔；這裡只重新讀一次並刷新大地圖
         this.save = GameState.loadSave();
+        // [ROSTER_SRC] 內政的任免/派遣/招降/移動改的是 `sanguo_city_v1.roster`；
+        // 關面板時把兩份名單與 `cities[城].officers` 同步一次，物品頁/名冊頁立刻同口徑。
+        this.seedRuntimeOfficers();
         this.cityPanel?.hide();
         this.hintText = `${cityName}：內政已更新（國庫 ${GameState.nationalGold()} 金）。`;
         this.refresh();
@@ -2324,16 +2339,21 @@ export class CampaignRoot extends Component {
   private runMapAi(): AiMonthOutcome | null {
     const save = this.save;
     if (!save || !this.data) return null;
+    // [ROSTER_SRC] AI 世界播種也吃存檔運行時人事：先取這座城「現在」的歸屬/太守/駐將
+    // （`save.cities[城]` 或我方 roster），只有完全沒有紀錄的城才回落劇本表；
+    // 劇本表 fallback 用本局 `this.scenIdx`（舊碼恆 0 ⇒《討伐董卓》跑到 184 年的人事）。
     const garrisonOfCity = (name: string): AiRunnerGarrison | null => {
       const data = this.data;
       if (!data) return null;
-      const g = garrisonOf(data, 0, name);
-      if (!g) return null;
+      const ctx = this.rosterCtx();
+      const table = garrisonOf(data, this.scenIdx, name);
+      const runtime = O.officersOfCity(save, name, ctx);
+      if (!table && runtime.length === 0) return null;
       return {
-        owner: g.owner,
-        major: g.major,
-        garrison: g.garrison,
-        officers: g.officers.map((o) => ({ name: o.name, str: o.str, int: o.int, loyal: o.loyal, status: o.status })),
+        owner: O.cityOwnerOf(save, name) || table?.owner || '',
+        major: O.cityMajorNameOf(save, name, ctx) || table?.major || '',
+        garrison: table?.garrison ?? 0,
+        officers: runtime.map((o) => ({ name: o.name, str: o.str, int: o.int, loyal: o.loyal, status: o.status })),
       };
     };
     // 型別：`GameState.CityRuntime.officers` 已升成物件陣列（cocos-officers，
@@ -2537,13 +2557,22 @@ export class CampaignRoot extends Component {
     const fallback = `勢力 ${this.kingNameOf(city)} · 太守 — · 守將 —`;
     if (!data) return fallback;
     try {
-      const garrison = garrisonOf(data as GarrisonData, 0, name);
-      const defenders = defendersOf(data as GarrisonData, 0, name, 3);
-      const owner = garrison?.owner || this.kingNameOf(city);
-      const major = garrison?.major || '—';
+      // [ROSTER_SRC] 先取存檔運行時人事（這座城現在歸誰、駐著誰）；沒有任何紀錄才回落劇本表
+      // （`garrisonOf/defendersOf` 用**本局**劇本號，舊碼恆 0 ⇒ 劇本 1 顯示 184 年的人事）。
+      const ctx = this.rosterCtx();
+      const runtime = O.officersOfCity(this.save, name, ctx);
+      const garrison = garrisonOf(data as GarrisonData, this.scenIdx, name);
+      const defenders = defendersOf(data as GarrisonData, this.scenIdx, name, 3);
+      const owner = O.cityOwnerOf(this.save, name) || garrison?.owner || this.kingNameOf(city);
+      const major = O.cityMajorNameOf(this.save, name, ctx) || garrison?.major || '—';
       // 空城（garrison.json 里 officers: []）显示兜底守備隊，而不是一个「—」让人以爲没有守军逻辑
       const intel = this.enemyIntelOf(name);
+      const runtimeNames = runtime.map((officer) => officer.name);
+      const ordered = major !== '—' && runtimeNames.indexOf(major) >= 0
+        ? [major, ...runtimeNames.filter((n) => n !== major)]
+        : runtimeNames;
       const names =
+        ordered.slice(0, 3).join('/') ||
         defenders.map((officer) => officer.name).join('/') ||
         (intel?.fallback ? `${intel.name}（城防折算 武 ${intel.str}/智 ${intel.int}）` : '—');
       return `勢力 ${owner} · 太守 ${major} · 守將 ${names}`;
@@ -3468,11 +3497,15 @@ export class CampaignRoot extends Component {
     return { still, arrived, logs, notes };
   }
 
-  /** 出發城的主將名（garrison.json 的 major → 存檔的 major）；沒有就空字串 */
+  /**
+   * 出發城的主將名：存檔運行時的 `cities[城].major` 優先 → 劇本表（**本局**劇本號）→ `''`。
+   * 舊碼是 `garrisonOf(this.data, 0, city)`：劇本號恆 0，換劇本/換勢力後會取錯太守。
+   */
   private leaderOf(city: string): string {
-    const garrison = this.data ? garrisonOf(this.data, 0, city) : null;
-    const major = garrison?.major ?? this.save?.cities[city]?.major ?? '';
-    return typeof major === 'string' ? major : '';
+    const major = O.cityMajorNameOf(this.save, city, this.rosterCtx());
+    if (major) return major;
+    const table = this.data ? garrisonOf(this.data, this.scenIdx, city) : null;
+    return typeof table?.major === 'string' ? table.major : '';
   }
 
   /**
@@ -3481,10 +3514,11 @@ export class CampaignRoot extends Component {
    * web 還有一份「出陣隊列」優先序（DQ.queueOf），Cocos 沒有那個概念 → 傳空陣列。
    */
   private armyRosterFor(city: string, leader: string): string[] {
-    const garrison = this.data ? garrisonOf(this.data, 0, city) : null;
-    const roster: string[] = [];
-    if (garrison) {
-      for (const officer of garrison.officers ?? []) {
+    // [ROSTER_SRC] 運行時駐將優先（存檔）；存檔完全沒有紀錄才回落劇本表（用本局劇本號）。
+    const roster = O.officerNamesOfCity(this.save, city, this.rosterCtx());
+    if (roster.length === 0) {
+      const table = this.data ? garrisonOf(this.data, this.scenIdx, city) : null;
+      for (const officer of table?.officers ?? []) {
         const name = typeof officer?.name === 'string' ? officer.name : '';
         if (name && roster.indexOf(name) < 0) roster.push(name);
       }
@@ -3512,7 +3546,24 @@ export class CampaignRoot extends Component {
       });
       this.itemsPanel = panel;
     }
-    panel.open(data.generals, data.items, GameState.loadSave().owned ?? []);
+    // [ROSTER_SRC] 武將池的資料源是**存檔**（我方城運行時人事），不是劇本 0 的靜態 `CITY`。
+    // 2026-11-26 用戶反饋：《討伐董卓》劉備開局，物品頁武將卡卻是黃巾之亂的張角。
+    const save = GameState.loadSave();
+    this.save = save;
+    const city = this.selected ?? save.owned[0] ?? '';
+    const ctx = this.rosterCtx();
+    panel.open(data.generals, data.items, save.owned ?? [], {
+      save,
+      generals: data.generals,
+      scenIdx: this.scenIdx,
+      cityName: city,
+      // 默認選將：當前城太守（leaderOf）→ 君主；都不在池裡才落到池首。
+      king: M.monarchOf(this.monarchState ?? {}) || runPlayerForce() || '',
+      preferName: this.leaderOf(city),
+      roster: ctx.roster ?? null,
+      playerForce: runPlayerForce(),
+      scenarioCities: this.cities,
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -3599,21 +3650,66 @@ export class CampaignRoot extends Component {
     return M.forceIdOf(this.monarchState);
   }
 
-  /** 各城守將（`garrison.json` 的 officers）：君主面板算在職武將/讓位候選/殘將都要 */
-  private officersByCity(): Record<string, unknown[]> {
-    const data = this.data;
-    if (!data) return {};
-    let map = this.officerMap;
-    if (!map) {
-      map = {};
-      this.officerMap = map;
+  /**
+   * 內政 extras（`sanguo_city_v1`）裡的 roster；讀不到/壞資料 → `null`。
+   *
+   * Cocos 目前有兩份 roster：戰役存檔的 `save.roster`（招降台帳，`core/roster` 寫）與
+   * 內政 extras 的 `roster`（任免/派遣/招降，`CityPanel.persist` 寫），兩者互不同步。
+   */
+  private readExtrasRoster(): Record<string, unknown> | null {
+    try {
+      const raw = sys.localStorage.getItem(CITY_EXTRAS_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const roster = (parsed as { roster?: unknown }).roster;
+      return roster && typeof roster === 'object' && !Array.isArray(roster)
+        ? (roster as Record<string, unknown>)
+        : null;
+    } catch (err) {
+      console.warn(`[ROSTER_SRC] 讀 ${CITY_EXTRAS_KEY} 失敗：${String(err)}`);
+      return null;
     }
-    for (const city of this.cities) {
-      if (map[city.NAME]) continue;
-      const garrison = garrisonOf(data, 0, city.NAME);
-      map[city.NAME] = garrison ? (garrison.officers as unknown[]) : [];
-    }
-    return map;
+  }
+
+  /**
+   * 面板/播種的統一上下文：存檔 `save.roster` **∪** 內政 extras roster。
+   * `scenIdx` 只給「還沒有人事紀錄的城」播種用，已有名單的城換劇本不受影響。
+   */
+  private rosterCtx(): O.OfficersCtx {
+    const save = this.save as unknown as { roster?: unknown } | null;
+    return {
+      generals: this.generals,
+      scenIdx: this.scenIdx,
+      roster: O.mergeRosters(save?.roster, this.readExtrasRoster()),
+      playerForce: runPlayerForce(),
+      scenarioCities: this.cities,
+    };
+  }
+
+  /**
+   * 運行時人事播種/同步（2026-11-26「物品頁武將卡是張角」的根治點）。
+   *
+   * 我方每座城：把 `save.roster[城]` 與 `save.cities[城].officers` 寫成同一份名單；
+   * 敵城：有人事紀錄就尊重（AI 月結寫的），沒有才按**本局劇本**的劇本表播種。
+   * 入口：`start()`、招降面板 `onDone`、內政面板 `onClose`（見各處呼叫）。
+   */
+  private seedRuntimeOfficers(): void {
+    const save = this.save;
+    if (!save) return;
+    const ctx = this.rosterCtx();
+    const result = O.seedCityOfficers(save, this.cities, ctx);
+    GameState.persistSave();
+    console.log(`[ROSTER_SRC] seed officers: owned=${result.owned} seeded=${result.seeded}`);
+  }
+
+  /**
+   * 各城駐將：存檔運行時人事（`OfficersOfCity.officersOfCity`）——
+   * 君主面板的在職武將/讓位候選/殘將、名冊頁的「城 → 武將」索引都用它。
+   * 舊碼是 `garrisonOf(data, 0, 城)`（劇本 0 靜態表，換劇本/換勢力都會錯）。
+   */
+  private officersByCity(): Record<string, O.OfficerLike[]> {
+    return O.officersByCity(this.save, this.cities, this.rosterCtx());
   }
 
   private ensureMonarchPanel(): MonarchPanel {
@@ -3675,6 +3771,11 @@ export class CampaignRoot extends Component {
       save: this.save as unknown as NonNullable<Parameters<typeof ForcesPanel.show>[1]['save']>,
       data: this.data,
       cities: this.cities as unknown as NonNullable<Parameters<typeof ForcesPanel.show>[1]['cities']>,
+      // [ROSTER_SRC] 城的駐將/歸屬/太守走存檔運行時人事，不再讓面板自己 `garrisonOf(data, 0, 城)`
+      officersByCity: this.officersByCity(),
+      paths: this.paths,
+      // 劇本號只給「沒有任何人事紀錄的城」播種/取 cities 用
+      scenIdx: this.scenIdx,
       ownerOf: (name: string) => this.ownerOf(name),
       player: runPlayerForce(),
       onClose: () => {
@@ -3700,7 +3801,10 @@ export class CampaignRoot extends Component {
       // 直接传会被名义类型挡住；面板只读，这里按结构互转。
       save: this.save as unknown as NonNullable<GeneralBookPanelOptions['save']>,
       cities: this.cities as unknown as NonNullable<GeneralBookPanelOptions['cities']>,
+      // [ROSTER_SRC] 名冊「所屬城」從存檔運行時人事反查（`officersByCity`）；
+      // `scenIdx` 只給「沒有任何紀錄的將」取劇本表城市（`city_by_times[scenIdx]`）用。
       officersByCity: this.officersByCity(),
+      scenIdx: this.scenIdx,
       ownerOf: (name: string) => this.ownerOf(name),
       onClose: () => {
         this.hideSheetScrim('book');
@@ -4061,11 +4165,13 @@ export class CampaignRoot extends Component {
     let found = '';
     const data = this.data;
     if (data) {
+      const ctx = this.rosterCtx();
       for (let i = 0; i < owned.length; i += 1) {
         const name = owned[i];
         if (!name) continue;
-        const garrison = garrisonOf(data, 0, name);
-        if (garrison && garrison.major === monarch) {
+        // [ROSTER_SRC] 座位 = 君主現在當太守的那座城：存檔運行時人事優先，劇本表只兜底。
+        // 舊碼 `garrisonOf(data, 0, name)` 恆吃劇本 0，換劇本後座位判定會整個跑偏。
+        if (O.cityMajorNameOf(save, name, ctx) === monarch) {
           found = name;
           break;
         }

@@ -12,7 +12,7 @@
  *
  * | 欄位 | 第一來源 | 第二來源 | 兜底 |
  * |------|----------|----------|------|
- * | 所屬城 | `officersByCity` 反查（= 存檔現場的守將表） | `generals.CITY` | `''`（未登場） |
+ * | 所屬城 | `officersByCity` 反查（= 存檔運行時守將表） | `city_by_times[scenIdx]` → `generals.CITY` | `''`（未登場） |
  * | 狀態 | `save.generalStatus[名]`（原作 +0x0B9） | 城內守將記錄的 `status` | `generals.Status` → `'未'` |
  * | 等級 | `save.generalLevel[名]`（原作 +0x04E） | `generals.level` | 20（`CityModel.levelOf` 同口徑） |
  * | 忠誠 | `save.loyal[名]` | 守將記錄 `loyal` | `generals.Loyal` → 90 |
@@ -47,7 +47,7 @@
  * 三者都**不 import 'cc'**，所以 `work/cocos_book/model_assert.mjs` 能直接在 node 裡
  * `require` 編譯後的 JS 跑斷言（不需要 mock 引擎）。面板才碰 `cc`。
  */
-import { levelOf as cityLevelOf, type CityGeneral } from './CityModel';
+import { cityOf, levelOf as cityLevelOf, type CityGeneral } from './CityModel';
 import { FORCE_COLOR_NEUTRAL, forceColorOf, intOr, num, str, troopCapOf } from './MonarchModel';
 import { scenarioLevelOf } from './ScenarioLevels';
 
@@ -163,10 +163,16 @@ export interface BookOptions {
   magics?: unknown;
   /** wises.json（軍師技名） */
   wises?: unknown;
-  /** 各城守將 `{城: [武將]}`（campaign 傳 `CampaignRoot.officersByCity()`） */
+  /** 各城守將 `{城: [武將]}`（campaign 傳 `CampaignRoot.officersByCity()`＝存檔運行時人事） */
   officersByCity?: Record<string, unknown> | null;
   /** 城 → 勢力 id（campaign 傳自己的 `forceAt`）；不傳則全部視為無主 */
   ownerOf?: ((city: string) => string) | null;
+  /**
+   * 劇本號（`CampaignRoot.scenIdx`）：只給「守將表反查不到的將」取城市欄位用——
+   * `generals.json` 的 `city_by_times[scenIdx]` 優先、靜態 `CITY` 兜底（見 `mergeRow`）。
+   * 舊碼直接吃靜態 `CITY`（= 劇本 0 的所屬城），《討伐董卓》名冊的「所屬城」會全錯。
+   */
+  scenIdx?: unknown;
 }
 
 export interface BookSummary {
@@ -368,6 +374,8 @@ export function mergeRow(
     officer?: { city: string; rec: Record<string, unknown> } | null;
     ownerOf?: ((city: string) => string) | null;
     playerForce?: string;
+    /** 劇本號：只影響「守將表反查不到」時取城市欄位的口徑（見 `BookOptions.scenIdx`） */
+    scenIdx?: unknown;
   },
 ): BookGeneral | null {
   const rec = (raw && typeof raw === 'object' ? raw : null) as Record<string, unknown> | null;
@@ -378,7 +386,9 @@ export function mergeRow(
   const officer = ctx.officer ?? null;
   const level = levelOf(rec, save);
 
-  const city = officer && officer.city ? officer.city : str(rec.CITY).trim();
+  // 所屬城：存檔運行時守將表反查 → 本局劇本 `city_by_times[scenIdx]` → 靜態 `CITY`（未登場）。
+  // 舊碼只吃靜態 `CITY`（劇本 0 的所屬城），《討伐董卓》名冊會把所有人都標到 184 年的城。
+  const city = officer && officer.city ? officer.city : str(cityOf(rec as unknown as CityGeneral, intOr(ctx.scenIdx, 0, 0))).trim();
   const liveStatus = mapGet(save.generalStatus, name);
   const status = normBookStatus(
     liveStatus !== undefined && str(liveStatus) ? liveStatus : officer ? officer.rec.status : rec.Status,
@@ -453,6 +463,7 @@ export function buildBook(opts: BookOptions = {}): BookGeneral[] {
       officer: index.get(name) ?? null,
       ownerOf: opts.ownerOf ?? null,
       playerForce,
+      scenIdx: opts.scenIdx,
     });
     if (row) rows.push(row);
   }

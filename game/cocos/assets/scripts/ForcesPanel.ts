@@ -501,14 +501,19 @@ export interface ForcesPanelOptions {
   save: object;
   /** 有 `garrison` 就能自己算守將；沒有就用 `officersByCity` */
   data?: GarrisonData | object | null;
-  /** 全部城（`scenarios.json` 的 `cities`）；缺省從 `data.scenarios[0]` 取 */
+  /** 全部城（`scenarios.json` 的 `cities`）；缺省從 `data.scenarios[scenIdx]` 取 */
   cities?: readonly unknown[];
   /** 當前歸屬（城名 → 勢力 id）；缺省 `save.cities[n].owner` → `city.KING` */
   ownerOf?: (cityName: string) => string;
-  /** 各城武將；缺省從 `garrison.json` 取 */
+  /** 各城武將（存檔運行時人事，`CampaignRoot.officersByCity()`）；缺省按劇本表取 */
   officersByCity?: Record<string, unknown>;
-  /** 路網（`scenarios.json` 的 `paths`）；缺省從 `data.scenarios[0]` 取 */
+  /** 路網（`scenarios.json` 的 `paths`）；缺省從 `data.scenarios[scenIdx]` 取 */
   paths?: readonly unknown[];
+  /**
+   * 劇本號（`CampaignRoot.scenIdx`）：補 `cities/paths` 與 `officersByCity` 的劇本表兜底都用它。
+   * 缺省 0 只是舊行為（《討伐董卓》要傳 1，否則 60 城按 184 年的劇本表算）。
+   */
+  scenIdx?: number;
   /** 玩家勢力 id；缺省 `forceIdOf(save)` */
   player?: string;
   onClose?: (() => void) | null;
@@ -525,21 +530,21 @@ function rgba(hexColor: string, alpha = 255): Color {
   return new Color((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff, alpha);
 }
 
-function scenarioOf(data: unknown): ScenarioLike | null {
+function scenarioOf(data: unknown, scenIdx = 0): ScenarioLike | null {
   if (!data || typeof data !== 'object') return null;
   const scenarios = (data as Record<string, unknown>).scenarios;
   if (!Array.isArray(scenarios) || !scenarios.length) return null;
-  const first = scenarios[0];
-  return first && typeof first === 'object' ? (first as ScenarioLike) : null;
+  const pick = scenarios[scenIdx] ?? scenarios[0];
+  return pick && typeof pick === 'object' ? (pick as ScenarioLike) : null;
 }
 
-/** 從 `garrison.json` 取 `{城: [武將]}`（`garrisonOf()` 缺資料時回 `{}`）。 */
-export function officersByCityOf(data: unknown, cities: readonly unknown[]): Record<string, unknown> {
+/** 從 `garrison.json` 取 `{城: [武將]}`（`garrisonOf()` 缺資料時回 `{}`）；`scenIdx` 是本局劇本號。 */
+export function officersByCityOf(data: unknown, cities: readonly unknown[], scenIdx = 0): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const city of cities) {
     const name = cityNameOf(city);
     if (!name) continue;
-    const garrison = garrisonOf(data as GarrisonData, 0, name);
+    const garrison = garrisonOf(data as GarrisonData, scenIdx, name);
     out[name] = garrison ? garrison.officers : [];
   }
   return out;
@@ -724,7 +729,7 @@ export class ForcesPanel extends Component {
     if (!this.built) this.build();
     const save = options.save ?? {};
     const data = options.data ?? null;
-    const scenario = scenarioOf(data);
+    const scenario = scenarioOf(data, options.scenIdx ?? 0);
     const cities = options.cities ?? pickList(scenario?.cities);
     const paths = options.paths ?? pickList(scenario?.paths);
     const ownerOf = makeOwnerOf(cities, save, options.ownerOf);
@@ -733,7 +738,7 @@ export class ForcesPanel extends Component {
     this.paths = paths;
     this.ownerOf = ownerOf;
     this.player = str(options.player) || forceIdOf(save);
-    const officersByCity = options.officersByCity ?? officersByCityOf(data, cities);
+    const officersByCity = options.officersByCity ?? officersByCityOf(data, cities, options.scenIdx ?? 0);
     this.rows = forceListRows({
       save,
       cities,

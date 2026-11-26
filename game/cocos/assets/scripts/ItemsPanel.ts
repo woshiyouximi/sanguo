@@ -66,6 +66,9 @@ import type { EquipTable, GroupKey, ItemLike, Slot, StatKey } from './ItemsModel
 import { loadPortrait } from './Portrait';
 import type { PortraitResult } from './Portrait';
 import type { General, Item } from './types';
+// 「這座城現在有誰」的唯一入口（純邏輯、零 cc 依賴）：武將池從存檔的運行時人事取，
+// 不再吃 `generals.json` 的靜態 `CITY`（劇本 0）——見 `OfficersOfCity.ts` 的檔頭說明。
+import * as O from './OfficersOfCity';
 import type { DesignRect as Rect } from './ArtLayer';
 import { COLORS, FONT_FAMILY } from './view/theme';
 import { applyTextRole, applyTextRoles } from './TextRole';
@@ -225,6 +228,8 @@ export interface PanelDebug {
   generals: string[];
   genIndex: number;
   general: string | null;
+  /** 選中將現在所在城（運行時；測試釘「不是劇本 0 的靜態 CITY」用）。 */
+  generalCity: string;
   filter: TabKey;
   page: number;
   pages: number;
@@ -405,6 +410,50 @@ function pickPool(generals: readonly General[], owned: readonly string[]): Gener
   return pool;
 }
 
+/**
+ * 武將池的**運行時口徑**（2026-11-26 用戶反饋：物品頁武將卡不該被劇本表綁死）。
+ *
+ * 池子 = 我方每座城「現在駐著誰」（`OfficersOfCity.officersOfCity`）：先讀存檔裡的人事
+ * 紀錄（`roster` / `cities[城].officers`），只有完全沒有紀錄的城才按劇本表播種。
+ * 這樣「劉備開局看到張角」不再可能：劇本 1 下平原的運行時名單是劉備自己人。
+ *
+ * `pickPool()` 只在存檔連一座城的名字都給不出時兜底（例如舊檔/空存檔）。
+ */
+function pickRuntimePool(
+  generals: readonly General[],
+  opts: ItemsOpenOptions,
+  owned: readonly string[],
+): { pool: General[]; cities: Record<string, string>; rows: Map<string, O.OfficerLike> } {
+  const built = O.ownedOfficerPool(
+    opts.save,
+    owned,
+    {
+      generals,
+      scenIdx: opts.scenIdx ?? 0,
+      roster: (opts.roster as Record<string, unknown> | null | undefined) ?? null,
+      playerForce: opts.playerForce ?? '',
+      scenarioCities: opts.scenarioCities ?? null,
+    },
+    POOL_SIZE + 32,
+  );
+  const byName = new Map<string, General>();
+  for (const g of generals) {
+    const name = typeof g?.NAME === 'string' ? g.NAME : '';
+    if (name && !byName.has(name)) byName.set(name, g);
+  }
+  const pool: General[] = [];
+  for (const name of built.names) {
+    if (pool.length >= POOL_SIZE) break;
+    const g = byName.get(name);
+    if (g) pool.push(g);
+  }
+  const rows = new Map<string, O.OfficerLike>();
+  for (const row of built.rows) rows.set(row.name, row);
+  const cities: Record<string, string> = {};
+  for (const name of built.names) cities[name] = built.cityOf[name] ?? '';
+  return { pool, cities, rows };
+}
+
 function buildTabs(): Tab[] {
   const tabs: Tab[] = [{ key: 'all', label: '全部' }];
   for (const group of GROUP_ORDER) tabs.push({ key: group, label: GROUP_LABELS[group].replace(/\s+/g, '') });
@@ -417,6 +466,33 @@ function buildTabs(): Tab[] {
 
 export interface ItemsPanelOptions {
   onClose?: (() => void) | null;
+}
+
+/**
+ * `open()` 的第 4 個參數：武將池的資料源（存檔運行時人事）。
+ *
+ * 兩個呼叫端（`CampaignRoot.openItems()` / `CityPanel.cmdItems()`）都必須傳；
+ * 少了 `save` 才會退回舊的劇本表口徑（只當舊檔兼容的兜底，正常遊玩走不到）。
+ */
+export interface ItemsOpenOptions {
+  /** 戰役存檔（`GameState.loadSave()` 或內政面板持有的 `CitySave`）；取運行時人事用。 */
+  save?: unknown;
+  /** `generals.json` 全表；查 STR/INT/Loyal/Status（不傳就用 `open()` 的第一個參數）。 */
+  generals?: readonly General[] | null;
+  /** 劇本號（`RunSetup.scenarioIndex()`）；**只**用於「還沒有人事紀錄的城」的播種。 */
+  scenIdx?: number;
+  /** 當前城（`CampaignRoot.selected` / 內政頁的 `cityName`）：默認選將優先這座城的太守。 */
+  cityName?: string;
+  /** 君主名（`M.monarchOf(...)` / `runPlayerForce()`）：默認選將第二優先。 */
+  king?: string;
+  /** 當前城太守名（`CampaignRoot.leaderOf(city)` / 內政 `M.majorOf`）：第一優先。 */
+  preferName?: string;
+  /** 運行時 roster（`mergeRosters(存檔 roster, 內政 extras roster)`）；不傳就讀 `save.roster`。 */
+  roster?: Record<string, unknown> | null;
+  /** 玩家勢力名（`RunSetup.playerForce()`）；判斷「劇本開局是否屬於玩家」用。 */
+  playerForce?: string;
+  /** `scenarios[scenIdx].cities`；判斷城池 KING/MAJOR 用。 */
+  scenarioCities?: readonly unknown[] | null;
 }
 
 export const ITEMS_NODE_NAME = 'ItemsPanel';
@@ -527,6 +603,12 @@ export class ItemsPanel extends Component {
   private generals: General[] = [];
   private pool: General[] = [];
   private genIndex = 0;
+  /** `open()` 第 4 參數：武將池資料源（存檔運行時人事），`renderGeneral` 也用它取所在城。 */
+  private ctx: ItemsOpenOptions = {};
+  /** 武將池每一員「現在在哪座城」（運行時；`renderGeneral` 的「所在」用）。 */
+  private poolCities: Record<string, string> = {};
+  /** 武將池每一員的運行時屬性（忠誠等；`renderGeneral` 用）。 */
+  private poolRows = new Map<string, O.OfficerLike>();
   private save: ItemsSave = { equip: {}, bag: DEFAULT_BAG.slice(), gen: null };
   private bag = new Set<number>();
   private filter: TabKey = 'all';
@@ -815,19 +897,38 @@ export class ItemsPanel extends Component {
     applyTextRole(this.labelToast, 'head', 15);
   }
 
-  /** 開面板：灌資料、讀存檔、選第一位武將與第一件物品。 */
-  open(generals: readonly General[], items: readonly Item[], owned: readonly string[]): void {
+  /**
+   * 開面板：灌資料、讀存檔、選武將與第一件物品。
+   *
+   * 武將池的真源是**存檔**（`opts.save` 的我方城人事 + `opts.roster`），劇本表只在
+   * 存檔完全沒有人事紀錄時兜底。2026-11-26 用戶反饋「劉備開局物品頁看到張角」就是
+   * 舊碼直接吃 `generals.json` 的靜態 `CITY`（= 劇本 0 的所屬城）造成的；詳見
+   * `OfficersOfCity.ts` 的檔頭說明。
+   */
+  open(
+    generals: readonly General[],
+    items: readonly Item[],
+    owned: readonly string[],
+    opts: ItemsOpenOptions = {},
+  ): void {
     if (!this.built) this.build();
     registerItems(items as readonly unknown[]);
     this.generals = generals.slice();
+    this.ctx = opts;
     this.save = readItemsSave();
     this.bag = new Set<number>();
     for (const seq of this.save.bag) if (itemOf(seq)) this.bag.add(seq);
 
-    this.pool = pickPool(this.generals, owned);
-    let index = this.save.gen ? this.pool.findIndex((g) => g.NAME === this.save.gen) : -1;
-    if (index < 0) index = 0;
-    this.genIndex = index;
+    const runtimePool = pickRuntimePool(this.generals, opts, owned);
+    this.poolCities = runtimePool.cities;
+    this.poolRows = runtimePool.rows;
+    this.pool = runtimePool.pool.length > 0 ? runtimePool.pool : pickPool(this.generals, owned);
+    // 默認選將：上次選的（還在池裡）→ 當前城太守 → 君主 → 池首。
+    // 舊碼 `if (index < 0) index = 0` 等於默認選 STR+INT 最高的那位，劇本 0 平原就是張角。
+    this.genIndex = O.pickDefaultIndex(
+      this.pool.map((g) => g.NAME),
+      [this.save.gen, opts.preferName, opts.king],
+    );
 
     this.filter = 'all';
     this.page = 0;
@@ -874,6 +975,7 @@ export class ItemsPanel extends Component {
       generals: this.pool.map((g) => g.NAME),
       genIndex: this.genIndex,
       general: this.genName(),
+      generalCity: this.currentGeneralCity(),
       filter: this.filter,
       page: this.page,
       pages: this.pages.length,
@@ -1094,6 +1196,18 @@ export class ItemsPanel extends Component {
 
   private genName(): string {
     return this.currentGeneral()?.NAME ?? '';
+  }
+
+  /**
+   * 選中將「現在所在城」：武將池的運行時所在城優先；池是舊劇本表兜底時，
+   * 按劇本口徑的 `city_by_times[scenIdx]` 取（不再用靜態 `general.CITY`）。
+   */
+  private currentGeneralCity(): string {
+    const general = this.currentGeneral();
+    if (!general) return '';
+    const fromPool = this.poolCities[general.NAME];
+    if (typeof fromPool === 'string' && fromPool) return fromPool;
+    return O.cityOfGeneral(general as unknown, this.ctx.scenIdx ?? 0);
   }
 
   private equipsOf(name: string): EquipTable {
@@ -1390,7 +1504,10 @@ export class ItemsPanel extends Component {
         .join(' · ');
     }
     if (this.labelGenCity) {
-      this.labelGenCity.string = `所在 ${general.CITY ?? '—'} · 忠誠 ${num(general.Loyal)}`;
+      // 所在城與忠誠走運行時人事（存檔）口徑；劇本表只在沒有任何紀錄時兜底。
+      const runtimeRow = this.poolRows.get(general.NAME);
+      const city = this.currentGeneralCity() || '—';
+      this.labelGenCity.string = `所在 ${city} · 忠誠 ${runtimeRow ? runtimeRow.loyal : num(general.Loyal)}`;
     }
 
     // 肖像只在換人時重載（full → thumb → hero → 隱藏）

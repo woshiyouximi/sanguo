@@ -274,12 +274,17 @@ export interface GeneralBookPanelOptions {
   wises?: unknown;
   /** `CampaignRoot.save` */
   save?: object;
-  /** 各城守將 `{城: [武將]}`；缺省從 `garrison.json` 取（需 `data`） */
+  /** 各城守將 `{城: [武將]}`（campaign 傳 `CampaignRoot.officersByCity()`＝存檔運行時人事） */
   officersByCity?: Record<string, unknown>;
   /** 城 → 勢力 id；缺省 `save.cities[n].owner` → `city.KING` */
   ownerOf?: (city: string) => string;
-  /** 全部城（`scenarios.json` 的 cities）；缺省從 `data.scenarios[0]` 取 */
+  /** 全部城（`scenarios.json` 的 cities）；缺省從 `data.scenarios[scenIdx]` 取 */
   cities?: readonly unknown[];
+  /**
+   * 劇本號（`CampaignRoot.scenIdx`）：補 `cities` 與「守將表反查不到時的所屬城」都用它。
+   * 缺省 0 只是舊行為兜底（《討伐董卓》要傳 1，否則名冊的城/勢力全按 184 年算）。
+   */
+  scenIdx?: number;
   /** 有它就自己能補 `cities` / `officersByCity` */
   data?: object | null;
   /** 一開始要不要直接按城分組（web 的 `bootCmd` 沒有這檔，缺省按勢力） */
@@ -309,12 +314,12 @@ function rgba(hexColor: string, alpha = 255): Color {
   return new Color((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff, alpha);
 }
 
-function scenarioOf(data: unknown): Record<string, unknown> | null {
+function scenarioOf(data: unknown, scenIdx = 0): Record<string, unknown> | null {
   if (!data || typeof data !== 'object') return null;
   const scenarios = (data as Record<string, unknown>).scenarios;
   if (!Array.isArray(scenarios) || !scenarios.length) return null;
-  const first = scenarios[0];
-  return first && typeof first === 'object' ? (first as Record<string, unknown>) : null;
+  const pick = scenarios[scenIdx] ?? scenarios[0];
+  return pick && typeof pick === 'object' ? (pick as Record<string, unknown>) : null;
 }
 
 function cityNameOf(city: unknown): string {
@@ -605,7 +610,7 @@ export class GeneralBookPanel extends Component {
     if (!this.built) this.build();
     const save = options.save && typeof options.save === 'object' ? (options.save as Record<string, unknown>) : {};
     const data = options.data ?? null;
-    const scenario = scenarioOf(data);
+    const scenario = scenarioOf(data, options.scenIdx ?? 0);
     const cities = options.cities ?? (Array.isArray(scenario?.cities) ? (scenario?.cities as unknown[]) : []);
     const ownerOf = this.ownerOfOf(cities, save, options.ownerOf);
     const ownedRaw = save.owned;
@@ -618,6 +623,7 @@ export class GeneralBookPanel extends Component {
       wises: options.wises,
       officersByCity: options.officersByCity ?? null,
       ownerOf,
+      scenIdx: options.scenIdx,
     });
     this.group = options.group === 'city' ? 'city' : 'force';
     this.filterForce = '';
