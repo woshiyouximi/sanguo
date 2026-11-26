@@ -32,7 +32,7 @@ import type { BattleAudioMark } from './AudioBus';
 import { AudioHost } from './AudioHost';
 import { BattleHud } from './BattleHud';
 import { BattleWeather, ScreenTint } from './BattleWeather';
-import { camera, createWorld, settle, step, QI_MAX, TICK_HZ } from './core/battle';
+import { camera, createWorld, normalizeCol, settle, step, QI_MAX, TICK_HZ } from './core/battle';
 import { sangoRng } from './core/sango_rng';
 import { buildTauntSeq, regionFromCamera, tauntEnabled } from './core/open_taunt';
 import type { TauntLine } from './core/open_taunt';
@@ -82,6 +82,14 @@ const { ccclass, property } = _decorator;
  * 不按 id 过滤的话，12px 的旧行会正好压在新卡的四裸数字上。
  */
 const CARD_TAKEOVER_IDS: ReadonlySet<string> = new Set(['gen.stats', 'gen.hp', 'gen.mp']);
+
+// ---------------------------------------------------------------------------
+// F-07 出战站位：出征编成页（DeployRoot）把每将的 front/mid/back 掛在 payload 的 `cols`
+// （`{ 武將名: 'front'|'mid'|'back' }`）上带进来。`GameState.BattleLoadout` 没有 col 欄位
+// （本輪不碰 GameState.ts），`startBattle()` 是 `{ ...loadout }` 展開，額外屬性原樣進
+// `BattleLaunch`；這裡補交叉型別把 `cols` 接上，值用 core 的 `normalizeCol()` 收口。
+// ---------------------------------------------------------------------------
+type BattleLaunchWithCols = BattleLaunch & { cols?: Record<string, unknown> };
 
 const HALF_W = DESIGN_W / 2;
 const HALF_H = DESIGN_H / 2;
@@ -394,6 +402,9 @@ export class BattleRoot extends Component {
       // `roll: sangoRng(cfg.seed ?? 1)` 与 `seed` 同源；Cocos 这里用同一个 seed，
       // 战场的方向抽样 / 先扫哪一侧 / 命中 / AI 选令才与 web 逐位同流（`?seed=` 可复现）。
       const seed = launch?.seed ?? 20261124;
+      // F-07：出征編成頁傳來的站位表（按武將名）；沒帶 / 名對不上 / 值不認識 → 中列（與 web 同口徑）。
+      const launchCols: Record<string, unknown> = (launch as BattleLaunchWithCols | null)?.cols ?? {};
+      const colOf = (name: string | undefined): 'front' | 'mid' | 'back' => normalizeCol(name ? launchCols[name] : undefined);
       const world = createWorld({
         data,
         seed,
@@ -413,6 +424,8 @@ export class BattleRoot extends Component {
           morale: 60,
           // 每侧军师技：core 的 SideConfig.strategy（battle.ts:206），web 是 `cfg.wise`
           strategy: launch?.wise ?? null,
+          // F-07 主將站位：編成頁三檔（前/中/後）→ core 落位向敵方偏移 1 格（中列 = 既有落位）。
+          col: colOf(launch?.gen),
           general: launch
             ? { name: launch.gen, str: launch.genStr ?? 80, int: launch.genInt ?? 60, level: launch.genLevel ?? 6 }
             : { name: '關羽', str: 97, int: 75, level: 6 },
@@ -424,6 +437,8 @@ export class BattleRoot extends Component {
           morale: 60,
           // 敵方軍師技：web 是 `cfg.bWise`（main.js:578）
           strategy: launch?.bwise ?? null,
+          // F-07 敵方站位：本輪不開放（劇本/敵將沒帶欄位）→ 固定中列，保持既有落位。
+          col: 'mid',
           general: {
             // 守城/攻城主将：web 走 `bgen=` 传敌方主将名，缺省才是「守將」
             name: launch?.bgen ?? (launch ? '守將' : '張角'),

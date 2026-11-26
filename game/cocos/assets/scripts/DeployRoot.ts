@@ -31,6 +31,7 @@ import {
   Node,
   Sprite,
   SpriteFrame,
+  sys,
   Texture2D,
   UITransform,
   Vec3,
@@ -43,6 +44,8 @@ import { Band, edgeBands, gridWeave, lightGrid, topSheen, vBands } from './Draw'
 import { cityGarrisonTroops, resolveEnemyIntel } from './EnemyIntel';
 import type { EnemyIntel } from './EnemyIntel';
 import type { GarrisonData } from './core/garrison';
+// F-07 站位型別：直接吃 core 的 `GeneralCol`（'front'|'mid'|'back'），不複製第二份聯合型別
+import type { GeneralCol } from './core/battle';
 // 兵力兩欄（project/170）：帶兵上限 `troopCapOf()` 與騎兵上限 `cavalryCapOf()` 互不包含，
 // 上陣總數是兩欄之和（原作 `unit+0x5C` ← `unit+0x58`，`project/168` §4）。
 import { troopColumnsOf } from './core/levels';
@@ -72,6 +75,9 @@ import { COLORS, FONT_FAMILY } from './view/theme';
 import { applyTextRole, applyTextRoles } from './TextRole';
 import { makeNineSlice, placeDesign } from './UiSkin';
 import { scenarioLevelOf } from './ScenarioLevels';
+// [P0-2] 劇本號的執行期來源：與 `CampaignRoot.start()` 的 `runScenarioIndex()` 同一份 RunSetup
+// （ScenarioLevels 也在用它；本頁不再恆取第 1 劇本）
+import { scenarioIndex as runScenarioIndex } from './RunSetup';
 
 const { ccclass, property } = _decorator;
 
@@ -110,6 +116,20 @@ const QUICK_Y = 1104;
 /** 出陣順序窄條：夾在兵力快捷鈕（1104+42）與底欄（1194）之間 */
 const QUEUE_Y = 1150;
 const QUEUE_ROW_H = 96;
+
+/* ------------------------------------------------------------------ *
+ * F-07 前 / 中 / 後列（站位）
+ *
+ * 與 web `deploy.html:540-571` **同一個 localStorage 鍵、同一份格式**：
+ *   `sanguo_deploy_cols_v1` = `{ 武將名: 'front'|'mid'|'back' }`
+ * 為什麼按武將名另存、不塞進 `deployQueue`：`core/deploy_queue.ts` 的 `saveQueue()` 只寫回
+ * `{general,troop,troops}` 三欄，額外欄位會被剝掉；web 也是這樣繞開的（`COL_BY_NAME`）。
+ * 出征時把整份站位表掛在 payload 的 `cols` 欄位帶進戰鬥（web 走 URL 的 `cols=`）——
+ * 不新造傳參機制，見 `march()` / `BattleRoot.boot()`。
+ * ------------------------------------------------------------------ */
+const COL_KEY = 'sanguo_deploy_cols_v1';
+const COL_LABEL: Record<GeneralCol, string> = { front: '前', mid: '中', back: '後' };
+const COL_ORDER: readonly GeneralCol[] = ['front', 'mid', 'back'];
 
 /**
  * 兵種下標 → 原作單字（web deploy.html 的 `TROOP_CHARS` 同一張表）。
@@ -170,7 +190,9 @@ interface MatrixRow {
 }
 
 type ButtonKind = 'gen' | 'troop' | 'form' | 'wise' | 'slide' | 'quick' | 'back' | 'go'
-  | 'queue' | 'qup' | 'qdn' | 'qtr' | 'qclose';
+  | 'queue' | 'qup' | 'qdn' | 'qtr' | 'qclose'
+  // F-07 站位三檔：'qcol' = 出陣順序面板每槽（index = slot*3 + 檔位）；'mcol' = 主將區右上角
+  | 'qcol' | 'mcol';
 
 interface ButtonRect {
   kind: ButtonKind;
@@ -180,6 +202,16 @@ interface ButtonRect {
   w: number;
   h: number;
 }
+
+/**
+ * 出征 payload 的站位擴展（F-07）。
+ *
+ * `GameState.BattleLoadout` 沒有 col 欄位（也不能改：本輪不碰 GameState.ts），但
+ * `startBattle()` 內部是 `{ ...loadout, city, seed, from }` 物件展開 —— 額外屬性會原樣進
+ * `BattleLaunch`。所以型別上補一個交叉型別、執行期靠展開保留，BattleRoot 讀 `launch.cols`
+ * 即可。與 web 的 `cols=關羽:front,...` URL 參數是同一個 payload 語義。
+ */
+type BattleLoadoutWithCols = BattleLoadout & { cols: Record<string, GeneralCol> };
 
 interface WiseOption {
   seq: number | null;
@@ -215,7 +247,7 @@ function bonus(matrix: readonly MatrixRow[], attack: number, defend: number): nu
   return row.vs[defend] ?? 0;
 }
 
-/** `city_by_times` / `status_by_times` 取第 index 个剧本（web 固定 SCEN_IDX = 0） */
+/** `city_by_times` / `status_by_times` 取第 index 个剧本（index = 本局剧本号 `this.scenIdx`） */
 function timeAt(value: unknown, index: number): string {
   if (!Array.isArray(value)) return typeof value === 'string' ? value : '';
   const item = value[index];
@@ -259,6 +291,11 @@ export class DeployRoot extends Component {
   private targetCity: CampaignCity | null = null;
   /** 出發城（web 的 `?from`）：主将池按这座城出的人筛 */
   private home = '';
+  /**
+   * [P0-2] 本局劇本號：`RunSetup.scenarioIndex()` 在 `start()` 取一次，
+   * 與 `CampaignRoot.scenIdx` 同源。劇本表 / 守軍 / 敵情 / 武將所屬城都按它讀。
+   */
+  private scenIdx = 0;
   private garrison = 0;
   /**
    * 敵方主將/兵力的**唯一來源**：大地圖發起時由 `EnemyIntel.resolveEnemyIntel()` 算好、
@@ -306,6 +343,21 @@ export class DeployRoot extends Component {
   private queueHint: Label | null = null;
   private queueClose: Label | null = null;
 
+  /* ---- F-07 前 / 中 / 後列（站位） ---- */
+
+  /**
+   * 每將站位，按武將名列存（`COL_KEY`）。**不**塞進 `queue` 的槽位：`saveQueue()` 只寫回
+   * `{general,troop,troops}`，額外欄位會被剝掉 —— web 也是同一個繞法（`COL_BY_NAME`）。
+   * 預設空表 ⇒ `colOf()` 一律回 mid（= 既有落位）。
+   */
+  private cols: Record<string, GeneralCol> = {};
+  /** 武將卡右上角的「前/中/後」角標（12 個） */
+  private genColLabels: Label[] = [];
+  /** 出陣順序面板每槽第二行的三檔鈕（5 槽 × 3 檔） */
+  private queueColLabels: Label[] = [];
+  /** 主將區右上角三檔鈕的文字（3 個） */
+  private mainColLabels: Label[] = [];
+
   /* ---- 九宮底板（w5-cocos-skin） ---- */
 
   private skinLayer: Node | null = null;
@@ -341,6 +393,11 @@ export class DeployRoot extends Component {
     this.labelIntel.lineHeight = 23;
     addOutline(this.labelIntel, new Color(6, 8, 12, 200), 1);
 
+    // F-07 主將區右上角的三檔站位鈕（文字在 drawMainCols() 裡擺）
+    for (let i = 0; i < COL_ORDER.length; i += 1) {
+      this.mainColLabels.push(this.makeLabel('', 0, 0, 70, 15, COLORS.textDim, 'center'));
+    }
+
     this.makeSectionLabel('主 將', 24, 312);
     this.makeSectionLabel('兵 種（相剋 ±68 · 未學置灰）', 24, 480);
     this.makeSectionLabel('陣 形（相剋 ±25 · 未學置灰）', 24, 704);
@@ -353,6 +410,8 @@ export class DeployRoot extends Component {
 
     for (let i = 0; i < 12; i += 1) {
       this.genLabels.push(this.makeLabel('', 0, 0, GEN_W, 16, COLORS.textDim, 'center'));
+      // F-07：卡片右上角「前/中/後」角標（12px，右對齊；drawGenGrid() 裡按 colOf() 換字）
+      this.genColLabels.push(this.makeLabel('', 0, 0, 30, 12, COLORS.textFaint, 'right'));
       const thumb = new ArtSprite(this.node, `GenThumb_${i}`, { x: 0, y: 0, w: 34, h: GEN_H - 4 }, 'contain');
       thumb.setVisible(false);
       this.genThumbs.push(thumb);
@@ -379,6 +438,10 @@ export class DeployRoot extends Component {
     for (let i = 0; i < DEPLOY_SLOTS; i += 1) {
       this.queueLabels.push(this.makeLabel('', 0, 0, 320, 18, COLORS.text, 'left'));
       this.queueTroopLabels.push(this.makeLabel('', 0, 0, 190, 17, COLORS.textDim, 'center'));
+      // F-07：每槽第二行三檔站位鈕的文字（前 / 中 / 後）
+      for (let c = 0; c < COL_ORDER.length; c += 1) {
+        this.queueColLabels.push(this.makeLabel('', 0, 0, 180, 15, COLORS.textDim, 'center'));
+      }
     }
     this.queueTitle = this.makeLabel('出 陣 順 序', 375, 196, 520, 24, COLORS.goldLight, 'center');
     // 收起態時當窄條標題、展開態時當面板底部的說明（同一顆 Label，省一個節點）
@@ -394,16 +457,19 @@ export class DeployRoot extends Component {
       this.labelHint!.string = '載入劇本與武將…';
       const data = await loadGameData();
       this.data = data;
-      const scenario = data.scenarios[0] as unknown as CampaignScenario | undefined;
+      // [P0-2] 劇本號取執行期來源（CampaignRoot.start() 同一支 `RunSetup.scenarioIndex()`）；
+      // 舊碼恆取 `scenarios[0]`，《討伐董卓》等劇本會讀到第 1 劇本的城市與守軍。
+      this.scenIdx = runScenarioIndex();
+      const scenario = (data.scenarios[this.scenIdx] ?? data.scenarios[0]) as unknown as CampaignScenario | undefined;
       if (!scenario || !Array.isArray(scenario.cities)) {
-        throw new Error('scenarios[0].cities 為空，請確認 bundles/res/data/scenarios.json');
+        throw new Error(`scenarios[${this.scenIdx}].cities 為空，請確認 bundles/res/data/scenarios.json`);
       }
       const targetName = GameState.takeDeployTarget() ?? scenario.cities[0]?.NAME ?? '南皮';
       this.targetCity =
         scenario.cities.find((city) => city.NAME === targetName) ??
         ({ NAME: targetName, POPULATION: 200000, DEFENSE: 300, pos_xy: [0, 0] } satisfies CampaignCity);
       // 守軍總數：garrison.json 優先（與 web deploy.html 的 `garrison` 同口徑）
-      this.garrison = cityGarrisonTroops(data, 0, this.targetCity.NAME);
+      this.garrison = cityGarrisonTroops(data, this.scenIdx, this.targetCity.NAME);
 
       // 敵情由大地圖發起時算好（出征 = 城裏的守將；守城戰 = 來襲部隊的主將）。
       // 直接打開 Deploy 場景（沒人 setDeployEnemy）時退化成現算，空城會得到「守備隊」。
@@ -428,7 +494,7 @@ export class DeployRoot extends Component {
             officers: [],
             fallback: passed.fallback,
           }
-        : resolveEnemyIntel(data, 0, this.targetCity.NAME, 100);
+        : resolveEnemyIntel(data, this.scenIdx, this.targetCity.NAME, 100);
 
       this.troopNames = data.troops.names;
       this.formNames = data.formations.names;
@@ -436,6 +502,8 @@ export class DeployRoot extends Component {
       this.formMatrix = data.formations.matrix as unknown as MatrixRow[];
 
       const save = GameState.loadSave();
+      // F-07：進來先讀站位（與 web 共用 COL_KEY；沒存過 → 全部按中列）
+      this.loadCols();
       const from = GameState.takeDeployFrom();
       // 与 web 的 `HOME = qs.from || save.owned[0] || target` 一致
       this.home = from ?? save.owned[0] ?? targetName;
@@ -444,8 +512,8 @@ export class DeployRoot extends Component {
       const atHome = rows.filter(
         (gen) =>
           gen.NAME !== '盜賊' &&
-          timeAt(gen.city_by_times, 0) === this.home &&
-          timeAt(gen.status_by_times, 0) !== '未',
+          timeAt(gen.city_by_times, this.scenIdx) === this.home &&
+          timeAt(gen.status_by_times, this.scenIdx) !== '未',
       );
       const owned = rows.filter(
         (gen) => gen.NAME !== '盜賊' && typeof gen.CITY === 'string' && save.owned.includes(gen.CITY),
@@ -709,6 +777,10 @@ export class DeployRoot extends Component {
     applyTextRoles(this.wiseLabels, 'body', 15);
     applyTextRoles(this.quickLabels, 'num', 17);
     applyTextRoles(this.actionLabels, 'head', 18);
+    // F-07 站位角標/按鈕：版式豁免字號（格子只有 52 高、面板一行要塞三檔）
+    applyTextRoles(this.genColLabels, 'badge', 12);
+    applyTextRoles(this.mainColLabels, 'body', 15);
+    applyTextRoles(this.queueColLabels, 'body', 15);
   }
 
   private fillRect(g: Graphics, x: number, y: number, w: number, h: number, color: string, alpha = 255): void {
@@ -816,7 +888,7 @@ export class DeployRoot extends Component {
       // 太守只有 garrison.json 里有；缺表时为空串，排序自然退回 STR+INT。
       const table = (data as GarrisonData).garrison;
       const list = Array.isArray(table) ? table : [];
-      const scenario = list.find((row) => row && (row as { scenario?: number }).scenario === 0) as
+      const scenario = list.find((row) => row && (row as { scenario?: number }).scenario === this.scenIdx) as
         | { cities?: Record<string, { major?: string }> }
         | undefined;
       const city = this.targetCity ? scenario?.cities?.[this.targetCity.NAME] : undefined;
@@ -883,7 +955,7 @@ export class DeployRoot extends Component {
     // 敵情已在大地圖算好；直接開場（沒人傳）才現算。兩個分支都走 EnemyIntel，
     // 保證「空城 → 守備隊（武/智由城防折算）」而不是「守將 武 0 / 智 0」。
     if (!this.intel) {
-      this.intel = resolveEnemyIntel(data, 0, this.targetCity?.NAME ?? '南皮', 100);
+      this.intel = resolveEnemyIntel(data, this.scenIdx, this.targetCity?.NAME ?? '南皮', 100);
     }
     if (this.labelTitle) this.labelTitle.string = this.defenseArmyId ? '守 城 戰' : '出 征 編 成';
 
@@ -1065,6 +1137,7 @@ export class DeployRoot extends Component {
     });
 
     this.buttons = [];
+    this.drawMainCols(ui);
     this.drawGenGrid(ui);
     this.drawGrid(ui, 'troop', this.troopLabels, this.troopLockLabels, this.lockedTroops, this.troopNames, TROOP_COLS, TROOP_X, TROOP_Y, this.troop);
     this.drawGrid(ui, 'form', this.formLabels, this.formLockLabels, this.lockedForms, this.formNames, FORM_COLS, TROOP_X, FORM_Y, this.form);
@@ -1077,6 +1150,31 @@ export class DeployRoot extends Component {
     // 九宮底板：先按數據隱藏空格，再把選中態擺到剛畫好的格子上
     this.syncCellPlates();
     this.placeSelections();
+  }
+
+  /**
+   * 主將區右上角的三檔站位鈕（F-07）。與武將卡角標 / 出陣順序面板共用同一份 `COL_KEY`：
+   * 主將就是隊列第 1 槽，這裡改完 `colOf()` 立刻反映到角標與出征 payload。
+   */
+  private drawMainCols(g: Graphics): void {
+    const gen = this.currentGen();
+    const current = gen ? this.colOf(gen.NAME) : 'mid';
+    COL_ORDER.forEach((col, index) => {
+      // 主將卡（y136-302）右上角：姓名行右端之外、屬性行之上，70 寬的三連鈕
+      const x = 498 + index * 78;
+      const y = 138;
+      const on = col === current;
+      this.cellGrid(g, x, y, 70, 30, on ? '#4A3A20' : '#22282F', on ? '#1D1509' : '#171C22', 5, 5, on ? 244 : 200);
+      if (on) this.paintBands(g, topSheen(x + 1, y + 1, 68, '#FBEBBE', 56));
+      this.strokeRect(g, x, y, 70, 30, on ? COLORS.gold : COLORS.line, on ? 2 : 1);
+      const label = this.mainColLabels[index];
+      if (label) {
+        label.string = COL_LABEL[col];
+        label.color = rgba(on ? COLORS.goldLight : COLORS.textDim);
+        label.node.setPosition(x + 35 - HALF_W, HALF_H - (y + 15), 0);
+      }
+      this.buttons.push({ kind: 'mcol', index, x, y, w: 70, h: 30 });
+    });
   }
 
   private drawGenGrid(g: Graphics): void {
@@ -1100,6 +1198,15 @@ export class DeployRoot extends Component {
         // 左侧 34px 让给缩略立绘，姓名居中在右半格
         label.node.setPosition(x + 36 + (GEN_W - 36) / 2 - HALF_W, HALF_H - (y + GEN_H / 2), 0);
       }
+      // F-07：卡片右上角「前/中/後」角標。站位按武將名存，默認中列；角標只看不點，
+      // 三檔按鈕在主將區（主將）與出陣順序面板（每一槽）——與 web 的「按武將持久化」同口徑。
+      const colLabel = this.genColLabels[index];
+      if (colLabel) {
+        const col = this.colOf(gen.NAME);
+        colLabel.string = COL_LABEL[col];
+        colLabel.color = rgba(col === 'mid' ? COLORS.textFaint : COLORS.goldLight);
+        colLabel.node.setPosition(x + GEN_W - 16 - HALF_W, HALF_H - (y + 9), 0);
+      }
       const thumb = this.genThumbs[index];
       if (thumb) {
         thumb.setPosition(x + 2, y + 2);
@@ -1114,6 +1221,8 @@ export class DeployRoot extends Component {
     for (let i = this.generals.length; i < this.genLabels.length; i += 1) {
       const label = this.genLabels[i];
       if (label) label.string = '';
+      const colLabel = this.genColLabels[i];
+      if (colLabel) colLabel.string = '';
       this.genThumbs[i]?.setVisible(false);
     }
   }
@@ -1338,6 +1447,67 @@ export class DeployRoot extends Component {
     GameState.persistSave();
   }
 
+  // -------------------------------------------------------------------------
+  // F-07 前 / 中 / 後列（站位）
+  // -------------------------------------------------------------------------
+
+  /** 某將的站位；沒存過 / 名字不認識 → 中列（與 web 的 `colOf()` 同語義，默認中列）。 */
+  private colOf(name: string): GeneralCol {
+    const col = this.cols[name];
+    return col === 'front' || col === 'back' ? col : 'mid';
+  }
+
+  /**
+   * 從 `COL_KEY` 讀站位。只收 `front/mid/back` 三個合法值（web `loadCols()` 同口徑）：
+   * 壞 JSON / 非物件 / 髒值一律當沒存 —— 出征頁讀外部存檔不能拋。
+   */
+  private loadCols(): void {
+    const out: Record<string, GeneralCol> = {};
+    try {
+      const raw = sys.localStorage.getItem(COL_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+            if (!name) continue;
+            if (value === 'front' || value === 'mid' || value === 'back') out[name] = value;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[DeployRoot] 讀站位（COL_KEY）失敗，全部按中列', err);
+    }
+    this.cols = out;
+  }
+
+  /** 寫回 `COL_KEY`：`{ 武將名: 'front'|'mid'|'back' }`（與 web 同鍵同格式，互為相容）。 */
+  private saveCols(): void {
+    try {
+      sys.localStorage.setItem(COL_KEY, JSON.stringify(this.cols));
+    } catch (err) {
+      console.warn('[DeployRoot] 寫站位（COL_KEY）失敗，本局仍生效', err);
+    }
+  }
+
+  /** 改一將的站位並立刻落盤（角標 / 三檔按鈕 / 出征 payload 全部讀同一份 `cols`）。 */
+  private setCol(name: string, col: GeneralCol): void {
+    if (!name) return;
+    this.cols[name] = col;
+    this.saveCols();
+  }
+
+  /**
+   * 出征 payload 的站位表：出陣隊列裡的每將 → 前/中/後（5 槽全帶；默認中列）。
+   * 這是 web `deployColsParam()` 的同一份名單，只是不走字串 URL 而是直接掛 payload 的 `cols`。
+   */
+  private deployCols(): Record<string, GeneralCol> {
+    const out: Record<string, GeneralCol> = {};
+    for (const slot of this.queue) {
+      if (slot && typeof slot.general === 'string' && slot.general) out[slot.general] = this.colOf(slot.general);
+    }
+    return out;
+  }
+
   /** 三角形箭頭（按鈕沒有文字標籤，直接用 Graphics 畫，省 5 個 Label 節點）。 */
   private drawArrow(g: Graphics, cx: number, cy: number, size: number, up: boolean, color: string, alpha: number): void {
     const ax = cx - HALF_W;
@@ -1355,6 +1525,7 @@ export class DeployRoot extends Component {
     const title = this.queueTitle;
     for (const label of this.queueLabels) label.node.active = this.queueOpen;
     for (const label of this.queueTroopLabels) label.node.active = this.queueOpen;
+    for (const label of this.queueColLabels) label.node.active = this.queueOpen;
     if (title) title.node.active = this.queueOpen;
     if (this.queueClose) this.queueClose.node.active = this.queueOpen;
 
@@ -1406,6 +1577,24 @@ export class DeployRoot extends Component {
         troop.color = rgba(onField ? COLORS.text : COLORS.textFaint);
         troop.node.setPosition(px + 380 - HALF_W, HALF_H - (rowY + 12), 0);
       }
+      // F-07 站位三檔（前/中/後）：每槽第二行，按武將名存 COL_KEY（槽位本身不存 col，
+      // saveQueue() 會剝掉額外欄位）。預備槽也允許先排站位，真正進戰場的只有前 3 槽。
+      const currentCol = this.colOf(slot.general);
+      COL_ORDER.forEach((col, c) => {
+        const bx = px + 34 + c * 188;
+        const by = rowY + 42;
+        const on = currentCol === col;
+        this.cellGrid(g, bx, by, 180, 34, on ? '#4A3A20' : '#22282F', on ? '#1D1509' : '#171C22', 10, 5, on ? 244 : 200);
+        if (on) this.paintBands(g, topSheen(bx + 1, by + 1, 178, '#FBEBBE', 56));
+        this.strokeRect(g, bx, by, 180, 34, on ? COLORS.gold : COLORS.line, on ? 2 : 1);
+        const label = this.queueColLabels[i * COL_ORDER.length + c];
+        if (label) {
+          label.string = COL_LABEL[col];
+          label.color = rgba(on ? COLORS.goldLight : COLORS.textDim);
+          label.node.setPosition(bx + 90 - HALF_W, HALF_H - (by + 17), 0);
+        }
+        this.buttons.push({ kind: 'qcol', index: i * COL_ORDER.length + c, x: bx, y: by, w: 180, h: 34 });
+      });
       // 兵種：點一下在 12 個兵種字之間循環（web 版是 <select>，這裡用點擊循環，最小可用）
       this.buttons.push({ kind: 'qtr', index: i, x: px + 300, y: rowY - 6, w: 180, h: 40 });
       // 上/下移只在「可上陣的前 3 槽」之間生效（軍師技 seq 3 放開的正是這 3 槽）
@@ -1432,7 +1621,7 @@ export class DeployRoot extends Component {
     }
     this.buttons.push({ kind: 'qclose', index: 0, ...close });
     if (hint) {
-      hint.string = '前 3 槽上陣 · 點兵種循環切換 · ▲▼ 調序';
+      hint.string = '前 3 槽上陣 · 點兵種循環切換 · ▲▼ 調序 · 前/中/後 定站位';
       hint.color = rgba(COLORS.textDim);
       hint.node.setPosition(375 - HALF_W, HALF_H - (py + ph - 24), 0);
     }
@@ -1524,6 +1713,15 @@ export class DeployRoot extends Component {
           this.refresh();
           return;
         }
+        if (button.kind === 'qcol') {
+          // index = slot*3 + 檔位：站位按武將名存（槽位本身不存 col）
+          const slot = this.queue[Math.floor(button.index / COL_ORDER.length)];
+          const col = COL_ORDER[button.index % COL_ORDER.length];
+          if (!slot || !col) return;
+          this.setCol(slot.general, col);
+          this.refresh();
+          return;
+        }
         return;
       }
       return;
@@ -1542,6 +1740,14 @@ export class DeployRoot extends Component {
       }
       if (button.kind === 'queue') {
         this.queueOpen = true;
+        this.refresh();
+        return;
+      }
+      if (button.kind === 'mcol') {
+        // 主將區三檔：主將 = 隊列第 1 槽，站位按武將名存（角標/隊列面板立即同步）
+        const gen = this.currentGen();
+        const col = COL_ORDER[button.index];
+        if (gen && col) this.setCol(gen.NAME, col);
         this.refresh();
         return;
       }
@@ -1604,7 +1810,11 @@ export class DeployRoot extends Component {
       loadout.defend = true;
       loadout.armyId = this.defenseArmyId;
     }
-    GameState.startBattle(this.targetCity?.NAME ?? '南皮', loadout);
+    // F-07 站位：每將 front/mid/back 隨 payload 的 `cols` 帶進戰鬥（web 是 URL 的 `cols=`）。
+    // `GameState.BattleLoadout` 沒有 col 欄位（本輪不碰 GameState.ts）——`startBattle()` 是
+    // `{ ...loadout, ... }` 展開，額外屬性原樣進 `BattleLaunch`，所以型別上補交叉型別即可。
+    const payload: BattleLoadoutWithCols = { ...loadout, cols: this.deployCols() };
+    GameState.startBattle(this.targetCity?.NAME ?? '南皮', payload);
   }
 
   // -------------------------------------------------------------------------
