@@ -119,10 +119,14 @@ export interface ArmyStatus {
   qiParam: number;
   /** `army+0x90` 集氣檔位（−3..3） */
   qiTier: number;
-  /** 恢復體力：每 `REGEN_PERIOD_TICKS` 回 `maxHp × hpRegen / 1000` */
+  /** 恢復體力參數（原作 `army+0x88`，40/60/80）：每幀累加，越過 `REGEN_ACC_MAX` 回 1 點 */
   hpRegen: number;
-  /** 恢復技力：同上，用 `mpMax` */
+  /** 恢復技力參數（原作 `army+0x88`，30/50/70）：同上 */
   mpRegen: number;
+  /** 原作 `army+0x8c` 體力恢復累加器（`hpRegen` 每幀加進來，過 6000 清零回 1 點） */
+  hpRegenAcc?: number;
+  /** 原作 `army+0x8c` 技力恢復累加器（體力旗標成立時整段不走） */
+  mpRegenAcc?: number;
   /** `unit+0x3c` 經驗加成百分比（結算時乘） */
   expPct: number;
   /** 行軍速度係數（逼近 1.1 / 偷襲 1.2 / 包圍 1.15 / 被包圍 0.9）[推測] */
@@ -433,6 +437,17 @@ export const STRATEGY_ENGAGE_RANGE = 3;
  * 同时 `game/tests/tick60.test.ts` 也锁了 `REGEN_PERIOD_TICKS / TICK_HZ === 2`。
  */
 export const REGEN_PERIOD_TICKS = 120;
+
+/**
+ * 原作 `0x43E847` 的累加阈值（`army+0x8c` 越过 `0x1770`=6000 回 1 点）。
+ * 速率 = 参数 / 100 点每秒（60Hz）：技力参数 30/50/70 ⇒ 0.30/0.50/0.70 点/秒，
+ * 体力参数 40/60/80 ⇒ 0.40/0.60/0.80 点/秒。证据见 `work/dis_battle_units.txt`
+ * 地址 0x43E84A–0x43E963 与 `work/jili/REPORT.md` §2。
+ *
+ * 注意：`REGEN_PERIOD_TICKS` 是旧实现的「每 120 tick 回一次百分比」，
+ * 保留只为 `game/tests/tick60.test.ts` 的历史断言，已不参与战斗计算。
+ */
+export const REGEN_ACC_MAX = 0x1770;
 
 function nearestFoeDist(world: World, u: Unit): number {
   let best = Infinity;

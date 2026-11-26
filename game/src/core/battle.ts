@@ -33,7 +33,7 @@ import type { SangoRng } from './sango_rng.ts';
 import {
   ARMY_FLAG,
   QI_TIER_MUL,
-  REGEN_PERIOD_TICKS,
+  REGEN_ACC_MAX,
   emptyArmyStatus,
   planReinforceGroups,
   tickReinforce,
@@ -3363,26 +3363,40 @@ export function tickSkills(world: World): void {
 }
 
 /**
- * R37 恢復體力／恢復技力（原作 `army+0x84 |= 1/2`、`+0x88 = 40/60/80`、`+0x8c = 0`）。
+ * 原作 `0x43E847(army)`：`work/dis_battle_units.txt` 地址 0x43E84A–0x43E963，
+ * 唯一调用点 `0x43E9E5`（在 `0x43E964` 内），而 `0x43E964` 由 Process 4 的
+ * OM_TICK(msg=2) 分支**每帧**调用。
  *
- * 原作把「每 N 帧恢复 `+0x88` 点」交给战斗主循环的一个计数器（`+0x8c` 记已过帧），
- * 但该计数器的消费点在 `0x44D450` 之外、尚未定位，这里按「每 `REGEN_PERIOD_TICKS`（60 帧 = 2 秒）
- * 恢复 `maxHp * 百分比`」实现 —— 幅度大于原作的定额恢复，属近似。[推測] 见报告 §4。
+ *   - `army+0x84` bit0=體力恢復 / bit1=技力恢復（**只有军师技**「體力/技力自動恢復」会置位，
+ *     全 dumps 26 处写入点里除 `0x44D450` 军师技分派器外只有 ctor/读档/初始化）；
+ *   - 每帧 `army+0x8c += army+0x88`（參數 40/60/80 或 30/50/70）；
+ *   - `army+0x8c > 0x1770`(6000) ⇒ `-= 6000`、对应当前值 +1、夹到上限；
+ *   - bit0 成立时直接返回，技力分支整段不走（體力優先，`0x43E857` 末尾 `jmp 0x43E960`）。
+ *
+ * 效果（60Hz）：技力 L1/L2/L3 = 0.30/0.50/0.70 点/秒，體力 = 0.40/0.60/0.80 点/秒。
+ * 没带军师技时整场恒 0 —— 这就是原作口径，玩家觉得「不回」属正常。
  */
 function strategyRegen(world: World, side: Side): void {
   const army = world.army?.[side];
   if (!army) return;
-  const onHp = (army.flags & ARMY_FLAG.hpRegen) !== 0;
-  const onMp = (army.flags & ARMY_FLAG.mpRegen) !== 0;
-  if (!onHp && !onMp) return;
-  if (world.tick % REGEN_PERIOD_TICKS !== 0) return;
   const g = world.sides[side].general;
   if (!g.alive) return;
-  if (onHp && army.hpRegen > 0) {
-    g.hp = Math.min(g.maxHp, g.hp + Math.max(1, Math.round((g.maxHp * army.hpRegen) / 1000)));
+  if ((army.flags & ARMY_FLAG.hpRegen) !== 0) {
+    if (army.hpRegen <= 0) return;
+    army.hpRegenAcc = (army.hpRegenAcc ?? 0) + army.hpRegen;
+    if (army.hpRegenAcc > REGEN_ACC_MAX) {
+      army.hpRegenAcc -= REGEN_ACC_MAX;
+      g.hp = Math.min(g.maxHp, g.hp + 1);
+    }
+    return;
   }
-  if (onMp && army.mpRegen > 0) {
-    g.mp = Math.min(g.mpMax, g.mp + Math.max(1, Math.round((g.mpMax * army.mpRegen) / 1000)));
+  if ((army.flags & ARMY_FLAG.mpRegen) !== 0) {
+    if (army.mpRegen <= 0) return;
+    army.mpRegenAcc = (army.mpRegenAcc ?? 0) + army.mpRegen;
+    if (army.mpRegenAcc > REGEN_ACC_MAX) {
+      army.mpRegenAcc -= REGEN_ACC_MAX;
+      g.mp = Math.min(g.mpMax, g.mp + 1);
+    }
   }
 }
 

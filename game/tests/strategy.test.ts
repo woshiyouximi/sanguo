@@ -306,18 +306,17 @@ test('R37 快速集氣 +1 档 → qiTier=1，回气速度 ×1.3', () => {
   assert.ok(Math.abs(fast / plain - 1.3) < 0.05, `倍率应接近 1.3，实际 ${fast / plain}`);
 });
 
-test('R37 恢復體力 每 60 tick 回一次血，且不超上限', () => {
-  const w = mk({ a: { strategy: seqFor(35, 1) } }); // 40
+test('R37 恢復體力：原作定額累加——參數 40 ⇒ 0.40 點/秒（第 151 幀回第 1 點），且不超上限', () => {
+  const w = mk({ a: { strategy: seqFor(35, 1) } }); // 參數 40
   fire(w, 'A', seqFor(35, 1));
   const g = w.sides.A.general;
   g.hp = Math.max(1, Math.floor(g.maxHp / 2));
   const hurt = g.hp;
-  w.tick = REGEN_PERIOD_TICKS; // 对齐周期
+  for (let i = 0; i < 150; i += 1) tickSkills(w);
+  assert.equal(g.hp, hurt, `150 幀時累加器 6000、還沒越線：${hurt} → ${g.hp}`);
   tickSkills(w);
-  assert.ok(g.hp > hurt, `应回血：${hurt} → ${g.hp}`);
-  g.hp = g.maxHp;
-  w.tick = REGEN_PERIOD_TICKS * 2;
-  tickSkills(w);
+  assert.equal(g.hp, hurt + 1, `第 151 幀越線回 1 點：${hurt} → ${g.hp}`);
+  for (let i = 0; i < 9000; i += 1) tickSkills(w);
   assert.equal(g.hp, g.maxHp);
 });
 
