@@ -2024,6 +2024,23 @@ export class DeployRoot extends Component {
     // 出戰前把出陣順序落盤（含主將槽的兵種/兵力），避免「調了順序但沒按確定」丟失
     this.persistQueue();
     const intel = this.intel;
+    // [R243] 打空的城（存檔真實守軍 0、也沒有真守將）**不開戰**：直接進城。
+    // 舊碼 `enemySoldiers()` 對 0 兵也夾到 1，於是「空城」照樣起一場只有守備隊名號的戰鬥，
+    // 打光兵和將之後場上什麼都不剩，只能等 198 秒平掉（製作人實機卡在這）。
+    if (!this.defenseArmyId && this.targetCity) {
+      const live = GameState.loadSave().cities?.[this.targetCity.NAME];
+      const liveTroops = Math.max(0, Math.floor(Number(live?.troops ?? 0) || 0));
+      const intelName = String(intel?.name ?? '').trim();
+      if (liveTroops <= 0 && (!intelName || intelName === '守備隊')) {
+        const out = GameState.occupyCity(this.targetCity.NAME, null);
+        GameState.clearDeploySiege();
+        GameState.clearDeployMarch();
+        this.hintText = '';
+        console.log(`[DeployRoot] R243 空城不開戰：${this.targetCity.NAME} 守軍 ${out.troops ?? 0}，直接接收`);
+        director.loadScene('Campaign');
+        return;
+      }
+    }
     const bstr = intel?.str ?? Math.min(100, 50 + Math.floor((this.targetCity?.DEFENSE ?? 300) / 8));
     const bint = intel?.int ?? Math.max(30, 140 - bstr);
     // 與出征屏顯示同一個出口（enemySoldiers），不再各自夾一次（舊的 Math.max(60,…) 已去掉）

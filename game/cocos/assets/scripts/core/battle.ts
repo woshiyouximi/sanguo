@@ -561,7 +561,7 @@ export interface World {
    *  - `time`    = 硬时限到点、双方主将都还活着（reason 0x10 平手）。
    * **没有「兵尽」这一档**：`army+0x5c<=0` 只清命令位，战斗要继续到主将分出死活/撤走。
    */
-  endReason: 'general' | 'retreat' | 'time' | null;
+  endReason: 'general' | 'annihilate' | 'retreat' | 'time' | null;
   winner: Side | 'draw' | null;
   /**
    * 天气（R39）：0 晴 / 1 雨 / 2 雪 / 3 雾，见 `core/weather.ts`。
@@ -2838,6 +2838,10 @@ function recompute(world: World): void {
     }
     rt.aliveInf = inf;
     rt.aliveCav = cav;
+    // [R243] 主将存活旗标以「场上的那个单位」为准：单位被打死而旗标没翻（旧路径的漏写）
+    // 会让 `checkOver()` 的主将阵亡条件永远不成立 —— 兵和将都死了也不结束。
+    const genUnit = world.units.find((u) => u.side === side && u.isGeneral);
+    if (genUnit && !genUnit.alive && rt.general.alive) rt.general.alive = false;
     const other = world.sides[opposite(side)];
     rt.troopBonus = troopBonus(world.data, rt.troop, other.troop);
     rt.terrainBonus = terrainBonus(world.data, world.terrain, rt.troop);
@@ -2949,7 +2953,7 @@ function maybeRetreat(world: World): void {
 }
 
 /** 收尾：写 over/winner/endReason + 两侧战果状态码（`docs/04b:530`） */
-function finish(world: World, winner: Side | 'draw', reason: 'general' | 'retreat' | 'time'): void {
+function finish(world: World, winner: Side | 'draw', reason: 'general' | 'annihilate' | 'retreat' | 'time'): void {
   world.over = true;
   world.endReason = reason;
   world.winner = winner;
@@ -2985,6 +2989,19 @@ function checkOver(world: World): void {
   const bGen = world.sides.B.general.alive;
   if (!aGen || !bGen) {
     finish(world, aGen ? 'A' : bGen ? 'B' : 'draw', 'general');
+    return;
+  }
+  // [R243] 「场上已经没人了」也要收场（空城/主将没有实体单位）。
+  //
+  // 注意：士兵清零 **不等于** 覆没 —— 原作与既有测试都要求主将活着时双方主将互相索敌、
+  // 以 `general` 结束（见 `battle.test` 的「一方小兵清零但主将活着 → 战斗继续」）。
+  // 真正会卡死的是「这一侧在场上连一个活着的单位都没有」：空城只剩守備隊名号、或主将标记还活着
+  // 却没有实体单位 —— 此时既打不到它也满足不了任何结束条件，只能等到 198 秒平手（制作人实机卡住）。
+  const aAliveUnit = world.units.some((u) => u.side === 'A' && u.alive);
+  const bAliveUnit = world.units.some((u) => u.side === 'B' && u.alive);
+  if (!world.fled.A && !world.fled.B && (!aAliveUnit || !bAliveUnit)) {
+    if (!aAliveUnit && !bAliveUnit) finish(world, 'draw', 'annihilate');
+    else finish(world, aAliveUnit ? 'A' : 'B', 'annihilate');
     return;
   }
   // R38：撤退令下达后要等全军走出场地（`0x43BFE7` 退场）才算结束。

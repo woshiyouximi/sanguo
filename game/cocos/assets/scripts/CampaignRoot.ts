@@ -4441,7 +4441,14 @@ export class CampaignRoot extends Component {
         this.selected = target;
         // [R228] 真空城（沒有守將、守軍 0）沒有攻城戰可打：直接接收，部隊併入守軍。
         const intel = this.enemyIntelOf(target);
-        const emptyCity = !intel || (!String(intel.name ?? '').trim() && Math.floor(Number(intel.troops) || 0) <= 0);
+        // [R243] 空城判定要**以存檔的真實守軍為準**：`garrison.json` 的 intel 只是劇本播種，
+        // 城池被抽空（守軍 0、無守將）後它仍然回 `守備隊`，舊碼看 intel 就會給 0 兵空城開一場
+        // 「有守備隊」的攻城戰 —— 打光以後對方連一個實體單位都沒有，只能拖到 198 秒平手
+        // （製作人實機：「占領空城，触发战斗，击杀守城武将和所有士兵后战斗不结束」）。
+        const liveTroops = Math.max(0, Math.floor(Number(this.save?.cities?.[target]?.troops ?? intel?.troops ?? 0) || 0));
+        const intelName = String(intel?.name ?? '').trim();
+        const hasRealGeneral = !!intelName && intelName !== '守備隊';
+        const emptyCity = liveTroops <= 0 && !hasRealGeneral;
         if (emptyCity) {
           const out = GameState.occupyCity(target, arrivedNew.id);
           this.save = GameState.loadSave();
