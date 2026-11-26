@@ -2780,12 +2780,15 @@ export class CampaignRoot extends Component {
    * 敌城出兵候选：只看「与某座我方城相邻」的敌城（web aiCandidates 同口径）。
    * 目标 = 相邻我方城里守军最少的那座；敌兵 < 守军 + 30 就不出兵。
    */
-  private raidCandidates(): Array<{ from: string; to: string; troops: number; mine: number }> {
+  private raidCandidates(): Array<{ from: string; to: string; troops: number; mine: number; general: string }> {
     const save = this.save;
     if (!save) return [];
-    const out: Array<{ from: string; to: string; troops: number; mine: number }> = [];
+    const out: Array<{ from: string; to: string; troops: number; mine: number; general: string }> = [];
     for (const city of this.cities) {
       if (save.owned.includes(city.NAME)) continue;
+      // 原作空城/无守将不出兵（0x40CAF1 的 +0x3C 门）；无名将的城不能当作出发城
+      const general = this.cityGeneralName(city.NAME);
+      if (!general) continue;
       const troops = this.troopsOf(city.NAME);
       const mineNeighbors = this.neighborsOf(city.NAME).filter((name) => save.owned.includes(name));
       if (mineNeighbors.length === 0) continue;
@@ -2793,7 +2796,7 @@ export class CampaignRoot extends Component {
       const to = mineNeighbors[0];
       const mine = this.troopsOf(to);
       if (troops < mine + 30) continue;
-      out.push({ from: city.NAME, to, troops, mine });
+      out.push({ from: city.NAME, to, troops, mine, general });
     }
     out.sort((a, b) => b.troops - b.mine - (a.troops - a.mine) || a.from.localeCompare(b.from));
     return out;
@@ -2823,9 +2826,15 @@ export class CampaignRoot extends Component {
       const table = garrisonOf(data, this.scenIdx, name);
       const runtime = O.officersOfCity(save, name, ctx);
       if (!table && runtime.length === 0) return null;
+      // 原作 0x40CAF1 开头 `if (city->[+0x3C] == 0) return 0`：城里没有在职武将就不能出兵。
+      // 这里只给 AI 世界播种（garrisonOf 钩子）用，所以“空城不再回落剧本太守”，
+      // 否则剧本表里的旧太守名会让空城通过 canDispatch（governor 非空）继续出兵。
+      const major = runtime.length
+        ? O.cityMajorNameOf(save, name, ctx) || table?.major || ''
+        : '';
       return {
         owner: O.cityOwnerOf(save, name) || table?.owner || '',
-        major: O.cityMajorNameOf(save, name, ctx) || table?.major || '',
+        major,
         garrison: table?.garrison ?? 0,
         officers: runtime.map((o) => ({ name: o.name, str: o.str, int: o.int, loyal: o.loyal, status: o.status })),
       };
@@ -2851,9 +2860,9 @@ export class CampaignRoot extends Component {
     for (const row of out.incoming) {
       const pathIndex = pathBetween(this.scenarioLike(), row.from, row.to);
       if (pathIndex === null) continue;
-      // 有将带兵就用将名；AiRunner 的 cand.generals 目前不填，所以从出发城的运行时人事里取，
-      // 再退到太守/势力名——不再一律显示「來犯之將」
-      const general = row.cand?.generals?.[0] || this.cityGeneralName(row.from) || `${row.force || '敵軍'}將`;
+      // 原作无将城不出兵：出发城查不到任何在职武将就丢弃这条来犯
+      const general = row.cand?.generals?.[0] || this.cityGeneralName(row.from) || '';
+      if (!general) continue;
       const army: Army = {
         id: GameState.nextArmyId('B'),
         side: 'B',
@@ -2892,7 +2901,7 @@ export class CampaignRoot extends Component {
         pathIndex,
         progress: 0,
         troops: Math.max(20, Math.min(100, Math.round(candidate.troops * 0.6))),
-        general: intel?.name || this.cityGeneralName(candidate.from) || '敵軍將',
+        general: candidate.general || intel?.name || '敵軍將',
       };
       // 隨軍武將：web `spawnAiArmy()`（campaign.html:4255）也帶 officers（但不任命軍師）
       const officers = this.armyRosterFor(candidate.from, army.general ?? '');
