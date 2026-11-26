@@ -4301,10 +4301,25 @@ export class CampaignRoot extends Component {
     }
     if (arrivedNew) {
       const target = armyAtCity(arrivedNew);
-      this.hintText = this.clampHint(
-        target ? `部隊已到 ${target} 城下：點該城 →「攻 城 戰」。` : '部隊已抵達目的地。',
-        160,
-      );
+      if (target && !(this.save?.owned.includes(target) ?? false)) {
+        // [R226] 原作：兵團走到敵城下就進戰鬥，不是等玩家再點一次城、再點「攻城戰」。
+        // 這裡復用大地圖既有的 `doAction('march')`：撤隊 → 落 deploy 快照 → 切 Deploy 編成屏。
+        this.selected = target;
+        this.doAction('march');
+        return;
+      }
+      if (target) {
+        // 到自家城（增援/回防）：直接併入守軍，不回大地圖等手點。
+        const out = GameState.enterCityWithArmy(arrivedNew.id);
+        this.save = GameState.loadSave();
+        this.hintText = this.clampHint(
+          `兵 團 進 城：${arrivedNew.general ?? '我軍'} ${arrivedNew.troops} 兵 入 ${out.city}（守軍 ${out.troops}）。`,
+          160,
+        );
+        this.refresh();
+        return;
+      }
+      this.hintText = this.clampHint('部隊已抵達目的地。', 160);
       this.refresh();
     }
   }
