@@ -720,6 +720,16 @@ export class BattleInput {
       this.message = MSG_SKILL_PAGE;
       return [];
     }
+    // 原作每颗全局按钮都有自己的「查可用」（0x444C37/0x444BA6/0x444B4C），这里统一走 cmd6Usable，
+    // 不满足就只出提示、不写命令槽。
+    const idx = kind === 'guardLord' ? 0 : kind === 'sortie' ? 3 : kind === 'lordOrder' ? 4 : kind === 'retreat' ? 5 : -1;
+    if (idx >= 0) {
+      const use = cmd6Usable(world, idx, { fighting: this.mode === 'fighting', skillCount: this.bar.length });
+      if (!use.ok) {
+        this.message = `${label}：${use.reason ?? MSG_NO_ORDER}`;
+        return [];
+      }
+    }
     const act = kind === 'lordOrder' ? lordOrderKind(world) : (kind as ArmyCmdKind);
     const ok = applyArmyCmdKind(world, 'A', act);
     if (act === 'retreat') {

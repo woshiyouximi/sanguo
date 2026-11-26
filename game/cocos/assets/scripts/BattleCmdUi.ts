@@ -29,7 +29,7 @@ import {
   canUseArmyCmd,
 } from './core/army_cmd';
 import type { ArmyCmdKind } from './core/army_cmd';
-import { ACTION_INTERVAL_TICKS, ATTACK_COOLDOWN, GENERAL_SLOW_INTERVAL } from './core/battle';
+import { ACTION_INTERVAL_TICKS, ATTACK_COOLDOWN, GENERAL_SLOW_INTERVAL, unitCell } from './core/battle';
 import type { Unit, World } from './core/battle';
 import { contains } from './view/layout';
 import type { Rect } from './view/layout';
@@ -160,10 +160,11 @@ export function cmd6Usable(world: World | null | undefined, btn: number, ctx: Cm
   const w = world as World;
   const gen = w.sides.A.general;
   const buttons = armyOrderOf(w, 'A').buttons;
-  const soldiers = aliveSoldiersOf(w, 'A');
   switch (btn) {
     case 0:
       if (!gen.alive) return { ok: false, reason: '主將陣亡' };
+      // 原作 0x444C37 的可用性：`[0x4a8ae0] & 0xd == 0`（出擊/撤退/歸陣都没有）
+      if (w.fled.A || w.rush?.A) return { ok: false, reason: '當前狀態不可下令' };
       if ((buttons & ARMY_BTN.guardLord) !== 0) return { ok: false, reason: '已下令護衛' };
       return { ok: true, reason: null };
     case 1:
@@ -171,16 +172,30 @@ export function cmd6Usable(world: World | null | undefined, btn: number, ctx: Cm
     case 2:
       return ctx.skillCount > 0 ? { ok: true, reason: null } : { ok: false, reason: '無武將技' };
     case 3:
+      // 原作 0x444BA6(1)：全局 bit4（撤退中）⇒ 不可；前方格 (x−1,y) 站着自己人 ⇒ 不可
       if (!gen.alive) return { ok: false, reason: '主將陣亡' };
+      if (w.fled.A) return { ok: false, reason: '撤退中' };
       if ((buttons & ARMY_BTN.sortie) !== 0) return { ok: false, reason: '已出擊' };
-      if (soldiers <= 0) return { ok: false, reason: '已無士兵' };
+      {
+        const gu = generalUnitOf(w, 'A');
+        if (gu) {
+          const c = unitCell(gu);
+          const blocked = w.units.some((u) => {
+            if (!u.alive || u.side !== 'A' || u.isGeneral) return false;
+            const uc = unitCell(u);
+            return uc.gx === c.gx - 1 && uc.gy === c.gy;
+          });
+          if (blocked) return { ok: false, reason: '前方有我軍' };
+        }
+      }
       return { ok: true, reason: null };
     case 4:
       if (!gen.alive) return { ok: false, reason: '主將陣亡' };
       return { ok: true, reason: null };
     case 5:
+      // 原作 0x444B4C(1)：双方任一在撤退中 ⇒ 不可；不查士兵数
       if (w.fled.A) return { ok: false, reason: '我軍已在撤退' };
-      if (soldiers <= 0) return { ok: false, reason: '已無士兵' };
+      if (w.fled.B) return { ok: false, reason: '敵軍已在撤退' };
       return { ok: true, reason: null };
     default:
       return { ok: false, reason: '未知按鈕' };

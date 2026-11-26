@@ -14,7 +14,7 @@
  * 本模块只读 world，纯数据；绘制仍由 BattleRoot 的通用 CmdItem 渲染器完成。
  */
 import type { World } from './core/battle';
-import { armyMenuItems, cmd6Defs, cmd6Rects } from './BattleCmdUi';
+import { armyMenuItems, cmd6Defs, cmd6Rects, cmd6Usable } from './BattleCmdUi';
 import type { CmdBg, Cmd6Kind, CmdItem } from './BattleCmdUi';
 import type { Rect } from './view/layout';
 import { COLORS } from './view/theme';
@@ -55,6 +55,15 @@ export function globalRects(): Rect[] {
 }
 
 const GLOBAL_KINDS: readonly Cmd6Kind[] = ['guardLord', 'sortie', 'lordOrder', 'retreat'];
+/** 全局按钮 → 第一层 6 颗的下标（cmd6Usable 用下标查可用） */
+const CMD6_INDEX: Record<string, number> = {
+  guardLord: 0,
+  armyMenu: 1,
+  skillPage: 2,
+  sortie: 3,
+  lordOrder: 4,
+  retreat: 5,
+};
 
 export interface ConsoleSkill {
   name: string;
@@ -185,12 +194,14 @@ export function buildConsoleUi(
   const defs = cmd6Defs(world);
   const byKind = new Map(defs.map((d) => [d.kind, d] as const));
   const gr = globalRects();
+  const useCtx = { fighting, skillCount: skills.length };
   for (let i = 0; i < gr.length; i += 1) {
     const r = gr[i]!;
     const kind = GLOBAL_KINDS[i]!;
     const def = byKind.get(kind);
-    const ok = fighting;
-    items.push(bg(`global.${i}.bg`, r, 'plate_btn', def && ok ? 235 : 130));
+    // 原作可用性逐颗不同（0x444C37 / 0x444B4C / 0x445282），统一问 cmd6Usable
+    const use = cmd6Usable(world, CMD6_INDEX[kind] ?? -1, useCtx);
+    items.push(bg(`global.${i}.bg`, r, 'plate_btn', def && use.ok ? 235 : 130));
     items.push({
       kind: 'text',
       id: `global.${i}.label`,
@@ -199,7 +210,7 @@ export function buildConsoleUi(
       y: r.y + r.h / 2,
       w: r.w - 6,
       size: 15,
-      color: def && ok ? COLORS.text : COLORS.textFaint,
+      color: def && use.ok ? COLORS.text : COLORS.textFaint,
       align: 'center',
       bold: true,
     });
