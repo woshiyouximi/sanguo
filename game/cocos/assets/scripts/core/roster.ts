@@ -1,30 +1,49 @@
 /**
- * 武將名單（城池 → 名單）與「出池」狀態：招降 / 斬首 / 釋放的落庫層。
+ * 战后武将名单结算：招降入城（原有）+ 斩首出池（R56）+ 释放回原势力（R103）。
  *
- * 純邏輯模組（不 import `cc`、不碰 `sys.localStorage`）：所有入口都吃普通的
- * `CampaignSave` 對象，方便 headless 測試，也方便 web 側的 JS 直接共用。
+ * 存档形状见 `types.ts` 的 `CampaignSave`（就是 `game/web/campaign.html` 那份
+ * localStorage JSON 的子集）：`roster[城名] = 武将名[]`，另有
+ * `roster._moved[武将名] = 落腳城`（`game/web/city_model.js:512` 读它做调动的唯一真源）。
  *
- * 三條名單語義（與原作一致）：
- *  - 招降成功 → 進 `roster[homeCity]`（跨城去重，同一個人不能同時在兩座城）；
- *  - 斬首     → 從**所有城**的名單摘掉，`_moved[name] = DEAD`（永不復活）；
- *  - 釋放     → 同樣摘名單，`_moved[name] = RELEASED`（回原勢力，還能再遇）。
+ * R56 的缺口：`capture.ts` 只把被斩武将记进 `report.executed`，**没人把它从可招募池/
+ * 势力将池里删掉**，于是一个被斩的人下次还会出现在 `city_model.js` 的 `rosterOf()` /
+ * `wildPool()` 里被重新搜索、重新招募。原作里斩将 = 从城内武将链上摘掉、永不复活
+ * （`docs/04c_世界与内政.md:308-316`），所以这里补两件事：
  *
- * [R197] 本檔同時是招降面板十欄的取值層（`surrenderCardExtras()`）：等級 / 士氣 /
- * 疲勞 / 武器 / 物品 / 勝場 / 敗場全部照抄 web 的唯一標準
- * （`game/web/campaign.html:4917-4960` 的 `surFields()`、`saves.js:836-909` 的
- * `generalRecord`）。**存檔沒有就是「沒有」**：一律回 `null` / 不填，由面板畫灰
- * 「—」，不拿 0 或 60 冒充真值（web 的 `moraleOf()` 缺省 60 是為了戰鬥計算，
- * 不是為了顯示）。
+ *  1. `removeFromPools()`：把名字从**每一座城**的 `roster[城]` 名单里删掉（招降/调动
+ *     留下的副本一并清掉），并打上"已斩首"标记；
+ *  2. `applyPostBattle()`：一次性做"招降入城 + 斩首出池 + 跨城去重"，幂等。
+ *
+ * "已斩首"标记用 `roster._moved[name] = '陣亡'` 这个哨兵值表达，原因：
+ * `city_model.js` 的 `rosterOf()`（:512-535）/`stationedNames()`（:552-566）已经只认
+ * `_moved` 这一个渠道 —— 只要 `moved[name]` 存在且不等于查询城名，这个人就既不在
+ * 原城、也不在 `wildPool()`，等于彻底出池。用一条**现有**渠道而不是新增 `save.dead`
+ * 字段，是因为 `game/web/**` 这一轮不归我改（另一个 agent 在动），新增字段 web 侧
+ * 读不到、等于没修。哨兵值取"陣亡"而不是空串：`rosterOf()` 里 `moved[name] || ''`
+ * 会把空串当成"没调动"。
+ *
+ * 规则：
+ *  - 只处理 `post.captures` 里 `recruited === true` 的条目（executed 走 `removeFromPools()`、
+ *    released 走 `releaseFromPools()`，都不进名单）；
+ *  - 释放（R103）只摘名单 + 打 `_moved` 哨兵，不改任何静态归属（见 `releaseFromPools()`）；
+ *  - 被斩首的名字从所有城名单里删掉，且以后 `applyCapturesToRoster()` 也不会再加回来；
+ *  - 该城没有 `roster` 数组就建一个（连 `save.roster` 本身没有也一起建）；
+ *  - **幂等**：重复调用不会重复 push、不会重复记 `removed`。
+ *
+ * 原作里招降成功的将直接进"我方武将列表"，所以这里是"按城"记名；
+ * 哪座城（`homeCity`）由调用方给 —— 通常是打完仗回城的那座。
+ *
+ * **单源（R224）**：本文件是 roster 的唯一源，Cocos 正式版镜像
+ * `game/cocos/assets/scripts/core/roster.ts` 由 `work/cocos_sync/sync_core3.mjs` 单向生成，
+ * **不要再手改镜像**（R224 之前 `SKIP_FILES` 把它排除在同步外，才出现 `[R220 mirror]`
+ * 那种手工补丁分叉）。同步器对本文件有 4 条 KEEP_PATCHES（K8–K11）：把
+ * `for (const x of a || b)` 提成 `const t = a || b; for (const x of t)` —— Cocos 的 Babel
+ * 在「逻辑表达式直接当 for-of 头」时会崩。所以下面那 4 行 for-of 头**保持原样**，
+ * 同步器按原文精确匹配（改一个字补丁就命不中，同步会中止）。
  */
-
-import type { CampaignSave, GameData, General } from '../types';
+import type { CampaignSave, GameData } from '../types';
 import type { CapturedGeneral, PostBattleReport, PostGeneral } from './capture';
 import { canRecruit, recruitChanceOf } from './capture';
-import type { Side } from './battle';
-
-/* ------------------------------------------------------------------------- */
-/* [R56] 出池：名單 / `_moved` 哨兵                                            */
-/* ------------------------------------------------------------------------- */
 
 /** `roster._moved[name]` 的哨兵值：已斩首，永不复活（见文件头"出池"说明） */
 export const DEAD = '陣亡';
@@ -46,24 +65,42 @@ export const DEAD = '陣亡';
 export const RELEASED = '釋放';
 
 /**
- * `roster._moved[name]` 的哨兵值：我軍戰敗後被敵軍帶走（勸降轉投敵營）。
+ * `roster._moved[name]` 的哨兵值：被我方战败后**被敌军带走**（我方战败时，敌方 AI 按
+ * 战斗页已判的"劝降成功"处置）→ 他已在敌营，不再回我方任何城的名单。
  *
- * [R220 mirror] 与 `game/src/core/roster.ts` 同名常量逐字一致（core R208 胜者门引入，
- * Cocos 镜像因 `sync_core3.mjs` 的 `SKIP_FILES` 一直没跟上，现按 lead R220 授权补齐）。
- * 语义与 `DEAD`/`RELEASED` 一样只是"不在我方名单"的标记：不写静态归属；
- * 下次再被我方俘获并招降时，由 `applyCapturesToRoster()` 摘掉这个哨兵。
+ * 与 `DEAD` 的区别：人没死，将来敌方守城时还会出现（可再被俘/招降）；与 `RELEASED`
+ * 的区别：不是"放回原势力"，而是转投敌方。`city_model.js:rosterOf()` 只认"落腳城"，
+ * 这个值不等于任何城名 → 他从此不在我方名单（`stationedNames()` 仍把他算作"不在野"，
+ * 不会被当成在野将重复搜索）。重新招降时会摘掉哨兵（见 `applyCapturesToRoster()`）。
  */
 export const ENEMY_HELD = '敵軍';
 
-/** `save.roster` 的原始形状：城名 → 名单；唯一例外是 `_moved`（名 → 哨兵） */
-type RosterRaw = Record<string, unknown>;
+/** 只需要这几个字段，测试里传 `{ captures: [...] }` 就够；`executed` 可选 */
+export type PostBattle = Pick<PostBattleReport, 'captures'> &
+  Partial<Pick<PostBattleReport, 'executed'>>;
 
-function rawRoster(save: CampaignSave, create = true): RosterRaw {
-  if (!save.roster && create) save.roster = {};
-  return (save.roster ?? {}) as RosterRaw;
+export interface ApplyCapturesResult {
+  /** 本次真正新增的武将名（已去重、按 post.captures 顺序）；幂等重放时为空 */
+  added: string[];
 }
 
-function cityList(raw: RosterRaw, city: string): string[] {
+export interface ApplyPostBattleResult extends ApplyCapturesResult {
+  /** 本次从池里移除（斩首）的武将名；幂等重放时为空 */
+  removed: string[];
+}
+
+/** `save.roster` 的宽松视图：值可能是 `string[]`（城名单）或 `_moved` 的映射 */
+type RawRoster = {
+  _moved?: Record<string, string>;
+  [key: string]: unknown;
+};
+
+function rawRoster(save: CampaignSave, create = true): RawRoster {
+  if (!save.roster && create) save.roster = {};
+  return (save.roster ?? {}) as unknown as RawRoster;
+}
+
+function cityList(raw: RawRoster, city: string): string[] {
   const cur = raw[city];
   if (Array.isArray(cur)) return cur as string[];
   const list: string[] = [];
@@ -72,7 +109,7 @@ function cityList(raw: RosterRaw, city: string): string[] {
 }
 
 /** 所有城的名单键（排除 `_moved`；非数组的键一律跳过） */
-function cityKeys(raw: RosterRaw): string[] {
+function cityKeys(raw: RawRoster): string[] {
   return Object.keys(raw).filter((k) => k !== '_moved' && Array.isArray(raw[k]));
 }
 
@@ -85,7 +122,7 @@ export function deadNames(save: CampaignSave): string[] {
   const raw = rawRoster(save, false);
   const moved = raw._moved;
   if (!moved || typeof moved !== 'object') return [];
-  return Object.keys(moved).filter((n) => (moved as Record<string, unknown>)[n] === DEAD);
+  return Object.keys(moved).filter((n) => moved[n] === DEAD);
 }
 
 /**
@@ -97,14 +134,14 @@ export function deadNames(save: CampaignSave): string[] {
 export function movedOf(save: CampaignSave): Record<string, string> {
   const raw = rawRoster(save, false);
   const moved = raw._moved;
-  return moved && typeof moved === 'object' ? (moved as Record<string, string>) : {};
+  return moved && typeof moved === 'object' ? moved : {};
 }
 
 /** 这个武将是否已被斩首（永不进池） */
 export function isDead(save: CampaignSave, name: string): boolean {
   const raw = rawRoster(save, false);
   const moved = raw._moved;
-  return !!moved && typeof moved === 'object' && (moved as Record<string, unknown>)[String(name)] === DEAD;
+  return !!moved && typeof moved === 'object' && moved[String(name)] === DEAD;
 }
 
 /**
@@ -131,18 +168,17 @@ export function isReleased(save: CampaignSave, name: string): boolean {
  *
  * @returns 本次**新记入死亡**的名字（幂等重放返回空数组）
  */
-export function removeFromPools(save: CampaignSave, names: readonly string[]): string[] {
+export function removeFromPools(save: CampaignSave, names: Iterable<string>): string[] {
   const raw = rawRoster(save);
-  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : (raw._moved = {})) as Record<
-    string,
-    string
-  >;
+  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : (raw._moved = {})) as
+    Record<string, string>;
   const removed: string[] = [];
+
   for (const n of names) {
     const name = String(n ?? '');
     if (!name) continue;
     for (const city of cityKeys(raw)) {
-      const list = cityList(raw, city);
+      const list = raw[city] as string[];
       const at = list.indexOf(name);
       if (at >= 0) list.splice(at, 1);
     }
@@ -166,19 +202,18 @@ export function removeFromPools(save: CampaignSave, names: readonly string[]): s
  *
  * @returns 本次**新打上**释放哨兵的名字（幂等重放返回空数组）
  */
-export function releaseFromPools(save: CampaignSave, names: readonly string[]): string[] {
+export function releaseFromPools(save: CampaignSave, names: Iterable<string>): string[] {
   const raw = rawRoster(save);
-  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : (raw._moved = {})) as Record<
-    string,
-    string
-  >;
+  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : (raw._moved = {})) as
+    Record<string, string>;
   const released: string[] = [];
+
   for (const n of names) {
     const name = String(n ?? '');
     if (!name) continue;
     if (moved[name] === DEAD) continue; // 已斩首的不复活
     for (const city of cityKeys(raw)) {
-      const list = cityList(raw, city);
+      const list = raw[city] as string[];
       const at = list.indexOf(name);
       if (at >= 0) list.splice(at, 1);
     }
@@ -189,29 +224,26 @@ export function releaseFromPools(save: CampaignSave, names: readonly string[]): 
   return released;
 }
 
-/* ------------------------------------------------------------------------- */
-/* [R56] 战后落库                                                              */
-/* ------------------------------------------------------------------------- */
-
-/** 招降成功的人进 `homeCity` 的名单（幂等；一个都没有时不建空城数组） */
 export function applyCapturesToRoster(
   save: CampaignSave,
-  post: PostBattleReport,
+  post: PostBattle,
   homeCity: string,
-): { added: string[] } {
+): ApplyCapturesResult {
   const city = String(homeCity);
   const raw = rawRoster(save);
+
   // 先筛出真正要加的人：一个都没有就**不要**建空城数组（旧行为会把城"建"出来）
   const pending = post.captures
     .filter((cap) => cap && cap.recruited === true)
     .map((cap) => String(cap.name))
     .filter((name) => name && !isDead(save, name));
   if (pending.length === 0) return { added: [] };
+
   const list = cityList(raw, city);
   const added: string[] = [];
-  // 曾经释放过 / 被我方战败后带走的将再被招降：先摘掉哨兵，否则 `rosterOf()` 仍当他"不在任何城"
-  // [R220 mirror] 适配：core 用 `moved[name] === RELEASED || moved[name] === ENEMY_HELD`；镜像原只摘 RELEASED。
-  const moved = raw._moved && typeof raw._moved === 'object' ? (raw._moved as Record<string, string>) : null;
+  // 曾经释放过 / 被敌军带走过的将再被招降：先摘掉哨兵，否则 `rosterOf()` 仍当他"不在任何城"
+  const moved = (raw._moved && typeof raw._moved === 'object' ? raw._moved : null) as
+    Record<string, string> | null;
   for (const name of pending) {
     if (moved && (moved[name] === RELEASED || moved[name] === ENEMY_HELD)) delete moved[name];
     // 幂等：同一批里重复、或上一次调用已经写进去的，都不再 push
@@ -241,12 +273,12 @@ export function applyCapturesToRoster(
  * @returns 真的被標成「招降成功」的名字；null = 沒有新變化
  */
 export function markDefectedCapture(
-  post: PostBattleReport,
-  g: Partial<PostGeneral> | null | undefined,
+  post: Pick<PostBattleReport, 'captures'>,
+  g: { name: string; str?: number; int?: number; loyal?: number },
 ): string | null {
   const name = typeof g?.name === 'string' ? g.name : '';
   if (!name) return null;
-  const list = Array.isArray(post.captures) ? post.captures : (post.captures = []);
+  const list: CapturedGeneral[] = Array.isArray(post.captures) ? post.captures : (post.captures = []);
   const hit = list.find((c) => c && String(c.name) === name);
   if (hit) {
     if (hit.recruited === true) return null;
@@ -279,12 +311,13 @@ export function markDefectedCapture(
  */
 export function applyPostBattle(
   save: CampaignSave,
-  post: PostBattleReport,
+  post: PostBattle,
   homeCity: string,
-): { added: string[]; removed: string[] } {
+): ApplyPostBattleResult {
   const raw = rawRoster(save);
   const executed = (post.executed ?? []).map((e) => String(e?.name ?? '')).filter(Boolean);
   const removed = executed.length ? removeFromPools(save, executed) : [];
+
   // 招降：跨城去重（防止"原城的副本 + 新城的副本"同一个人出现两次）
   const city = String(homeCity);
   const recruits = post.captures.filter((c) => c && c.recruited === true);
@@ -295,35 +328,37 @@ export function applyPostBattle(
       if (!name || isDead(save, name) || home.includes(name)) continue;
       for (const other of cityKeys(raw)) {
         if (other === city) continue;
-        const list = cityList(raw, other);
+        const list = raw[other] as string[];
         const at = list.indexOf(name);
         if (at >= 0) list.splice(at, 1);
       }
     }
   }
+
   const { added } = applyCapturesToRoster(save, post, city);
   return { added, removed };
 }
 
 /* ------------------------------------------------------------------------- */
-/* [R197] 十欄真值：士氣 / 疲勞 / 勝敗場 / 裝備 / 等級                          */
+/* [R197] 招降面板「十栏真值」：等级 / 士气 / 疲劳 / 胜败场 / 装备              */
 /*                                                                           */
-/* 逐條照抄 web 的唯一標準：`campaign.html:4917-4960 surFields()` +            */
-/* `saves.js:836-909`（`generalRecord`）。差別只有一處，而且是**故意的**：     */
-/* web 的 `moraleOf()` 缺記錄回默認 60，這裡回 `null` —— 面板要顯示原作的      */
-/* 真值，拿 60 冒充會把「沒打過仗的新人」畫成「士氣 60」（= 假數）。           */
+/* 取值口径逐条照生产端：`game/web/campaign.html:4917-4960 surFields()` +      */
+/* `game/web/saves.js:836-909`（`generalRecord`）。**存档没有就是「没有」**：   */
+/* 一律回 `null` / 不填，由面板画灰「—」，绝不拿 0 或 60 冒充真值 —— 那只是把 */
+/* 「没记录」画成「有数据」。HTML 侧 `moraleOf()` 缺记录回默认 60 是给战斗计算  */
+/* 用的推定值，不是显示真值；面板要显示的是原作栏位真值。                       */
 /* ------------------------------------------------------------------------- */
 
-/** 勝/敗場計數上限（web `saves.js` 的 `GENERAL_RECORD_MAX`） */
+/** 胜/败场计数上限（原作与 web `saves.js` 同值；Cocos `GameState.ts` 归一化 generalRecord 也用它） */
 export const GENERAL_RECORD_MAX = 9999;
 
-/** 一個武將的勝/敗記錄（web `saves.js:857 generalRowOf()` 的一行） */
+/** 一个武将的胜/败记录（web `saves.js:857 generalRowOf()` 的一行） */
 export interface GeneralRecordRow {
   w: number;
   l: number;
 }
 
-/** 四槽裝備名（web `campaign.html:1710 equipNamesOf()` 的返回值；空槽是空串） */
+/** 四槽装备名（web `campaign.html:1710 equipNamesOf()` 的返回值；空槽是空串） */
 export interface EquipNames {
   weapon: string;
   horse: string;
@@ -335,12 +370,12 @@ function saveBox(save: CampaignSave): Record<string, unknown> {
   return (save ?? {}) as Record<string, unknown>;
 }
 
-/** 把 `raw` 当映射看（非物件/陣列一律空映射，不拋）。 */
+/** 把 `raw` 当映射看（非物件/数组一律空映射，不抛）。 */
 function objectAt(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
 }
 
-/** `save[key]` 當映射看（髒檔裡 `morale: 'x'` 之類不該炸）。 */
+/** `save[key]` 当映射看（脏档里 `morale: 'x'` 之类不该炸）。 */
 function mapAt(save: CampaignSave, key: string): Record<string, unknown> {
   return objectAt(saveBox(save)[key]);
 }
@@ -350,11 +385,11 @@ function hasKey(map: Record<string, unknown>, key: string): boolean {
 }
 
 /**
- * 有限數 → 夾在 `[lo, hi]` 的整數；**不是數回 `null`**。
+ * 有限数 → 夹在 `[lo, hi]` 的整数；**不是数回 `null`**。
  *
- * 與 `numOf()` 的差別：`numOf(v, 0)` 會把「缺欄位」變 `0`，而面板要能區分
- * 「值是 0」與「根本沒有這條記錄」。布林/空串/`null` 也算沒有（web
- * `moraleNormalize()` 同樣丟這些）。
+ * 与 `numOf()` 的差别：`numOf(v, 0)` 会把「缺字段」变 `0`，而面板要能区分
+ * 「值是 0」与「根本没有这条记录」。布尔/空串/`null` 也算没有（HTML 侧
+ * `moraleNormalize()` 同样丢这些）。
  */
 function intOrNull(value: unknown, lo: number, hi: number): number | null {
   if (value === null || value === undefined || typeof value === 'boolean' || value === '') return null;
@@ -362,7 +397,7 @@ function intOrNull(value: unknown, lo: number, hi: number): number | null {
   return Number.isFinite(n) ? clampInt(n, lo, hi) : null;
 }
 
-/** web `setEquipSlots()` 的 `text()`：去空白；空串與佔位符 `---` / `—` 都算「沒有」。 */
+/** web `setEquipSlots()` 的 `text()`：去空白；空串与占位符 `---` / `—` 都算「没有」。 */
 function equipText(value: unknown): string {
   if (typeof value !== 'string') return '';
   const text = value.trim();
@@ -370,11 +405,11 @@ function equipText(value: unknown): string {
 }
 
 /**
- * 某個武將的勝/敗記錄（web `Saves.generalRecordOf()`，`saves.js:879`）。
+ * 某个武将的胜/败记录（web `Saves.generalRecordOf()`，`saves.js:879`）。
  *
- * **沒有記錄返回 `null`**，不是 `{w:0,l:0}` —— 面板要能區分「打過 0 場」與
- * 「存檔裡根本沒有這個人的記錄」（後者畫灰「—」）。判定用 `hasOwnProperty`，
- * 與 web 一致（繼承鍵不算）。
+ * **没有记录返回 `null`**，不是 `{w:0,l:0}` —— 面板要能区分「打过 0 场」与
+ * 「存档里根本没有这个人的记录」（后者画灰「—」）。判定用 `hasOwnProperty`，
+ * 与 HTML 侧一致（继承键不算）。
  */
 export function generalRecordOf(save: CampaignSave, name: string): GeneralRecordRow | null {
   const key = String(name ?? '').trim();
@@ -391,10 +426,10 @@ export function generalRecordOf(save: CampaignSave, name: string): GeneralRecord
 }
 
 /**
- * 記一場勝/敗（web `Saves.noteGeneralResult()`，`saves.js:896`）。
+ * 记一场胜/败（web `Saves.noteGeneralResult()`，`saves.js:896`）。
  *
- * 只寫 `save.generalRecord` 這一個鍵（不碰任何別的表）；`won` 必須是布林
- * （web 也是這麼嚴：非布林回 `null` 且不寫檔）。返回落帳後的整行。
+ * 只写 `save.generalRecord` 这一个键（不碰任何别的表）；`won` 必须是布尔
+ * （HTML 侧也这么严：非布尔回 `null` 且不写档）。返回落帐后的整行。
  */
 export function noteGeneralResult(save: CampaignSave, name: string, won: boolean): GeneralRecordRow | null {
   const key = String(name ?? '').trim();
@@ -410,10 +445,10 @@ export function noteGeneralResult(save: CampaignSave, name: string, won: boolean
 }
 
 /**
- * 士氣（原作 `general+0x38`；web `campaign.html:722-745` 的 `save.morale`）。
+ * 士气（原作 `general+0x38`；web `campaign.html:722-745` 的 `save.morale`）。
  *
- * **無記錄回 `null`**（web 的 `moraleOf()` 回默認 60，這裡故意不跟：面板顯示的是
- * 原作欄位真值，60 是「沒資料時的推定值」，畫上去就是編數）。
+ * **无记录回 `null`**（HTML 侧的 `moraleOf()` 回默认 60，这里故意不跟：面板显示的是
+ * 原作栏位真值，60 是「没资料时的推定值」，画上去就是编数）。
  */
 export function moraleOf(save: CampaignSave, name: string): number | null {
   const key = String(name ?? '').trim();
@@ -422,7 +457,7 @@ export function moraleOf(save: CampaignSave, name: string): number | null {
   return hasKey(map, key) ? intOrNull(map[key], 0, 100) : null;
 }
 
-/** 疲勞（原作 `general+0x3A`；web `save.tire`；無記錄回 `null` 而非 0）。 */
+/** 疲劳（原作 `general+0x3A`；web `save.tire`；无记录回 `null` 而非 0）。 */
 export function tireOf(save: CampaignSave, name: string): number | null {
   const key = String(name ?? '').trim();
   if (!key) return null;
@@ -431,11 +466,11 @@ export function tireOf(save: CampaignSave, name: string): number | null {
 }
 
 /**
- * 裝備名（web `campaign.html:1710 equipNamesOf()`）。
+ * 装备名（web `campaign.html:1710 equipNamesOf()`）。
  *
- * 兩張表都讀：v3 的 `save.equip[name][slot]` 優先，回落舊鏡像
- * `save.weapon / horse / thing`（web `Saves.equipOf()`；`book` 對應舊表的 `thing`）。
- * 一個都沒有就是空串（面板那格畫「—」）。
+ * 两张表都读：v3 的 `save.equip[name][slot]` 优先，回落旧镜像
+ * `save.weapon / horse / thing`（web `Saves.equipOf()`；`book` 对应旧表的 `thing`）。
+ * 一个都没有就是空串（面板那格画「—」）。
  */
 export function equipNamesOf(save: CampaignSave, name: string): EquipNames {
   const key = String(name ?? '').trim();
@@ -449,11 +484,11 @@ export function equipNamesOf(save: CampaignSave, name: string): EquipNames {
 }
 
 /**
- * 等級（web `campaign.html:1624 generalLevelOf()` 的**存檔段**）。
+ * 等级（web `campaign.html:1624 generalLevelOf()` 的**存档段**）。
  *
- * 只認 `save.generalLevel[name]`（≥1、上限 99）；**不做** web 那層
- * `scenarioLevelOf()` 劇本回落 —— 回落等於給「存檔沒記等級」的將編一個數字，
- * 與這輪「無記錄畫「—」」的口徑衝突。
+ * 只认 `save.generalLevel[name]`（≥1、上限 99）；**不做** HTML 侧那层
+ * `scenarioLevelOf()` 剧本回落 —— 回落等于给「存档没记等级」的将编一个数字，
+ * 与这一轮「无记录画「—」」的口径冲突。
  */
 export function generalLevelOf(save: CampaignSave, name: string): number | null {
   const key = String(name ?? '').trim();
@@ -464,19 +499,39 @@ export function generalLevelOf(save: CampaignSave, name: string): number | null 
   return level !== null && level >= 1 ? level : null;
 }
 
-/** `generals.json` 的一行；`Thing`（物品）不在 `types.ts` 的 `General` 裡，本地補一層 */
-type GeneralRow = General & { Thing?: unknown };
-
-/** `generals.json` 的靜態裝備名（web `surFields()` 的 `text(row.Weapon)` / `text(row.Thing)` 回落） */
+/** `generals.json` 的静态装备名（web `surFields()` 的 `text(row.Weapon)` / `text(row.Thing)` 回落） */
 function staticEquipOf(data: GameData, name: string, field: 'Weapon' | 'Thing'): string {
   return equipText(rowOf(data, name)?.[field]);
 }
 
 /**
- * 卡片那七欄的取值（取不到就不填 → 面板畫灰「—」）。
+ * 面板十栏里「存档不一定有」的那七项（`SurrenderCard` 的可选附加栏）。
  *
- * 逐項對應 web `surFields(c)`：等級 / 士氣 / 疲勞 / 武器（裝備表回落靜態表）/
- * 物品（`book` 再 `amulet`，最後回落 `Thing`）/ 勝場 / 敗場。
+ * 每一项都照原作偏移与 web 同名键取值；**存档没有就不填**（`undefined`），
+ * 面板画灰「—」。绝不拿 0 / 60 之类的缺省值冒充真值。
+ */
+export interface SurrenderCardExtras {
+  /** 等级（web `save.generalLevel[name]`，`campaign.html:1624`）；没有就不填 */
+  level?: number;
+  /** 士气（原作 `general+0x38`；web `save.morale[name]`）；没有就不填，**不套 60** */
+  morale?: number;
+  /** 疲劳（原作 `general+0x3A`；web `save.tire[name]`）；没有就不填，**不套 0** */
+  tire?: number;
+  /** 胜场（原作 `general+0x9F`；web `save.generalRecord[name].w`） */
+  wins?: number;
+  /** 败场（原作 `general+0xA1`；web `save.generalRecord[name].l`） */
+  losses?: number;
+  /** 武器名（`equip[name].weapon` → 旧镜像 `weapon[name]` → `generals.json` 的 `Weapon`） */
+  weapon?: string;
+  /** 物品名（`equip[name].book` → `.amulet` → 旧镜像 `thing[name]` → `generals.json` 的 `Thing`） */
+  item?: string;
+}
+
+/**
+ * 卡片那七栏的取值（取不到就不填 → 面板画灰「—」）。
+ *
+ * 逐项对应 web `surFields(c)`：等级 / 士气 / 疲劳 / 武器（装备表回落静态表）/
+ * 物品（`book` 再 `amulet`，最后回落 `Thing`）/ 胜场 / 败场。
  */
 export function surrenderCardExtras(save: CampaignSave, data: GameData, name: string): SurrenderCardExtras {
   const extras: SurrenderCardExtras = {};
@@ -499,89 +554,101 @@ export function surrenderCardExtras(save: CampaignSave, data: GameData, name: st
   return extras;
 }
 
-/* ------------------------------------------------------------------------- */
-/* 招降卡                                                                      */
-/* ------------------------------------------------------------------------- */
+// ---------------------------------------------------------------------------
+// 招降决策（R85，`project/92_招降决策.md`）
+//
+// `project/89_全流程演练.md` 卡点③：战后结算是「自动拒降 → 直接进斩首池」，玩家没有
+// 机会选。原作 `0x44E820` 是**先把招降结果算好**存 `[0x4A8094]`，再弹
+// `0x491D8C "抓到敵將，如何處理?"`；按钮确认函数 `0x44EBE2` 只读那个预算结果、
+// **不重新掷骰**（`docs/04b2_招降斩首与战后结算.md` §2.1）。战斗页 `main.js` 已经按这个
+// 顺序把「预判成功的」写进 `save.captured`、「预判失败后被斩的」写进 `save.executed`。
+//
+// 所以这里**一行判定都不重写**：
+//   1. `surrenderCandidates()` 把两个名单翻成"卡片"，档位直接问 `capture.ts` 的
+//      `recruitChanceOf()`（:197，纯函数、不掷骰）—— p==1 必降 / 0<p<1 须掷骰 /
+//      p==0 拒降。理由文案用 `canRecruit()`（:237）的原文，但**只在 chance 为 0/1 时**
+//      调它：那两条路径 capture.ts 必然在掷骰前早退（:259-300），所以传一个会抛错的
+//      `NO_ROLL` 当 rng，capture.ts 哪天改成"先掷骰再判"这里会立刻炸出来。
+//   2. `applySurrender()` 只在玩家逐将决策**之后**落库，招降入城 / 斩首出池仍走既有的
+//      `applyPostBattle()`；已决策的名字从待决名单摘掉 → 二次进入不会重复结算。
+//
+// 君主（`0x40975E`）：`resolvePostBattle()` 在 `isKingOf()` 处就 `continue` 了，君主
+// **永远不会**出现在 captured/executed 里，所以面板单独出一张"逃走"行（候选来自
+// `opts.atCity` 里那些剧本君主），不给按钮。
+// ---------------------------------------------------------------------------
 
-/** 招降档位：必降 / 需掷骰 / 拒降（`capture.ts` 的 `recruitChanceOf()` 判出来） */
+/** 招降判定档位：可降 / 需再战（要掷骰）/ 拒降 */
 export type SurrenderTier = 'must' | 'roll' | 'refuse';
 
-/** 玩家对一张卡的处置（`escape` 只对君主/批量放走有意义） */
-export type SurrenderDecision = 'recruit' | 'kill' | 'release' | 'escape';
+/** 玩家对一张卡的处置；`escape` = 放走（君主只能是这个），`release` = 释放回原势力（R103） */
+export type SurrenderDecision = 'recruit' | 'kill' | 'escape' | 'release';
 
 /**
- * 面板十欄裡「存檔不一定有」的那七項（`SurrenderCard` 的可選附加欄）。
+ * 逐将询问面板上的一张卡（面板只负责画，不参与判定）。
  *
- * 每一項都照原作偏移與 web 同名鍵取值；**存檔沒有就不填**（`undefined`），
- * 面板畫灰「—」。絕不拿 0 / 60 之類的缺省值冒充真值。
+ * R197 起 `extends SurrenderCardExtras`：等级 / 士气 / 疲劳 / 胜败场 / 装备这七栏
+ * 由 `cardOf()` / `kingCardOf()` 从存档里取（取不到就不填 → 面板画灰「—」）。
  */
-export interface SurrenderCardExtras {
-  /** 等級（web `save.generalLevel[name]`，`campaign.html:1624`）；沒有就不填 */
-  level?: number;
-  /** 士氣（原作 `general+0x38`；web `save.morale[name]`）；沒有就不填，**不套 60** */
-  morale?: number;
-  /** 疲勞（原作 `general+0x3A`；web `save.tire[name]`）；沒有就不填，**不套 0** */
-  tire?: number;
-  /** 勝場（原作 `general+0x9F`；web `save.generalRecord[name].w`） */
-  wins?: number;
-  /** 敗場（原作 `general+0xA1`；web `save.generalRecord[name].l`） */
-  losses?: number;
-  /** 武器名（`equip[name].weapon` → 舊鏡像 `weapon[name]` → `generals.json` 的 `Weapon`） */
-  weapon?: string;
-  /** 物品名（`equip[name].book` → `.amulet` → 舊鏡像 `thing[name]` → `generals.json` 的 `Thing`） */
-  item?: string;
-}
-
-/** 一张俘虏卡 / 君主卡（`surrenderCandidates()` 的输出，面板只读它） */
 export interface SurrenderCard extends SurrenderCardExtras {
   name: string;
   str: number;
   int: number;
-  /** 被俘当刻的忠诚（已按 `0x447520` 扣过 `(10-節操)*2`；君主不扣） */
+  /** 被俘当刻的忠诚（已扣 `0x447520`；君主行是未扣的表值） */
   loyal: number;
+  /** 节操 1..9（`general+0xC7`） */
   constancy: number;
   isKing: boolean;
-  /** 这张卡从哪来：`captured` 预判可降 / `executed` 预判拒降被斩 / `king` 君主逃走 */
+  /** 这张卡从哪来：战斗页预判成功 / 预判失败被斩 / 君主逃走 */
   from: 'captured' | 'executed' | 'king';
-  /** 战斗页的预判结果（`from === 'captured'`） */
+  /** 战斗页已经预判过结果（= 这张卡在 `save.captured` 里） */
   predicted: boolean;
-  /** 招降成功率 0..1（`capture.ts:recruitChanceOf`；rng 固定 0.5，只看档位） */
+  /** `recruitChanceOf()` 的返回值：1 必降、0 拒降、中间值须掷骰 */
   chance: number;
   tier: SurrenderTier;
+  /** 档位文案：`可 降` / `需 再 戰` / `拒 降`（君主 `逃 走`） */
   tierText: string;
-  /** 能不能点「招降」：只有预判成功的俘虏卡能点（君主/被斩永远 false） */
+  /** 按钮能不能点「招降」（君主与预判失败的都点不了） */
   recruitable: boolean;
-  /** 档位原因（原作硬门原文，或 `本戰擲骰成功：成功率 …`） */
+  /** 一行中文理由（原作硬门/节操原文，或成功率） */
   reason: string;
 }
 
-/** `surrenderCandidates()` 的可选覆盖项（不给就自己从存档/守将表推） */
+/** `surrenderCandidates()` 的上下文：城市守将名、我方将名、君主名 */
 export interface SurrenderOpts {
-  /** 该城守将名：只有剧本君主才出「逃走」卡 */
-  atCity?: readonly string[];
-  /** 我方在职武将名（这些人不出卡） */
-  mine?: readonly string[];
-  /** 我方君主名（他自己不出「逃走」卡） */
+  /** 该城（通常是刚打下的城）的守将名单，用来找"逃走"的君主 */
+  atCity?: string[];
+  /** 我方在職武将名：与他们同名的俘虏是"我方被俘"，不进面板（也不该被斩首） */
+  mine?: string[];
+  /** 我方君主名（`save.monarch || save.king`） */
   king?: string;
   /**
-   * 我方是不是这场仗的胜者（R208 胜者门）。`false` 时一张卡都不出：
-   * 战败方没有处置俘虏的权利，被俘的我方将交给 `planAiDisposal()` 由敌方 AI 处置。
-   * 不给 / `true` 时行为与旧版一致（胜方/未知）。
+   * 这一仗是不是**我方胜**（胜者才有处置权）。
+   *
+   * `false` 时直接返回空卡（比"过滤"更硬）：我方战败时 `save.captured`/`save.executed`
+   * 里装的是**我方**被俘将（main.js:932-937 不分胜负都写），若只靠 `mine` 过滤，
+   * 守城丢城后我方将已不在 `owned` 里（静态归属跟着城走），仍会漏进面板 —— 用户报的
+   * "我方决定我方俘虏"就是这么来的。缺省 `undefined` = 旧行为（web 侧还没接胜负信号）。
    */
   won?: boolean;
 }
 
-/** `applySurrender()` 的结果（各类处置的名字清单） */
 export interface SurrenderResult {
+  /** 真正招降入城的名字（`applyPostBattle().added`） */
   recruited: string[];
+  /** 玩家选了斩首的名字（不论是否已在池里） */
   killed: string[];
-  /** 从别的城名单里摘掉的名字（招降跨城去重） */
+  /** 真正从池里移除的名字（`applyPostBattle().removed`，幂等重放为空） */
   removed: string[];
+  /** 放走的名字，含君主 */
   escaped: string[];
+  /**
+   * 玩家选了释放的名字（回原势力）：不进 `save.captured`/`save.executed`，
+   * 而是累加进 `save.released`、`_moved` 打 `RELEASED` 哨兵（幂等重放仍会列出）。
+   */
   released: string[];
-  /** 绕过硬门被按「放走」处理的名字（拒降档点了招降等） */
+  /** 档位不允许却被要求招降的名字（防绕过硬门；按放走处理） */
   rejected: string[];
-  /** 本次真正落库（摘出待决名单）的名字 */
+  /** 从 `save.captured` / `save.executed` 摘掉的名字（= 已决策） */
   cleared: string[];
 }
 
@@ -590,17 +657,30 @@ const TIER_TEXT: Record<SurrenderTier, string> = {
   roll: '需 再 戰',
   refuse: '拒 降',
 };
-
 const KING_TEXT = '逃 走';
 const KING_REASON = '君主不可俘（0x40975E）：只能逃走';
 
 /** 只允许走 `canRecruit()` 里"不掷骰"的早退路径；一旦掷骰立刻抛错（见文件头） */
-const NO_ROLL = (): never => {
+const NO_ROLL: () => number = () => {
   throw new Error('capture.ts 的招降判定不应在 roster 的招降面板里掷骰（0x44EBE2 只读预算结果）');
 };
 
 /** 与 `capture.ts` 里 `Side` 同名；招降方永远是胜方 */
-const WINNER: Side = 'A';
+const WINNER = 'A' as unknown as Parameters<typeof canRecruit>[0];
+
+type GeneralRow = {
+  NAME?: unknown;
+  STR?: unknown;
+  INT?: unknown;
+  /** generals.json 的数值忠诚（注意不是那个空的 `LOYAL` 字段） */
+  Loyal?: unknown;
+  CONSTANCY?: unknown;
+  /** generals.json 的静态装备名（面板武器/物品的回落；`Thing` 不在 `types.ts` 的 `General` 里） */
+  Weapon?: unknown;
+  Thing?: unknown;
+};
+
+type KingsRow = { kings?: { NAME?: unknown }[] };
 
 function numOf(v: unknown, dflt: number): number {
   const n = typeof v === 'number' ? v : Number(v);
@@ -616,14 +696,19 @@ function nameListOf(v: unknown): string[] {
   return v.map((x) => String(x ?? '')).filter(Boolean);
 }
 
-/** 剧本里的君主名（`capture.ts:150 isKingOf()` 的第二条判据；该函数没导出，只读不改） */
+/**
+ * 剧本里的君主名（`capture.ts:150 isKingOf()` 的第二条判据；该函数没导出，只读不改）。
+ *
+ * 下面两行 for-of 头是同步器 KEEP_PATCHES **K8/K9** 的精确锚点（Cocos 的 Babel 不吃
+ * `for (const x of a || b)` 这种逻辑表达式头，同步时会提成临时常量）—— 保持原样。
+ */
 export function kingsInScenario(data: GameData): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   // Cocos 的 Babel 不能吃「for-of 的头是逻辑表达式」：`for (const x of a || b)` 会在
   // plugin-transform-for-of 的类型推断里崩（`Property types[1] of TSUnionType ... GenericTypeAnnotation`），
   // 而 tsc 全绿。提成常量即可（同 PUBLISH 清单里「三元式提成常量」那条坑）。
-  const rows = (data?.scenarios ?? []) || [];
+  const rows = ((data?.scenarios ?? []) as unknown as KingsRow[]) || [];
   for (const sc of rows) {
     const kings = sc?.kings ?? [];
     for (const k of kings) {
@@ -638,7 +723,7 @@ export function kingsInScenario(data: GameData): string[] {
 }
 
 function rowOf(data: GameData, name: string): GeneralRow | undefined {
-  const rows = (data?.generals ?? []) as GeneralRow[];
+  const rows = (data?.generals ?? []) as unknown as GeneralRow[];
   return rows.find((g) => g && String(g.NAME ?? '') === name);
 }
 
@@ -647,10 +732,13 @@ function rowOf(data: GameData, name: string): GeneralRow | undefined {
  * `clamp(row.Loyal - (10-節操)*2, 0, 99)`（`capture.ts:363` 之后逐将内联）—— 面板显示
  * 的档位必须和引擎算的一致，否则 `project/89` 里的 程昱53/華佗84/張遼78/守將40 对不上。
  */
-function statOf(
-  data: GameData,
-  name: string,
-): { str: number; int: number; baseLoyal: number; loyal: number; constancy: number } {
+function statOf(data: GameData, name: string): {
+  str: number;
+  int: number;
+  baseLoyal: number;
+  loyal: number;
+  constancy: number;
+} {
   const row = rowOf(data, name);
   const constancy = clampInt(numOf(row?.CONSTANCY, 5), 0, 9);
   const baseLoyal = clampInt(numOf(row?.Loyal, 50), 0, 99);
@@ -702,7 +790,7 @@ function cardOf(data: GameData, name: string, from: 'captured' | 'executed', sav
     tierText: TIER_TEXT[tier],
     recruitable: predicted,
     reason,
-    // [R197] 十欄真值（存檔沒有就不填 → 面板畫「—」）
+    // [R197] 十栏真值（存档没有就不填 → 面板画灰「—」）
     ...surrenderCardExtras(save, data, name),
   };
 }
@@ -725,7 +813,7 @@ function kingCardOf(data: GameData, name: string, save: CampaignSave): Surrender
     tierText: KING_TEXT,
     recruitable: false,
     reason: KING_REASON,
-    // [R197] 君主也照同一套取值（士氣/疲勞/勝敗場同樣按名查，取不到就不填）
+    // [R197] 君主也照同一套取值（士气/疲劳/胜败场同样按名查，取不到就不填）
     ...surrenderCardExtras(save, data, name),
   };
 }
@@ -740,31 +828,38 @@ function kingCardOf(data: GameData, name: string, save: CampaignSave): Surrender
  *
  * 同名同时出现在两个名单里时**以斩首为准**（引擎不会这么写，防脏档）。
  * 已死的（`_moved='陣亡'`）、我方自己人（`opts.mine`）、我方君主（`opts.king`）都不出卡。
+ *
+ * `opts.won === false`（我方战败）→ **一张卡都不出**：处置俘虏是胜者的权利，我方战败时
+ * 名单里的是我方被俘将，交给 `planAiDisposal()` 由敌方 AI 处置（见本文件末尾「胜者门」）。
  */
-export function surrenderCandidates(save: CampaignSave, data: GameData, opts: SurrenderOpts = {}): SurrenderCard[] {
-  // 胜者门（R208）：我方战败时一张卡都不出 —— 处置俘虏是胜者的权利；
-  // 名单里那批人是我方被俘将，交给 `planAiDisposal()` 由敌方 AI 处置（见本文件末尾「胜者门」节）。
-  // 与 `game/src/core/roster.ts` 同名判断逐字一致。
-  if (opts.won === false) return [];
+export function surrenderCandidates(
+  save: CampaignSave,
+  data: GameData,
+  opts: SurrenderOpts = {},
+): SurrenderCard[] {
+  if (opts.won === false) return []; // 胜者门：败者没有处置权
   const cards: SurrenderCard[] = [];
   const taken = new Set<string>();
-  const executed = new Set(nameListOf((save as Record<string, unknown>)?.executed));
+  const executed = new Set(nameListOf(save?.executed));
   const mine = new Set((opts.mine ?? []).map((n) => String(n ?? '')).filter(Boolean));
   const kingName = String(opts.king ?? '');
   const kings = new Set(kingsInScenario(data));
+
   const usable = (name: string): boolean =>
     !!name && !taken.has(name) && !mine.has(name) && name !== kingName && !isDead(save, name);
+
   // 君主就算被脏档写进 captured/executed，也只能出"逃走"卡（`0x40975E`）
   const emit = (name: string, from: 'captured' | 'executed'): void => {
     if (!usable(name)) return;
     taken.add(name);
     cards.push(kings.has(name) ? kingCardOf(data, name, save) : cardOf(data, name, from, save));
   };
-  for (const name of nameListOf((save as Record<string, unknown>)?.captured)) {
+
+  for (const name of nameListOf(save?.captured)) {
     if (executed.has(name)) continue; // 以斩首为准，交给下面那趟
     emit(name, 'captured');
   }
-  for (const name of nameListOf((save as Record<string, unknown>)?.executed)) {
+  for (const name of nameListOf(save?.executed)) {
     emit(name, 'executed');
   }
   const atCity = opts.atCity ?? [];
@@ -778,23 +873,29 @@ export function surrenderCandidates(save: CampaignSave, data: GameData, opts: Su
 }
 
 /**
- * 面板要不要弹：没卡就不弹；我方战败（`opts.won === false`）时永远不弹（R208 胜者门）。
+ * 面板要不要弹：没卡就不弹；我方战败（`opts.won === false`）也不弹。
  *
  * `project/89` 的空城/无俘战（例如只打死守将没抓到人）不该每次都拦玩家一下 ——
  * web 侧必须先问这个函数再决定开不开 `#surrenderSheet`。
+ *
+ * `opts.won === false` 是「胜者门」的最后一层保险：即使调用方传了非空 cards（脏档/
+ * 旧调用点），我方战败时也一律不开面板（处置权在敌方 AI 手里）。
  */
-export function needSurrenderPanel(cards: readonly SurrenderCard[], opts: { won?: boolean } = {}): boolean {
+export function needSurrenderPanel(
+  cards: readonly SurrenderCard[] | null | undefined,
+  opts: { won?: boolean } = {},
+): boolean {
   if (opts.won === false) return false;
   return Array.isArray(cards) && cards.length > 0;
 }
 
 /** 从 `save.captured` / `save.executed` 里摘掉已决策的名字（不建新键） */
-function dropPending(save: CampaignSave, key: 'captured' | 'executed', names: readonly string[]): void {
-  const box = save as Record<string, unknown>;
-  const cur = box[key];
+function dropPending(save: CampaignSave, key: 'captured' | 'executed', names: string[]): void {
+  const cur = (save as Record<string, unknown>)[key];
   if (!Array.isArray(cur)) return;
   const drop = new Set(names);
-  box[key] = cur.filter((n) => !drop.has(String(n ?? '')));
+  const left = (cur as unknown[]).filter((n) => !drop.has(String(n ?? '')));
+  (save as Record<string, unknown>)[key] = left;
 }
 
 /**
@@ -810,7 +911,7 @@ function dropPending(save: CampaignSave, key: 'captured' | 'executed', names: re
 export function applySurrender(
   save: CampaignSave,
   cards: readonly SurrenderCard[],
-  decisions: Readonly<Record<string, SurrenderDecision>>,
+  decisions: Record<string, SurrenderDecision | undefined>,
   homeCity: string,
 ): SurrenderResult {
   const wantRecruit: string[] = [];
@@ -819,6 +920,7 @@ export function applySurrender(
   const escaped: string[] = [];
   const rejected: string[] = [];
   const cleared: string[] = [];
+
   const cardList = cards ?? [];
   for (const card of cardList) {
     const name = String(card?.name ?? '');
@@ -849,8 +951,8 @@ export function applySurrender(
     wantRecruit.push(name);
   }
 
-  const lookup = new Map<string, SurrenderCard>((cards ?? []).map((c) => [String(c.name), c] as [string, SurrenderCard]));
-  const post: PostBattleReport = {
+  const lookup = new Map((cards ?? []).map((c) => [String(c.name), c]));
+  const post: PostBattle = {
     captures: wantRecruit.map((name) => {
       const c = lookup.get(name);
       return { name, str: c?.str ?? 0, int: c?.int ?? 0, loyal: c?.loyal ?? 0, recruited: true };
@@ -859,14 +961,12 @@ export function applySurrender(
       const c = lookup.get(name);
       return { name, str: c?.str ?? 0, int: c?.int ?? 0, loyal: c?.loyal ?? 0, recruited: false };
     }),
-    released: [],
-    kingsEscaped: [],
-    drops: [],
-    expBonus: 0,
-    meritBonus: 0,
   };
+
   const res =
-    wantRecruit.length || wantKill.length ? applyPostBattle(save, post, homeCity) : { added: [], removed: [] };
+    wantRecruit.length || wantKill.length
+      ? applyPostBattle(save, post, homeCity)
+      : { added: [] as string[], removed: [] as string[] };
 
   // 释放：回原势力 → 不在我方任何城的名单 + `_moved` 哨兵 + `save.released` 累加（去重）
   if (wantRelease.length) {
@@ -898,8 +998,8 @@ export function applySurrender(
  */
 function rememberReleased(save: CampaignSave, names: readonly string[]): void {
   const box = save as Record<string, unknown>;
-  const cur = Array.isArray(box.released) ? (box.released as unknown[]) : [];
-  const list = cur.map((n) => String(n ?? '')).filter(Boolean);
+  const cur = Array.isArray(box.released) ? box.released : [];
+  const list = (cur as unknown[]).map((n) => String(n ?? '')).filter(Boolean);
   const seen = new Set(list);
   for (const raw of names) {
     const name = String(raw ?? '');
@@ -911,7 +1011,7 @@ function rememberReleased(save: CampaignSave, names: readonly string[]): void {
 }
 
 // ---------------------------------------------------------------------------
-// 「胜者才有处置权」（R208 / R220 mirror：从 `game/src/core/roster.ts` 同段落原样搬入）
+// 「胜者才有处置权」（2026-11，P0：我方战败却由我方决定我方俘将）
 //
 // 原作 `0x491D8C "抓到敵將，如何處理?"` 是**胜者**的战后结算面板；败方没有被俘将的
 // 处置权，他们的俘虏由胜方（AI）按战斗页已经算好的结果处置。web 侧原先只按
@@ -925,22 +1025,14 @@ function rememberReleased(save: CampaignSave, names: readonly string[]): void {
 //   1. `readBattleOutcome()`：读 main.js 战后写回的 `save.lastBattle`（唯一权威胜负信号）；
 //   2. `decideBattleWon()`：`lastBattle` 缺失（旧档/验收探针）时的兜底推断；
 //   3. `ourForceNames()`：**明确属于我方**的武将名（roster 名单 + `_moved` 落腳城），
-//      用来把"我方被俘"从候选卡里剔掉；
+//      用来把"我方被俘"从候选卡里剔掉 —— 不再靠"刚打下的城静态归属"这种会随战果翻转的判据；
 //   4. `planAiDisposal()` / `applyAiDisposal()`：我方战败时，敌方 AI **沿用战斗页已判结果**
 //      （`captured`/`joined` = 劝降成功、`executed` = 斩首、其余 = 释放），**不重新掷骰**。
 //
 // 胜者门的三层：
-//   · `surrenderCandidates(..., { won: false })` → 空卡（见上）；
-//   · `needSurrenderPanel(cards, { won: false })` → false（见上）；
-//   · 界面侧（Cocos `SurrenderModel.resolveCaptureFlow()` / web `settleBattleReturn()`）
-//     只在 `decideBattleWon()` 为真时才开面板。
-//
-// [R220 mirror] 移植说明：
-//   · 本段与 `game/src/core/roster.ts:766-1013` 逐字一致，只依赖两边同名的
-//     `rawRoster()/cityKeys()/movedOf()/removeFromPools()/nameListOf()/isDead()`，
-//     以及本文件新增的 `ENEMY_HELD`，无需签名适配。
-//   · 由 `game/tests/capture_gate_cocos.test.ts` 的防漂移用例守着两 fork 的导出集合；
-//     `work/cocos_sync/sync_core3.mjs` 的 `SKIP_FILES` 不含本文件对比，详见任务报告。
+//   · `surrenderCandidates(..., { won: false })` → 空卡；
+//   · `needSurrenderPanel(cards, { won: false })` → false；
+//   · web 侧 `settleBattleReturn()` 只在 `decideBattleWon()` 为真时才调上面两个。
 // ---------------------------------------------------------------------------
 
 /** main.js `writeBackCampaign()` 战后写回的胜负/俘虏记录（`save.lastBattle`） */
@@ -1119,7 +1211,9 @@ export function planAiDisposal(input: AiDisposalInput): AiDisposalEntry[] {
   const plan: AiDisposalEntry[] = [];
   const seen = new Set<string>();
   const add = (list: readonly string[] | undefined, action: AiDisposalAction): void => {
-    for (const rawName of list ?? []) {
+    // Babel 陷阱（同 K8–K11）：`for (const x of a ?? b)` 在 Cocos 里会崩，先把兜底提成常量
+    const names = list ?? [];
+    for (const rawName of names) {
       const name = String(rawName ?? '');
       if (!name || name === king || seen.has(name)) continue;
       seen.add(name);
@@ -1140,7 +1234,7 @@ export function planAiDisposal(input: AiDisposalInput): AiDisposalEntry[] {
  *   · release → 名单不动（我方将放回本城；他本来就没被移出名单）。
  *
  * 幂等：同一份计划重放，`recruited` / `executed` / `dead` 都是空数组。
- * 界面侧在 AI 处置后必须把已处置的名字从 `save.captured` / `save.executed` 摘掉
+ * web 侧在 AI 处置后必须把已处置的名字从 `save.captured` / `save.executed` 摘掉
  * （那是"待处置队列"，不清下一次回大地图会重复弹）。
  */
 export function applyAiDisposal(
@@ -1148,7 +1242,9 @@ export function applyAiDisposal(
   plan: readonly AiDisposalEntry[],
 ): AiDisposalResult {
   const out: AiDisposalResult = { recruited: [], executed: [], dead: [], released: [] };
-  for (const entry of plan ?? []) {
+  // Babel 陷阱（同 K8–K11）：`for (const x of a ?? b)` 在 Cocos 里会崩，先把兜底提成常量
+  const entries = plan ?? [];
+  for (const entry of entries) {
     const name = String(entry?.name ?? '');
     const action = entry?.action;
     if (!name || !action) continue;

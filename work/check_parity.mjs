@@ -69,7 +69,15 @@ function coreDiff() {
     if (!m) return { ok: false, why: '解析不到 sync_core3 汇总行', raw: out.slice(-300) };
     const [, same, stale, missing, extra] = m.map(Number);
     const bad = stale + missing + extra;
-    return { ok: bad === 0, same, stale, missing, extra, why: bad ? `core 不同步：差异 ${stale} / cocos 缺 ${missing} / 多出 ${extra}` : '' };
+    // R224：SKIP_FILES（roster.ts / field.ts）不参与同步，但「不同步」不等于「一致」。
+    // 这里把 SKIP 分叉单独提示出来（不判红），否则 core 单源的 ✓ 会被误读成「全都同步」。
+    const skipCount = Number((/SKIP-DIFF (\d+) 个/.exec(out) ?? [])[1] ?? 0);
+    if (skipCount) {
+      const rows = [...out.matchAll(/(\w+\.ts)\s+web (\d+) 行 \/ cocos (\d+) 行/g)]
+        .map((r) => `${r[1]} web ${r[2]} / cocos ${r[3]}`);
+      console.log(`  ⚠ SKIP 分叉 ${skipCount} 个（不同步、需人工收编，不判红）：${rows.join('；')}`);
+    }
+    return { ok: bad === 0, same, stale, missing, extra, skipCount, why: bad ? `core 不同步：差异 ${stale} / cocos 缺 ${missing} / 多出 ${extra}` : '' };
   } catch (err) {
     return { ok: false, why: `sync_core3 跑失败：${String(err.message ?? err).slice(0, 200)}` };
   }

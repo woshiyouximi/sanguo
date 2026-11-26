@@ -722,21 +722,39 @@ function patchLineIn(text, patch) {
 /**
  * 不同步的文件（Cocos 侧是权威源，web 侧没有对应实现）。
  *
- * `core/roster.ts`：R197 起 Cocos 版多出招降十欄所需的存档读取层
- * （`SurrenderCardExtras` / `generalRecordOf` / `noteGeneralResult` /
- * `moraleOf` / `tireOf` / `equipNamesOf` / `generalLevelOf` /
- * `surrenderCardExtras`，见 `project/197_Cocos招降十栏真值.md`）。
- * web 侧同语义在 `game/web/saves.js` 与 `campaign.html` 的 `surFields()` 里，
- * 两边是**不同架构下的等价实现**，硬同步会删掉 Cocos 那 250 行。
- * 同步回来之前先决定「是否把这块提升到 shared core」。
- *
- * `core/field.ts`：R198 的 web-only 字段边界模块（`CAM_MIN/CAM_MAX`），
- * Cocos 用不到，别往包里塞。
+ * **R224 收编后为空**：`roster.ts` 的 R197 十栏取值层已经并进 web 单源
+ * （`game/src/core/roster.ts` 是唯一源，Cocos 侧只由本脚本生成，见
+ * `work/roster_unify/REPORT.md`）；`field.ts` 两边本来就逐字节相同。机制保留给
+ * 将来真正的 Cocos-only 文件。
  */
-const SKIP_FILES = new Set([
-  'roster.ts',
-  'field.ts',
-]);
+const SKIP_FILES = new Set();
+
+/**
+ * SKIP_FILES 不参与同步，但「不同步」≠「一定相同」。
+ * R224 发现 roster.ts 在 cocos 侧被手工追加过 [R220 mirror] 段（1168 行 vs web 1013 行），
+ * 而 --diff-only 只报「23 相同 0 差异」，`check_parity` 因此把 roster 的分叉当成了「已同步」——假绿。
+ * 这里对 SKIP 文件单独算一次差异，只报告、不改写（它们不归同步器管）。
+ */
+function skipDiffRows() {
+  const out = [];
+  for (const f of SKIP_FILES) {
+    const a = join(SRC_ROOT, f);
+    const b = join(DST_ROOT, f);
+    if (!existsSync(a) || !existsSync(b)) continue;
+    const ta = readFileSync(a, 'utf8');
+    const tb = readFileSync(b, 'utf8');
+    if (ta === tb) continue;
+    const la = ta.split('\n');
+    const lb = tb.split('\n');
+    // 粗算差异行数（set 差集大小），只为给出数量级，不做逐行 diff
+    const setB = new Set(lb);
+    const setA = new Set(la);
+    const onlyWeb = la.filter((l) => l.trim() && !setB.has(l)).length;
+    const onlyCocos = lb.filter((l) => l.trim() && !setA.has(l)).length;
+    out.push({ file: f, webLines: la.length, cocosLines: lb.length, onlyWeb, onlyCocos });
+  }
+  return out;
+}
 
 function main() {
   if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
@@ -894,6 +912,27 @@ function main() {
     console.log(`[diff-only] 写入 ${DIFF_OUT}`);
     console.log(`  文件 ${files.length}：相同 ${same.length} / 有差异 ${files.length - same.length - created.length}`
       + ` / cocos 缺 ${created.length} / cocos 多出 ${stale.length}`);
+    // SKIP 文件的真实差异：不同步，但必须让人看见（否则 --diff-only 的「0 差异」是假绿）
+    const skips = skipDiffRows();
+    if (skips.length) {
+      console.log(`  SKIP-DIFF ${skips.length} 个（不同步、需人工收编）：`);
+      for (const s of skips) {
+        console.log(`    ${s.file}  web ${s.webLines} 行 / cocos ${s.cocosLines} 行`
+          + `（仅 web 有 ${s.onlyWeb} 行，仅 cocos 有 ${s.onlyCocos} 行）`);
+      }
+      diffParts.push('');
+      diffParts.push('SKIP_FILES（不同步）的实际差异：');
+      for (const s of skips) {
+        diffParts.push(`  ${s.file}  web ${s.webLines} 行 / cocos ${s.cocosLines} 行`
+          + `（仅 web 有 ${s.onlyWeb} 行，仅 cocos 有 ${s.onlyCocos} 行）`);
+      }
+      if (process.argv.includes('--strict-skip')) {
+        console.log('  → --strict-skip：存在 SKIP 分叉，退出码 1');
+        process.exitCode = 1;
+      }
+    } else {
+      console.log('  SKIP-DIFF 0 个（SKIP 文件内容一致）');
+    }
     for (const c of created) console.log(`  WEB-ONLY ${c.file} (${c.lines} 行)`);
     if (stale.length) for (const s of stale) console.log(`  COCOS-ONLY ${s}`);
     return;

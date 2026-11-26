@@ -32,6 +32,14 @@
  *
  * 原作里招降成功的将直接进"我方武将列表"，所以这里是"按城"记名；
  * 哪座城（`homeCity`）由调用方给 —— 通常是打完仗回城的那座。
+ *
+ * **单源（R224）**：本文件是 roster 的唯一源，Cocos 正式版镜像
+ * `game/cocos/assets/scripts/core/roster.ts` 由 `work/cocos_sync/sync_core3.mjs` 单向生成，
+ * **不要再手改镜像**（R224 之前 `SKIP_FILES` 把它排除在同步外，才出现 `[R220 mirror]`
+ * 那种手工补丁分叉）。同步器对本文件有 4 条 KEEP_PATCHES（K8–K11）：把
+ * `for (const x of a || b)` 提成 `const t = a || b; for (const x of t)` —— Cocos 的 Babel
+ * 在「逻辑表达式直接当 for-of 头」时会崩。所以下面那 4 行 for-of 头**保持原样**，
+ * 同步器按原文精确匹配（改一个字补丁就命不中，同步会中止）。
  */
 import type { CampaignSave, GameData } from '../types.ts';
 import type { CapturedGeneral, PostBattleReport, PostGeneral } from './capture.ts';
@@ -331,6 +339,221 @@ export function applyPostBattle(
   return { added, removed };
 }
 
+/* ------------------------------------------------------------------------- */
+/* [R197] 招降面板「十栏真值」：等级 / 士气 / 疲劳 / 胜败场 / 装备              */
+/*                                                                           */
+/* 取值口径逐条照生产端：`game/web/campaign.html:4917-4960 surFields()` +      */
+/* `game/web/saves.js:836-909`（`generalRecord`）。**存档没有就是「没有」**：   */
+/* 一律回 `null` / 不填，由面板画灰「—」，绝不拿 0 或 60 冒充真值 —— 那只是把 */
+/* 「没记录」画成「有数据」。HTML 侧 `moraleOf()` 缺记录回默认 60 是给战斗计算  */
+/* 用的推定值，不是显示真值；面板要显示的是原作栏位真值。                       */
+/* ------------------------------------------------------------------------- */
+
+/** 胜/败场计数上限（原作与 web `saves.js` 同值；Cocos `GameState.ts` 归一化 generalRecord 也用它） */
+export const GENERAL_RECORD_MAX = 9999;
+
+/** 一个武将的胜/败记录（web `saves.js:857 generalRowOf()` 的一行） */
+export interface GeneralRecordRow {
+  w: number;
+  l: number;
+}
+
+/** 四槽装备名（web `campaign.html:1710 equipNamesOf()` 的返回值；空槽是空串） */
+export interface EquipNames {
+  weapon: string;
+  horse: string;
+  book: string;
+  amulet: string;
+}
+
+function saveBox(save: CampaignSave): Record<string, unknown> {
+  return (save ?? {}) as Record<string, unknown>;
+}
+
+/** 把 `raw` 当映射看（非物件/数组一律空映射，不抛）。 */
+function objectAt(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+}
+
+/** `save[key]` 当映射看（脏档里 `morale: 'x'` 之类不该炸）。 */
+function mapAt(save: CampaignSave, key: string): Record<string, unknown> {
+  return objectAt(saveBox(save)[key]);
+}
+
+function hasKey(map: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(map, key);
+}
+
+/**
+ * 有限数 → 夹在 `[lo, hi]` 的整数；**不是数回 `null`**。
+ *
+ * 与 `numOf()` 的差别：`numOf(v, 0)` 会把「缺字段」变 `0`，而面板要能区分
+ * 「值是 0」与「根本没有这条记录」。布尔/空串/`null` 也算没有（HTML 侧
+ * `moraleNormalize()` 同样丢这些）。
+ */
+function intOrNull(value: unknown, lo: number, hi: number): number | null {
+  if (value === null || value === undefined || typeof value === 'boolean' || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(n) ? clampInt(n, lo, hi) : null;
+}
+
+/** web `setEquipSlots()` 的 `text()`：去空白；空串与占位符 `---` / `—` 都算「没有」。 */
+function equipText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text === '' || text === '---' || text === '—' ? '' : text;
+}
+
+/**
+ * 某个武将的胜/败记录（web `Saves.generalRecordOf()`，`saves.js:879`）。
+ *
+ * **没有记录返回 `null`**，不是 `{w:0,l:0}` —— 面板要能区分「打过 0 场」与
+ * 「存档里根本没有这个人的记录」（后者画灰「—」）。判定用 `hasOwnProperty`，
+ * 与 HTML 侧一致（继承键不算）。
+ */
+export function generalRecordOf(save: CampaignSave, name: string): GeneralRecordRow | null {
+  const key = String(name ?? '').trim();
+  if (!key) return null;
+  const rows = mapAt(save, 'generalRecord');
+  if (!hasKey(rows, key)) return null;
+  const row = rows[key];
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const rec = row as Record<string, unknown>;
+  return {
+    w: intOrNull(rec.w, 0, GENERAL_RECORD_MAX) ?? 0,
+    l: intOrNull(rec.l, 0, GENERAL_RECORD_MAX) ?? 0,
+  };
+}
+
+/**
+ * 记一场胜/败（web `Saves.noteGeneralResult()`，`saves.js:896`）。
+ *
+ * 只写 `save.generalRecord` 这一个键（不碰任何别的表）；`won` 必须是布尔
+ * （HTML 侧也这么严：非布尔回 `null` 且不写档）。返回落帐后的整行。
+ */
+export function noteGeneralResult(save: CampaignSave, name: string, won: boolean): GeneralRecordRow | null {
+  const key = String(name ?? '').trim();
+  if (!key || typeof won !== 'boolean') return null;
+  const rows = mapAt(save, 'generalRecord');
+  const row = generalRecordOf(save, key) ?? { w: 0, l: 0 };
+  const next: GeneralRecordRow = won
+    ? { w: Math.min(GENERAL_RECORD_MAX, row.w + 1), l: row.l }
+    : { w: row.w, l: Math.min(GENERAL_RECORD_MAX, row.l + 1) };
+  rows[key] = next;
+  saveBox(save).generalRecord = rows;
+  return next;
+}
+
+/**
+ * 士气（原作 `general+0x38`；web `campaign.html:722-745` 的 `save.morale`）。
+ *
+ * **无记录回 `null`**（HTML 侧的 `moraleOf()` 回默认 60，这里故意不跟：面板显示的是
+ * 原作栏位真值，60 是「没资料时的推定值」，画上去就是编数）。
+ */
+export function moraleOf(save: CampaignSave, name: string): number | null {
+  const key = String(name ?? '').trim();
+  if (!key) return null;
+  const map = mapAt(save, 'morale');
+  return hasKey(map, key) ? intOrNull(map[key], 0, 100) : null;
+}
+
+/** 疲劳（原作 `general+0x3A`；web `save.tire`；无记录回 `null` 而非 0）。 */
+export function tireOf(save: CampaignSave, name: string): number | null {
+  const key = String(name ?? '').trim();
+  if (!key) return null;
+  const map = mapAt(save, 'tire');
+  return hasKey(map, key) ? intOrNull(map[key], 0, 100) : null;
+}
+
+/**
+ * 装备名（web `campaign.html:1710 equipNamesOf()`）。
+ *
+ * 两张表都读：v3 的 `save.equip[name][slot]` 优先，回落旧镜像
+ * `save.weapon / horse / thing`（web `Saves.equipOf()`；`book` 对应旧表的 `thing`）。
+ * 一个都没有就是空串（面板那格画「—」）。
+ */
+export function equipNamesOf(save: CampaignSave, name: string): EquipNames {
+  const key = String(name ?? '').trim();
+  const slots = objectAt(mapAt(save, 'equip')[key]);
+  return {
+    weapon: equipText(slots.weapon) || equipText(mapAt(save, 'weapon')[key]),
+    horse: equipText(slots.horse) || equipText(mapAt(save, 'horse')[key]),
+    book: equipText(slots.book) || equipText(mapAt(save, 'thing')[key]),
+    amulet: equipText(slots.amulet),
+  };
+}
+
+/**
+ * 等级（web `campaign.html:1624 generalLevelOf()` 的**存档段**）。
+ *
+ * 只认 `save.generalLevel[name]`（≥1、上限 99）；**不做** HTML 侧那层
+ * `scenarioLevelOf()` 剧本回落 —— 回落等于给「存档没记等级」的将编一个数字，
+ * 与这一轮「无记录画「—」」的口径冲突。
+ */
+export function generalLevelOf(save: CampaignSave, name: string): number | null {
+  const key = String(name ?? '').trim();
+  if (!key) return null;
+  const map = mapAt(save, 'generalLevel');
+  if (!hasKey(map, key)) return null;
+  const level = intOrNull(map[key], 1, 99);
+  return level !== null && level >= 1 ? level : null;
+}
+
+/** `generals.json` 的静态装备名（web `surFields()` 的 `text(row.Weapon)` / `text(row.Thing)` 回落） */
+function staticEquipOf(data: GameData, name: string, field: 'Weapon' | 'Thing'): string {
+  return equipText(rowOf(data, name)?.[field]);
+}
+
+/**
+ * 面板十栏里「存档不一定有」的那七项（`SurrenderCard` 的可选附加栏）。
+ *
+ * 每一项都照原作偏移与 web 同名键取值；**存档没有就不填**（`undefined`），
+ * 面板画灰「—」。绝不拿 0 / 60 之类的缺省值冒充真值。
+ */
+export interface SurrenderCardExtras {
+  /** 等级（web `save.generalLevel[name]`，`campaign.html:1624`）；没有就不填 */
+  level?: number;
+  /** 士气（原作 `general+0x38`；web `save.morale[name]`）；没有就不填，**不套 60** */
+  morale?: number;
+  /** 疲劳（原作 `general+0x3A`；web `save.tire[name]`）；没有就不填，**不套 0** */
+  tire?: number;
+  /** 胜场（原作 `general+0x9F`；web `save.generalRecord[name].w`） */
+  wins?: number;
+  /** 败场（原作 `general+0xA1`；web `save.generalRecord[name].l`） */
+  losses?: number;
+  /** 武器名（`equip[name].weapon` → 旧镜像 `weapon[name]` → `generals.json` 的 `Weapon`） */
+  weapon?: string;
+  /** 物品名（`equip[name].book` → `.amulet` → 旧镜像 `thing[name]` → `generals.json` 的 `Thing`） */
+  item?: string;
+}
+
+/**
+ * 卡片那七栏的取值（取不到就不填 → 面板画灰「—」）。
+ *
+ * 逐项对应 web `surFields(c)`：等级 / 士气 / 疲劳 / 武器（装备表回落静态表）/
+ * 物品（`book` 再 `amulet`，最后回落 `Thing`）/ 胜场 / 败场。
+ */
+export function surrenderCardExtras(save: CampaignSave, data: GameData, name: string): SurrenderCardExtras {
+  const extras: SurrenderCardExtras = {};
+  const level = generalLevelOf(save, name);
+  if (level !== null) extras.level = level;
+  const morale = moraleOf(save, name);
+  if (morale !== null) extras.morale = morale;
+  const tire = tireOf(save, name);
+  if (tire !== null) extras.tire = tire;
+  const rec = generalRecordOf(save, name);
+  if (rec) {
+    extras.wins = rec.w;
+    extras.losses = rec.l;
+  }
+  const equip = equipNamesOf(save, name);
+  const weapon = equip.weapon || staticEquipOf(data, name, 'Weapon');
+  if (weapon) extras.weapon = weapon;
+  const item = equip.book || equip.amulet || staticEquipOf(data, name, 'Thing');
+  if (item) extras.item = item;
+  return extras;
+}
+
 // ---------------------------------------------------------------------------
 // 招降决策（R85，`project/92_招降决策.md`）
 //
@@ -360,8 +583,13 @@ export type SurrenderTier = 'must' | 'roll' | 'refuse';
 /** 玩家对一张卡的处置；`escape` = 放走（君主只能是这个），`release` = 释放回原势力（R103） */
 export type SurrenderDecision = 'recruit' | 'kill' | 'escape' | 'release';
 
-/** 逐将询问面板上的一张卡（web 侧只负责画，不参与判定） */
-export interface SurrenderCard {
+/**
+ * 逐将询问面板上的一张卡（面板只负责画，不参与判定）。
+ *
+ * R197 起 `extends SurrenderCardExtras`：等级 / 士气 / 疲劳 / 胜败场 / 装备这七栏
+ * 由 `cardOf()` / `kingCardOf()` 从存档里取（取不到就不填 → 面板画灰「—」）。
+ */
+export interface SurrenderCard extends SurrenderCardExtras {
   name: string;
   str: number;
   int: number;
@@ -447,6 +675,9 @@ type GeneralRow = {
   /** generals.json 的数值忠诚（注意不是那个空的 `LOYAL` 字段） */
   Loyal?: unknown;
   CONSTANCY?: unknown;
+  /** generals.json 的静态装备名（面板武器/物品的回落；`Thing` 不在 `types.ts` 的 `General` 里） */
+  Weapon?: unknown;
+  Thing?: unknown;
 };
 
 type KingsRow = { kings?: { NAME?: unknown }[] };
@@ -465,7 +696,12 @@ function nameListOf(v: unknown): string[] {
   return v.map((x) => String(x ?? '')).filter(Boolean);
 }
 
-/** 剧本里的君主名（`capture.ts:150 isKingOf()` 的第二条判据；该函数没导出，只读不改） */
+/**
+ * 剧本里的君主名（`capture.ts:150 isKingOf()` 的第二条判据；该函数没导出，只读不改）。
+ *
+ * 下面两行 for-of 头是同步器 KEEP_PATCHES **K8/K9** 的精确锚点（Cocos 的 Babel 不吃
+ * `for (const x of a || b)` 这种逻辑表达式头，同步时会提成临时常量）—— 保持原样。
+ */
 export function kingsInScenario(data: GameData): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -511,7 +747,7 @@ function statOf(data: GameData, name: string): {
 }
 
 /** 一张俘虏卡（`from` 只有 captured/executed 两种，君主行走 `kingCardOf()`） */
-function cardOf(data: GameData, name: string, from: 'captured' | 'executed'): SurrenderCard {
+function cardOf(data: GameData, name: string, from: 'captured' | 'executed', save: CampaignSave): SurrenderCard {
   const st = statOf(data, name);
   const g: PostGeneral = {
     name,
@@ -549,11 +785,13 @@ function cardOf(data: GameData, name: string, from: 'captured' | 'executed'): Su
     tierText: TIER_TEXT[tier],
     recruitable: predicted,
     reason,
+    // [R197] 十栏真值（存档没有就不填 → 面板画灰「—」）
+    ...surrenderCardExtras(save, data, name),
   };
 }
 
 /** 君主行：只给"逃走"，不给按钮（`0x40975E` 在处置入口就把他放走了） */
-function kingCardOf(data: GameData, name: string): SurrenderCard {
+function kingCardOf(data: GameData, name: string, save: CampaignSave): SurrenderCard {
   const st = statOf(data, name);
   return {
     name,
@@ -570,6 +808,8 @@ function kingCardOf(data: GameData, name: string): SurrenderCard {
     tierText: KING_TEXT,
     recruitable: false,
     reason: KING_REASON,
+    // [R197] 君主也照同一套取值（士气/疲劳/胜败场同样按名查，取不到就不填）
+    ...surrenderCardExtras(save, data, name),
   };
 }
 
@@ -607,7 +847,7 @@ export function surrenderCandidates(
   const emit = (name: string, from: 'captured' | 'executed'): void => {
     if (!usable(name)) return;
     taken.add(name);
-    cards.push(kings.has(name) ? kingCardOf(data, name) : cardOf(data, name, from));
+    cards.push(kings.has(name) ? kingCardOf(data, name, save) : cardOf(data, name, from, save));
   };
 
   for (const name of nameListOf(save?.captured)) {
@@ -964,7 +1204,9 @@ export function planAiDisposal(input: AiDisposalInput): AiDisposalEntry[] {
   const plan: AiDisposalEntry[] = [];
   const seen = new Set<string>();
   const add = (list: readonly string[] | undefined, action: AiDisposalAction): void => {
-    for (const rawName of list ?? []) {
+    // Babel 陷阱（同 K8–K11）：`for (const x of a ?? b)` 在 Cocos 里会崩，先把兜底提成常量
+    const names = list ?? [];
+    for (const rawName of names) {
       const name = String(rawName ?? '');
       if (!name || name === king || seen.has(name)) continue;
       seen.add(name);
@@ -993,7 +1235,9 @@ export function applyAiDisposal(
   plan: readonly AiDisposalEntry[],
 ): AiDisposalResult {
   const out: AiDisposalResult = { recruited: [], executed: [], dead: [], released: [] };
-  for (const entry of plan ?? []) {
+  // Babel 陷阱（同 K8–K11）：`for (const x of a ?? b)` 在 Cocos 里会崩，先把兜底提成常量
+  const entries = plan ?? [];
+  for (const entry of entries) {
     const name = String(entry?.name ?? '');
     const action = entry?.action;
     if (!name || !action) continue;

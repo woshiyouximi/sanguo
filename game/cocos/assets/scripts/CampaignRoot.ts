@@ -12,7 +12,6 @@
  */
 import {
   _decorator,
-  BlockInputEvents,
   Color,
   Component,
   director,
@@ -3406,6 +3405,10 @@ export class CampaignRoot extends Component {
   // -------------------------------------------------------------------------
 
   private onTouch(event: EventTouch): void {
+    // 【r224】全屏暗幕（城池一覽/勢力圖/存檔位/名冊）開著時，大地圖不吃任何點擊。
+    // 暗幕不再掛 BlockInputEvents（那會讓全局 input 完全收不到事件，見 showSheetScrim），
+    // 穿透改由這裡擋；暗幕節點只在面板開著時存在。
+    if (this.node.children.some((child) => child.name.startsWith('Scrim_'))) return;
     // 物品頁 / 內政頁 / 君主頁 / 兵團指令開著時，大地圖不吃任何點擊（面板自己也會處理，這裡只防穿透）
     if (this.itemsPanel?.isOpen) return;
     if (this.cityPanel?.isOpen()) return;
@@ -4404,8 +4407,15 @@ export class CampaignRoot extends Component {
   /** 點頁頭「勢 力」：開勢力一覽抽屜 */
   /**
    * 全屏暗幕（r90 起）：大面板盖住大地图时，底下的页头/地图会从半透明面板里透出来，
-   * 文字互相压。这里在最上层面板下面铺一张 210 alpha 的黑幕并吞掉点击。
+   * 文字互相压。这里在最上层面板下面铺一张 210 alpha 的黑幕。
    * 每个入口用完自己 destroy，避免叠层。
+   *
+   * 【r224 觸控根因】暗幕**不能**掛 `BlockInputEvents`：它會在節點上註冊 TOUCH_START/END
+   * 監聽，於是引擎 `PointerEventDispatcher`（priority UI=1，先於全局 input 派發）把暗幕當成
+   * 命中目標 → 認領該 touch 並回傳 `false` → `Input._emitEvent` 直接 `break`，
+   * **全局 `input.on(TOUCH_END)` 監聽（所有面板與大地圖都靠它）從此收不到任何事件**，
+   * 面板看起來就「按鈕全部無效、畫面卡住」（原生/模擬器必現，JS 幀循環仍在跑）。
+   * 因此改由 `onTouch()` 開頭檢查 `Scrim_*` 子節點擋穿透，暗幕只負責畫。
    */
   private showSheetScrim(tag: string): Node {
     const name = `Scrim_${tag}`;
@@ -4415,7 +4425,6 @@ export class CampaignRoot extends Component {
     n.layer = Layers.Enum.UI_2D;
     n.parent = this.node;
     n.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
-    n.addComponent(BlockInputEvents);
     const g = n.addComponent(Graphics);
     g.fillColor = new Color(4, 6, 10, 210);
     g.rect(-DESIGN_W / 2, -DESIGN_H / 2, DESIGN_W, DESIGN_H);
@@ -4520,7 +4529,9 @@ export class CampaignRoot extends Component {
       generals: this.generals as unknown as NonNullable<CityListPanelOptions['generals']>,
       selected: this.selected,
       onPick: (name: string) => {
-        this.hideSheetScrim('list');
+        // 【r224】點行依 CityListPanel 的設計「不自動關閉」，所以暗幕要留到使用者按
+        // 「關閉 / 返回地圖」才一起收。先前這裡先 hideSheetScrim('list')，暗幕一消失
+        // 穿透守衛就失效（面板還開著，地圖卻重新吃點擊）。
         this.selected = name;
         this.refresh();
       },
