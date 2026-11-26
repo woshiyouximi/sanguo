@@ -24,8 +24,31 @@
  */
 import { garrisonOf } from './core/garrison';
 import type { GarrisonData } from './core/garrison';
-import { DEAD, RELEASED, applySurrender, movedOf, needSurrenderPanel, noteGeneralResult, surrenderCandidates } from './core/roster';
-import type { SurrenderCard, SurrenderCardExtras, SurrenderDecision, SurrenderResult, SurrenderTier } from './core/roster';
+import {
+  DEAD,
+  ENEMY_HELD,
+  RELEASED,
+  applyAiDisposal,
+  applySurrender,
+  decideBattleWon,
+  movedOf,
+  needSurrenderPanel,
+  noteGeneralResult,
+  ourForceNames,
+  planAiDisposal,
+  readBattleOutcome,
+  surrenderCandidates,
+} from './core/roster';
+import type {
+  AiDisposalEntry,
+  AiDisposalResult,
+  BattleOutcome,
+  SurrenderCard,
+  SurrenderCardExtras,
+  SurrenderDecision,
+  SurrenderResult,
+  SurrenderTier,
+} from './core/roster';
 import type { CampaignSave, GameData } from './types';
 
 /* ------------------------------------------------------------------------- */
@@ -134,6 +157,12 @@ export interface SurrenderCtxOpts {
    * 手工 mock 的 state 會是 `false` —— 那時敗場數不現算，照舊畫「—」。
    */
   battle?: boolean;
+  /**
+   * [R208/R220] 這一仗我方是不是勝者。不給就從 `save.lastBattle` 推
+   * （`decideBattleWon()`，含舊檔兜底）。`false` 時 `surrenderCandidates()` /
+   * `needSurrenderPanel()` 两层硬門都關，`stateOf()` 永遠返回 `null`。
+   */
+  won?: boolean;
 }
 
 /**
@@ -150,6 +179,11 @@ export interface SurrenderCtx {
   king: string;
   /** [R197] 這批俘虜是不是「真的打完仗」來的（決定敗場數要不要現算這一場） */
   battle?: boolean;
+  /**
+   * [R208/R220] 這一仗我方是不是勝者。`contextOf()` 不給 `opts.won` 時自己從
+   * `save.lastBattle` 推（`readBattleOutcome()` + `decideBattleWon()` 兜底）。
+   */
+  won: boolean;
 }
 
 /** 面板的整個狀態：卡 + 已決策表（`picks`）+ 上下文。 */
@@ -252,7 +286,8 @@ export function myNamesOf(save: CampaignSave): string[] {
   for (const name of Object.keys(moved)) {
     if (seen.has(name)) continue;
     const city = moved[name];
-    if (!city || city === DEAD || city === RELEASED) continue;
+    // [R220] `敵軍` 也是"不在我方"的哨兵（R208 胜者门引入），不能算在職
+    if (!city || city === DEAD || city === RELEASED || city === ENEMY_HELD) continue;
     if (!isMineCity(city)) continue;
     seen.add(name);
     out.push(name);
@@ -290,6 +325,9 @@ export function contextOf(
   opts: SurrenderCtxOpts = {},
 ): SurrenderCtx {
   const city = String(home ?? '');
+  // [R208/R220] 勝者門：沒顯式給 won 就自己判（web `decideBattleWon(save, outcome)`）。
+  // 舊檔沒有 `lastBattle` 時走 core 的兜底推斷（丟城 / 俘將裡有明確我方的人 → 敗）。
+  const won = opts.won !== undefined ? opts.won === true : decideBattleWon(save);
   return {
     save,
     data,
@@ -299,6 +337,7 @@ export function contextOf(
     king: opts.king !== undefined ? String(opts.king ?? '') : kingOf(save),
     // [R197] 真實路徑默認「戰後」（web `surBattleReal`）；顯式 false 才關（自檢用）
     battle: opts.battle !== false,
+    won,
   };
 }
 
@@ -308,11 +347,13 @@ export function stateOf(ctx: SurrenderCtx): SurrenderState | null {
     atCity: ctx.atCity,
     mine: ctx.mine,
     king: ctx.king,
+    // [R208] 勝者門：敗方一张卡都不出（core 側再兜一層，面板層不重複判斷）
+    won: ctx.won,
   });
   // 規則層不做空名校驗（`nameListOf` 只過濾 falsy），面板這一層把純空白名擋掉：
   // 「空名不生成卡」是面板的責任，髒檔不該畫出一張沒有名字的卡。
   const cards = raw.filter((card) => String(card?.name ?? '').trim() !== '');
-  if (!needSurrenderPanel(cards)) return null;
+  if (!needSurrenderPanel(cards, { won: ctx.won })) return null;
   return { ctx, cards, picks: {}, done: false };
 }
 
@@ -672,4 +713,250 @@ export function queuePostBattle(save: CampaignSave, post: PostBattleLike | null 
 export function hasPending(save: CampaignSave): boolean {
   const box = boxOf(save);
   return namesOf(box.captured).length > 0 || namesOf(box.executed).length > 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* [R208/R220] 勝者門：戰後俘虜處置「該開面板還是由敵方 AI 處置」                 */
+/* ------------------------------------------------------------------------- */
+
+/** `resolveCaptureFlow()` 的可選覆蓋項：`home` 不給就從存檔推（對齊 web 的 home 推斷）。 */
+export interface CaptureFlowOpts extends SurrenderCtxOpts {
+  /** 招降入城 / 戰報城名（web `st.home`）；不給就用 `lastBattle.city → save.last → owned[0]` */
+  home?: string;
+}
+
+/** 我方戰敗時敵方 AI 對我軍俘將的處置（= `core/roster.ts` 的 `AiDisposalEntry`）。 */
+export type CaptureDisposal = AiDisposalEntry;
+
+/**
+ * 戰後俘虜處置的「該開什麼」結論（`resolveCaptureFlow()` 的返回值）。
+ *
+ * 這一個函式就是 UI 需要的全部門；`CampaignRoot` 不用再自己判 `hasPendingCaptures()`：
+ *  - `open === true` → 走 `SurrenderPanel.showIfNeeded(...)`（勝者才有處置權）；
+ *  - `open === false && reason === 'lost'` → 敵方 AI 已處置完、`save` 已落庫，
+ *    把 `logs` 逐條寫進戰報、`notice` 進提示條、`GameState.persistSave()` 即可；
+ *  - `reason === 'none'` → 這一仗沒有俘虜可处置（待決隊列空 / 已處置過 / 卡被規則層清空）。
+ *
+ * 副作用（全部只改記憶體裡的 `save`，冪等）：
+ *  - 敗方：`applyAiDisposal()` 落庫（勸降 → `_moved='敵軍'`；斬首/陣亡 → 出池；
+ *    釋放 → 名單不動）、清 `save.captured` / `save.executed` 的已處置名、
+ *    寫 `save.lastPost`（`ai:true` + `battleTs`，同一場不重複處置）；
+ *  - 勝方：把「我方被誤寫進待決隊列」的人摘掉並記一條戰報；待決隊列空/無卡 → `lastPost=null`。
+ */
+export interface CaptureFlow {
+  /** 要不要開招降面板（**只有我方勝、且有卡**才 true） */
+  open: boolean;
+  /** 勝方要处置的俘虜卡（`open === false` 時為空陣列） */
+  cards: SurrenderCard[];
+  /** 敗方：敵方 AI 的處置計劃（`open === false` 且 `reason === 'lost'` 時非空） */
+  aiDisposal: CaptureDisposal[];
+  /** `won` 勝方開面板 / `lost` 敗方 AI 處置 / `none` 無事可做 */
+  reason: 'won' | 'lost' | 'none';
+  /** 招降入城 / 戰報城名 */
+  home: string;
+  /** 這一仗我方是否勝（`opts.won` 優先，否則 `decideBattleWon()`） */
+  won: boolean;
+  /** 讀到的 `save.lastBattle`（舊檔沒有就 null） */
+  outcome: BattleOutcome | null;
+  /** 敗方 `applyAiDisposal()` 的結果（勝方/無事時 null） */
+  aiResult: AiDisposalResult | null;
+  /** 勝方可直接交給 `SurrenderPanel.show(node, opts, state)` 的狀態（免重算） */
+  state: SurrenderState | null;
+  /** 要 push 進戰報的行（內容與 web `campaign.html:4897-4986` 逐字對齊） */
+  logs: SurrenderLogLine[];
+  /** 提示條文案：`我軍戰敗：敵軍處置我軍俘將（勸降 1 · 斬首 1）`；勝方/無事為空串 */
+  notice: string;
+  /** 本次寫進 `save.lastPost` 的物件（勝方未結算 / 無事時 null） */
+  lastPost: Record<string, unknown> | null;
+}
+
+/** 去重 + 去空名（保持先出現的順序；web 的 `uniqNames()`）。 */
+function uniqOf(names: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const name = String(raw ?? '').trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/** web 的 `home` 推斷（`campaign.html:4882-4886`）：`lastBattle.city → save.last → owned[0]`。 */
+function homeOf(save: CampaignSave, outcome: BattleOutcome | null, given?: string): string {
+  const forced = String(given ?? '');
+  if (forced) return forced;
+  const box = boxOf(save);
+  const cities = (box.cities && typeof box.cities === 'object' ? box.cities : {}) as Record<string, unknown>;
+  const bCity = outcome && outcome.city && cities[outcome.city] ? outcome.city : '';
+  const last = typeof box.last === 'string' && cities[box.last] ? box.last : '';
+  const owned = namesOf(box.owned);
+  return bCity || last || owned[0] || '';
+}
+
+/** 敗方 AI 處置的戰報文案（web `campaign.html:4955-4961` 的 `verdict` 逐字）。 */
+const DISPOSAL_TEXT: Record<AiDisposalEntry['action'], string> = {
+  recruit: '勸降，已轉投敵營',
+  execute: '斬首',
+  dead: '所殺，陣亡',
+  release: '釋放，已回本城',
+};
+
+/**
+ * 戰後俘虜處置的唯一入口：**先判勝負，再決定「開面板」還是「敵方 AI 處置」**。
+ *
+ * 這是 F-01 的 Cocos 側模型層（web 對應 `settleBattleReturn()` / `aiDisposeCaptives()`，
+ * `game/web/campaign.html:4874-4988`）。UI 只調這一個函式，判定全部在可測層：
+ *
+ *   我方勝 + 待決隊列非空 → `{ open: true, cards: 非空, reason: 'won' }`
+ *   我方敗 + 有可處置的我方將 → `{ open: false, aiDisposal: 非空, reason: 'lost' }`
+ *                                             （`save` 已落庫，`logs`/`notice` 直接拿去顯示）
+ *   其餘（平手/無戰果/隊列空/已處置過/卡被硬門清空）→ `{ reason: 'none' }`
+ *
+ * 關鍵回歸（用戶實機 P0）：我方戰敗時 `cards` 永遠是空 —— 我方被俘將只會出現在
+ * `aiDisposal` 裡由敵方處置，玩家不會再看到「自己處置自己人被俘」的面板。
+ */
+export function resolveCaptureFlow(
+  save: CampaignSave,
+  data: GameData,
+  opts: CaptureFlowOpts = {},
+): CaptureFlow {
+  const box = boxOf(save);
+  const outcome = readBattleOutcome(save);
+  const won = opts.won !== undefined ? opts.won === true : decideBattleWon(save, outcome);
+  const home = homeOf(save, outcome, opts.home);
+  const ctx = contextOf(save, data, home, {
+    atCity: opts.atCity,
+    mine: opts.mine,
+    king: opts.king,
+    scenIdx: opts.scenIdx,
+    battle: opts.battle,
+    won,
+  });
+  const base: CaptureFlow = {
+    open: false,
+    cards: [],
+    aiDisposal: [],
+    reason: 'none',
+    home,
+    won,
+    outcome,
+    aiResult: null,
+    state: null,
+    logs: [],
+    notice: '',
+    lastPost: null,
+  };
+
+  // 冪等門（web `campaign.html:4888-4889`）：同一場戰鬥的敵方 AI 處置只做一次，
+  // 否則每次回大地圖都會重複寫戰報/重複彈提示。
+  const rawPost = box.lastPost;
+  const prev =
+    rawPost && typeof rawPost === 'object' && !Array.isArray(rawPost)
+      ? (rawPost as Record<string, unknown>)
+      : null;
+  if (outcome && outcome.ts > 0 && prev && prev.ai === true && numOf(prev.battleTs) === outcome.ts) {
+    return { ...base, lastPost: prev };
+  }
+
+  const king = ctx.king;
+  // 「明確屬於我方」的名單：面板層自己推的 + core 的 roster 口徑 + 君主（與 web 一致）
+  const own = new Set<string>(ctx.mine);
+  for (const name of ourForceNames(save)) own.add(name);
+  if (king) own.add(king);
+
+  if (!won) {
+    // 我方敗：把「應被俘 / 應被斬」的我方將交給敵方 AI —— 沿用戰鬥頁已判結果、不重擲骰。
+    const joined = uniqOf(namesOf(box.captured).concat(outcome ? outcome.captured : [])).filter(
+      (n) => n !== king,
+    );
+    const executed = uniqOf(namesOf(box.executed).concat(outcome ? outcome.executed : [])).filter(
+      (n) => n !== king,
+    );
+    const fallen = uniqOf(outcome ? outcome.dead : []);
+    const plan = planAiDisposal({ captured: joined, executed, dead: fallen, king });
+    if (!plan.length) {
+      // 沒有可處置的人：清掉舊的待決提示（web 同款），不寫 lastPost
+      box.lastPost = null;
+      return base;
+    }
+    const aiResult = applyAiDisposal(save, plan);
+    // 已處置的人從待決隊列摘掉，否則下一次進大地圖又會被當成"新的俘虜"
+    const disposed = new Set(plan.map((entry) => entry.name));
+    box.captured = namesOf(box.captured).filter((n) => !disposed.has(n));
+    box.executed = namesOf(box.executed).filter((n) => !disposed.has(n));
+
+    const logs: SurrenderLogLine[] = [];
+    // `battle !== false` 才是真打完仗的結算（自檢/探針不污染 `save.generalRecord`）
+    const real = opts.battle !== false;
+    for (const entry of plan) {
+      logs.push({ kind: 'lost', text: `戰 報：（我方）${entry.name} 被敵軍${DISPOSAL_TEXT[entry.action] ?? '處置'}` });
+      if (real) noteGeneralResult(save, entry.name, false);
+    }
+    const lastPost: Record<string, unknown> = {
+      city: home,
+      joined: [],
+      dead: aiResult.executed.concat(aiResult.dead),
+      joinedAll: [],
+      deadAll: plan.filter((entry) => entry.action !== 'recruit').map((entry) => entry.name),
+      escaped: [],
+      released: aiResult.released,
+      rejected: [],
+      month: numOf(box.month),
+      ts: numOf(box.ts),
+      ai: true,
+      battleTs: outcome ? outcome.ts : 0,
+      aiRecruited: aiResult.recruited,
+      aiReleased: aiResult.released,
+    };
+    box.lastPost = lastPost;
+
+    const bits: string[] = [];
+    if (aiResult.recruited.length) bits.push(`勸降 ${aiResult.recruited.length}`);
+    if (aiResult.executed.length) bits.push(`斬首 ${aiResult.executed.length}`);
+    if (aiResult.dead.length) bits.push(`陣亡 ${aiResult.dead.length}`);
+    if (aiResult.released.length) bits.push(`釋放 ${aiResult.released.length}`);
+    const notice = bits.length
+      ? `我軍戰敗：敵軍處置我軍俘將（${bits.join(' · ')}）`
+      : '我軍戰敗：敵軍處置我軍俘將';
+    return { ...base, aiDisposal: plan, reason: 'lost', aiResult, logs, notice, lastPost };
+  }
+
+  // 我方勝：先把我方被誤寫進待決隊列的人摘掉（web `campaign.html:4897-4902`）
+  const pending = namesOf(box.captured).filter((n) => n !== king);
+  const doomed = namesOf(box.executed).filter((n) => n !== king);
+  const oursHeld = uniqOf(pending.concat(doomed).filter((n) => own.has(n)));
+  const logs: SurrenderLogLine[] = [];
+  if (oursHeld.length) {
+    const dropped = new Set(oursHeld);
+    box.captured = namesOf(box.captured).filter((n) => !dropped.has(n));
+    box.executed = namesOf(box.executed).filter((n) => !dropped.has(n));
+    logs.push({
+      kind: 'lost',
+      text: `戰 報：（我方）${oursHeld.join('、')} 被敵軍俘去，本城名單不變`,
+    });
+  }
+  if (!namesOf(box.captured).length && !namesOf(box.executed).length) {
+    // 隊列空：沒有俘虜可处置 → 不彈面板，清掉舊提示（web 同款）
+    box.lastPost = null;
+    return { ...base, logs };
+  }
+
+  // 勝者才有處置權：這裡 cards 只會是敵方將（`own` 集合裡的人一律剔掉 —— 關鍵回歸）
+  const candidates = surrenderCandidates(save, data, {
+    atCity: ctx.atCity,
+    mine: Array.from(own),
+    king,
+    won,
+  });
+  const cards = candidates.filter(
+    (card) => String(card?.name ?? '').trim() !== '' && !own.has(String(card?.name ?? '')),
+  );
+  if (!needSurrenderPanel(cards, { won })) {
+    box.lastPost = null;
+    return { ...base, logs };
+  }
+  const state: SurrenderState = { ctx: { ...ctx, won }, cards, picks: {}, done: false };
+  return { ...base, open: true, cards, reason: 'won', state, logs };
 }

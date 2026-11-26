@@ -43,7 +43,8 @@ import type { Army } from './core/march';
 // 部隊的完整欄位（officers/advisor/stationed）在 GameState 的 CampaignArmy 上
 import type { CampaignArmy } from './GameState';
 import * as GameState from './GameState';
-import { hasPendingCaptures, healStaleQueue } from './core/run_scoped';
+import { healStaleQueue } from './core/run_scoped';
+import * as SurrenderModel from './SurrenderModel';
 import { ItemsPanel } from './ItemsPanel';
 // 城市駐將的唯一入口（純邏輯、零 cc 依賴）：存檔運行時人事優先，劇本表只作播種。
 import * as O from './OfficersOfCity';
@@ -1443,21 +1444,42 @@ export class CampaignRoot extends Component {
           hasLastBattle: Boolean(diag.lastBattle || diag.lastPost),
         }));
       }
-      // R214b：**只有队列里真有战果时才开面板**。之前无条件 `showIfNeeded`，而它的
-      // `atCity` 缺省是 `officersAt(data, home, scenIdx ?? 0)`——`scenIdx` 拿到 0（黃巾之亂），
-      // 于是《討伐董卓》的新局会按「184 年平原的守将」造出敌将卡：用户看到的就是
+      // R214b：之前无条件 `showIfNeeded`，而它的 `atCity` 缺省是
+      // `officersAt(data, home, scenIdx ?? 0)`——`scenIdx` 拿到 0（黃巾之亂），于是
+      // 《討伐董卓》的新局会按「184 年平原的守将」造出敌将卡：用户看到的就是
       // 「一进大地图先弹处置张角」（2026-11-26 实测，存档里其实 captured=null）。
-      // 现在两道闸：① `hasPending()` 没队列直接跳过；② 真要开时 `atCity` 用本局剧本号算。
+      // F-01（R220/R221）：胜负门与败方处置收进模型层 `SurrenderModel.resolveCaptureFlow()`——
+      // 我方胜才开面板；我方败由敌方 AI 处置我方俘将（save 由模型层落库，UI 只补战报/落盘/提示）。
       const homeCity = this.selected ?? this.save.owned[0] ?? '';
-      if (hasPendingCaptures(this.save)) {
-        const garrisonNow = garrisonOf(data as unknown as GarrisonData, sci, homeCity);
-        const atCity = Array.isArray(garrisonNow?.officers)
-          ? garrisonNow!.officers.map((o) => String(o?.name ?? '')).filter(Boolean)
-          : undefined;
+      const garrisonNow = garrisonOf(data as unknown as GarrisonData, sci, homeCity);
+      const atCity = Array.isArray(garrisonNow?.officers)
+        ? garrisonNow!.officers.map((o) => String(o?.name ?? '')).filter(Boolean)
+        : undefined;
+      const flow = SurrenderModel.resolveCaptureFlow(SurrenderModel.saveOf(this.save), data, {
+        home: homeCity,
+        atCity,
+        king: monarchName,
+        mine: this.myOfficerNames(),
+        scenIdx: sci,
+      });
+      if (flow.logs.length > 0) {
+        this.pushBattleLog(
+          flow.logs.map((raw) => {
+            const l = raw as { text?: string | null; kind?: BattleLogKind | null } | null;
+            return battleLogLine(
+              Number(this.save?.month ?? 0),
+              String(l?.text ?? ''),
+              (l?.kind ?? (flow.reason === 'lost' ? 'lose' : 'win')) as BattleLogKind,
+            );
+          }),
+        );
+        GameState.persistSave();
+      }
+      if (flow.open) {
         SurrenderPanel.showIfNeeded(this.node, {
           save: this.save,
           data,
-          home: homeCity,
+          home: flow.home,
           atCity,
           king: monarchName,
           mine: this.myOfficerNames(),
@@ -1468,6 +1490,11 @@ export class CampaignRoot extends Component {
             this.refresh();
           },
         });
+      } else if (flow.reason === 'lost') {
+        // 敗方：敵方 AI 已在模型層處置我軍俘將並落庫，這裡補提示條 + 重建運行時名單。
+        this.hintText = this.clampHint(flow.notice, 160);
+        this.seedRuntimeOfficers();
+        this.refresh();
       }
       // R214c：按 PDF《三国群英传2 全界面按键说明》的大循环「内政(1 月) → 大地图(11 月) → 战斗」，
       // 新局第一年的一月先把内政页打开（原版就是先在内政里安排搜索/开发/征兵再出兵）。
