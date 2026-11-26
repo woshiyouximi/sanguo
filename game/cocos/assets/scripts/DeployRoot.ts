@@ -79,7 +79,7 @@ import { listWisdomChoices, WISE_UNIMPLEMENTED, wiseHintOf } from './core/wises'
 // 不是 generals.json 的靜態 `CITY`（那張是第 1 劇本快照，黃巾之亂的張角會被當成平原守將）。
 import * as O from './OfficersOfCity';
 import * as GameState from './GameState';
-import type { BattleLoadout, CampaignCity, CampaignGeneral, CampaignScenario } from './GameState';
+import type { BattleLoadout, CampaignCity, CampaignGeneral, CampaignScenario, DeploySiege } from './GameState';
 import type { GameData } from './types';
 import { DESIGN_H, DESIGN_W } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
@@ -320,6 +320,14 @@ export class DeployRoot extends Component {
   private defenseArmyId: string | null = null;
   /** 來襲部隊的出發城（守城戰時 labelTarget 用） */
   private defenseFrom = '';
+  /**
+   * [R231] 攻城戰前準備：非空表示玩家是「兵團已抵達城下」進來的。
+   *
+   * 這份快照由 `CampaignRoot.startArrivalSiege()` / 大地圖「攻城」寫入，參戰部隊就是
+   * 剛抵達的那支兵團（主將/隨軍/兵數/armyId），本屏不能換將換兵，只能選陣形/兵種/
+   * 軍師技/站位/出陣順序；按「出 戰」直接進 Battle。`null` = 既有的派兵/守城戰模式。
+   */
+  private siege: DeploySiege | null = null;
   private generals: CampaignGeneral[] = [];
   private selectedGen = 0;
   private troop = 0;
@@ -542,6 +550,9 @@ export class DeployRoot extends Component {
       this.formMatrix = data.formations.matrix as unknown as MatrixRow[];
 
       const save = GameState.loadSave();
+      // [R231] 攻城戰前準備：CampaignRoot.startArrivalSiege() 會先把「剛抵達的兵團」
+      // 寫成快照再進本屏。非空時本屏改成戰前準備（參戰=這支兵團，不能換將/改兵）。
+      this.siege = GameState.peekDeploySiege();
       // F-07：進來先讀站位（與 web 共用 COL_KEY；沒存過 → 全部按中列）
       this.loadCols();
       const from = GameState.takeDeployFrom();
@@ -631,7 +642,11 @@ export class DeployRoot extends Component {
         this.queue = setGeneral(this.queue, 0, pool[0].NAME);
       }
       this.loaded = true;
+      // [R231] 攻城戰前準備：將在 applyGeneral 之前鎖定（主將=抵達兵團主將），
+      // 兵在 applyGeneral 之後鎖定（等級上限夾完再蓋回快照兵數）。
+      if (this.siege) this.applySiegeRoster(byName);
       this.applyGeneral();
+      if (this.siege) this.applySiegeTroops();
       this.loadPortrait();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -1050,7 +1065,10 @@ export class DeployRoot extends Component {
     if (!this.intel) {
       this.intel = resolveEnemyIntel(data, this.scenIdx, this.targetCity?.NAME ?? '南皮', 100);
     }
-    if (this.labelTitle) this.labelTitle.string = this.defenseArmyId ? '守 城 戰' : '出 征 編 成';
+    // [R231] 攻城戰前準備進入的畫面没有「出征」：參戰兵團已定，標題用「攻城編成」
+    if (this.labelTitle) {
+      this.labelTitle.string = this.siege ? '攻 城 編 成' : this.defenseArmyId ? '守 城 戰' : '出 征 編 成';
+    }
 
     this.refresh();
   }
@@ -1108,14 +1126,21 @@ export class DeployRoot extends Component {
     const intel = this.intel;
     const enemyName = intel?.name ?? '守備隊';
     const defending = !!this.defenseArmyId;
-    this.labelTarget.string = defending
-      ? `守 城 ${this.targetCity?.NAME ?? '—'} · 敵軍自 ${this.defenseFrom || '—'} 來襲 · 敵軍 ${this.enemySoldiers()} 兵`
-      // 兩個數字本來就不同，標籤必須分開（與 web `deploy.html:158` 同口徑，project/163）：
-      //   守軍 = 城內總兵（`cityGarrisonTroops()`，關卡就是 garrison.json 的 110）
-      //   上陣 = 這一仗敵方真的出場的兵（`enemySoldiers()`，loadout 的同一個出口）
-      // 舊版只寫「守軍 ${enemySoldiers()} 兵」＝把上陣兵貼上守軍標籤，關卡上會讀成「守軍 60」而清單寫 110。
-      : `目標 ${this.targetCity?.NAME ?? '—'} · 從 ${this.home || '—'} 出征 · ` +
-        `守軍 ${Math.max(0, Math.round(this.garrison))} 兵 · 上陣 ${this.enemySoldiers()} 兵`;
+    if (this.siege) {
+      // [R231] 攻城戰前準備：標籤寫清楚「這支兵團是抵達城下的那支」，不是從城裡重新派兵
+      this.labelTarget.string =
+        `攻 城 ${this.targetCity?.NAME ?? '—'} · ${this.siege.general || '我軍'} ` +
+        `${this.siege.troops} 兵 自 ${this.siege.from} 抵達 · 敵 ${this.enemySoldiers()} 兵`;
+    } else {
+      this.labelTarget.string = defending
+        ? `守 城 ${this.targetCity?.NAME ?? '—'} · 敵軍自 ${this.defenseFrom || '—'} 來襲 · 敵軍 ${this.enemySoldiers()} 兵`
+        // 兩個數字本來就不同，標籤必須分開（與 web `deploy.html:158` 同口徑，project/163）：
+        //   守軍 = 城內總兵（`cityGarrisonTroops()`，關卡就是 garrison.json 的 110）
+        //   上陣 = 這一仗敵方真的出場的兵（`enemySoldiers()`，loadout 的同一個出口）
+        // 舊版只寫「守軍 ${enemySoldiers()} 兵」＝把上陣兵貼上守軍標籤，關卡上會讀成「守軍 60」而清單寫 110。
+        : `目標 ${this.targetCity?.NAME ?? '—'} · 從 ${this.home || '—'} 出征 · ` +
+          `守軍 ${Math.max(0, Math.round(this.garrison))} 兵 · 上陣 ${this.enemySoldiers()} 兵`;
+    }
     if (this.labelGenName) this.labelGenName.string = gen?.NAME ?? '—（無可用主將）';
     if (this.labelGenStats) {
       this.labelGenStats.string = gen
@@ -1509,8 +1534,11 @@ export class DeployRoot extends Component {
     if (this.actionLabels[1]) {
       const gen = this.currentGen();
       const wiseName = this.wiseOptions.find((option) => option.seq === this.wise)?.name ?? '不用';
+      // [R231] 攻城戰前準備：參戰兵團已定，按鈕是「出 戰」（直接進 Battle），
+      // 不再是「出 征」（那會從出發城再派一支新兵團 → 又走到城下 → 再彈編成）。
+      const action = this.siege ? '出 戰' : '出 征';
       this.actionLabels[1].string =
-        `出 征\n${gen?.NAME ?? '—'} · ${this.troopNames[this.troop] ?? '?'} · ` +
+        `${action}\n${gen?.NAME ?? '—'} · ${this.troopNames[this.troop] ?? '?'} · ` +
         `${this.formNames[this.form] ?? '?'} · ${this.soldiers + this.cavalry} 兵 · ${wiseName}`;
       this.actionLabels[1].color = rgba(COLORS.goldLight);
       this.actionLabels[1].node.setPosition(go.x + go.w / 2 - HALF_W, HALF_H - (go.y + go.h / 2), 0);
@@ -1543,10 +1571,14 @@ export class DeployRoot extends Component {
     // 槽裡只有總兵力：先按新主將的兩欄上限拆回步/騎，再走 applyGeneral 的夾取
     if (Number.isFinite(head.troops) && head.troops > 0) this.totalToColumns(head.troops);
     this.applyGeneral();
+    // [R231] 攻城戰前準備：兵力鎖在抵達兵數，調序後不能被隊列槽位裡的預設兵力頂掉
+    if (this.siege) this.applySiegeTroops();
   }
 
   /** 落盤：存檔的 `deployQueue` 是唯一真身（v3 可選字段，舊檔沒有也能讀）。 */
   private persistQueue(): void {
+    // [R231] 攻城戰前準備不改寫存檔 deployQueue：參戰兵團是抵達部隊，不是城裡的派兵隊列
+    if (this.siege) return;
     this.syncQueueFromUi();
     const save = GameState.loadSave() as unknown as DeployQueueSave;
     saveQueue(save, this.queue);
@@ -1685,7 +1717,11 @@ export class DeployRoot extends Component {
       }
       const troop = this.queueTroopLabels[i];
       if (troop) {
-        troop.string = `${slot.troops} 兵 · ${slot.troop}`;
+        // [R231] 攻城戰前準備：兵力鎖在抵達兵數（整支兵團共用），不能像城內編成那樣逐將分兵。
+        // 主將行顯示抵達兵數，其餘行標「隨軍」，避免顯示 makeSlot 的預設 10 兵造成誤解。
+        troop.string = this.siege
+          ? `${i === 0 ? `${this.siege.troops} 兵` : '隨軍'} · ${slot.troop}`
+          : `${slot.troops} 兵 · ${slot.troop}`;
         troop.color = rgba(onField ? COLORS.text : COLORS.textFaint);
         troop.node.setPosition(px + 380 - HALF_W, HALF_H - (rowY + 12), 0);
       }
@@ -1754,6 +1790,8 @@ export class DeployRoot extends Component {
 
   /** 拖動第 column 欄（0 = 步、1 = 騎）到 x 處；兩欄各自夾自己的上限，互不佔用。 */
   private setColumnFromX(column: number, x: number): void {
+    // [R231] 攻城戰前準備：兵力鎖定，滑桿/拖拽一律不生效
+    if (this.siege) return;
     const r = this.sliderRange(column);
     const ratio = clamp((x - r.x0) / Math.max(1, r.x1 - r.x0), 0, 1);
     const value = Math.round(r.min + ratio * Math.max(1, r.cap - r.min));
@@ -1771,6 +1809,8 @@ export class DeployRoot extends Component {
     if (!this.loaded) return;
     // 調序面板是模態：展開時不進滑桿拖拽
     if (this.queueOpen) return;
+    // [R231] 攻城戰前準備：兵力鎖定，不進滑桿拖拽
+    if (this.siege) return;
     const point = this.toDesign(event);
     if (!point) return;
     // 只有落在滑杆热区才进拖拽，其余交给 TOUCH_END 的按钮命中
@@ -1843,6 +1883,12 @@ export class DeployRoot extends Component {
       if (x < button.x || x > button.x + button.w || y < button.y || y > button.y + button.h) continue;
       if (button.kind === 'back') {
         latchTap();
+        // [R231] 攻城戰前準備的「返回大地圖」＝放棄攻城：兵退回出發城、清快照，
+        // 不能回「重新派兵」的編成屏（那正是「到達一次彈一次」的循環）。
+        if (this.siege) {
+          this.abandonSiege();
+          return;
+        }
         director.loadScene('Campaign');
         return;
       }
@@ -1866,6 +1912,12 @@ export class DeployRoot extends Component {
         return;
       }
       if (button.kind === 'gen') {
+        // [R231] 攻城戰前準備：參戰的是抵達兵團，將卡只展示，不能換將/調人
+        if (this.siege) {
+          this.hintText = '攻城戰前準備：參戰的是剛抵達的兵團，不能換將（只可調陣形/兵種/軍師技/站位/出陣順序）。';
+          this.refresh();
+          return;
+        }
         const gen = this.generals[button.index];
         if (!gen) return;
         const at = this.queue.findIndex((slot) => slot.general === gen.NAME);
@@ -1901,9 +1953,20 @@ export class DeployRoot extends Component {
       } else if (button.kind === 'wise') {
         this.wise = this.wiseOptions[button.index]?.seq ?? null;
       } else if (button.kind === 'slide') {
+        // [R231] 攻城戰前準備：兵力鎖在抵達兵數，滑桿不生效
+        if (this.siege) {
+          this.hintText = '攻城戰前準備：兵力鎖在抵達時的兵數，不能增減。';
+          this.refresh();
+          return;
+        }
         this.setColumnFromX(button.index === 1 ? 1 : 0, x);
         return;
       } else if (button.kind === 'quick') {
+        if (this.siege) {
+          this.hintText = '攻城戰前準備：兵力鎖在抵達時的兵數，不能增減。';
+          this.refresh();
+          return;
+        }
         this.soldiers = [50, 80, 100][button.index] ?? this.soldierCap;
       }
       this.hintText = '';
@@ -1913,6 +1976,13 @@ export class DeployRoot extends Component {
   }
 
   private march(): void {
+    // [R231] 攻城戰前準備：按「出 戰」＝用剛抵達的兵團直接開打，不派新兵團。
+    // 必須放在「沒有可用主將」檢查之前：抵達兵團的將領若解析不到資料列，
+    // 仍應由 fight() 用快照裡的 general 兜底開戰（不能卡在「先取得一座有武將的城」）。
+    if (this.siege) {
+      this.fight();
+      return;
+    }
     const gen = this.currentGen();
     if (!gen) {
       this.hintText = '沒有可用主將：先在大地圖取得一座有我方武將的城。';
@@ -1978,6 +2048,130 @@ export class DeployRoot extends Component {
     // `{ ...loadout, ... }` 展開，額外屬性原樣進 `BattleLaunch`，所以型別上補交叉型別即可。
     const payload: BattleLoadoutWithCols = { ...loadout, cols: this.deployCols() };
     GameState.startBattle(this.targetCity?.NAME ?? '南皮', payload);
+  }
+
+  // -------------------------------------------------------------------------
+  // R231 攻城戰前準備（兵團抵達敵城/關卡 → 用剛抵達的部隊打，不再重新派兵）
+  // -------------------------------------------------------------------------
+
+  /**
+   * [R231] 把參戰將鎖成「剛抵達兵團」的編制。
+   *
+   * 兵團抵達時已 `removeArmy()`，出發城的候選池會把這些將當成「在外部隊」濾掉（away），
+   * 舊碼因此顯示「沒有可用主將」的空屏 → 玩家只能重新派兵 → 新兵團又抵達 → 再彈編成。
+   * 這裡直接用快照裡的主將/隨軍重建 generals 與出陣隊列（隊列順序即 web 的 `officers`）。
+   */
+  private applySiegeRoster(byName: Map<string, GeneralRow>): void {
+    const siege = this.siege;
+    if (!siege) return;
+    const names = [siege.general, ...siege.officers]
+      .filter((name): name is string => !!name)
+      .filter((name, i, all) => all.indexOf(name) === i)
+      .slice(0, DEPLOY_SLOTS);
+    const rows = names
+      .map((name) => byName.get(name))
+      .filter((gen): gen is GeneralRow => !!gen);
+    // 無條件覆寫：快照裡的將領若在 data.generals 裡解析不到，generals 就該是空陣列
+    // （fight() 會用 siege.general + 預設 STR/INT 兜底），不能殘留出發城的候選池——
+    // 那會讓 currentGen() 拿到城裡別的武將，戰前準備屏顯示的根本不是抵達的兵團。
+    this.generals = rows;
+    this.selectedGen = 0;
+    this.queue = names.map((name) => makeSlot(name));
+  }
+
+  /**
+   * [R231] 把兵力鎖在抵達兵數（兩欄上限放寬到兵數，全部記步兵欄）。
+   *
+   * 抵達兵團的兵是「已離開出發城」的實際兵力，不能再從城裡增減；等級上限只管「能帶多少」，
+   * 抵達兵數可能因上月徵兵而略高，所以上限取 max(等級上限, 抵達兵數) 而不是夾掉。
+   */
+  private applySiegeTroops(): void {
+    const siege = this.siege;
+    if (!siege) return;
+    const troops = Math.max(1, Math.round(Number(siege.troops) || 1));
+    this.soldierCap = Math.max(this.soldierCap, troops);
+    this.cavalry = 0;
+    this.soldiers = troops;
+    this.hintText =
+      '攻城戰前準備：參戰的是剛抵達的兵團，不能換將/改兵力；只可選陣形/兵種/軍師技/站位/出陣順序，按「出 戰」決戰。';
+    this.refresh();
+  }
+
+  /**
+   * [R231] 攻城戰前準備按「出 戰」：用剛抵達的兵團直接進 Battle。
+   *
+   * 與 `march()` 的差別：
+   *   - 不 `dispatchMarch()`（那會再造一支新兵團，是本 bug 的循環來源）；
+   *   - `soldiers` = 抵達兵數（鎖定值）；
+   *   - `armyId` = 快照部隊 id：戰後 `recordBattleResult()` 據此清部隊（已不在存檔時是 no-op），
+   *     不設 `defend`（我方進攻，輸了不掉城）。
+   */
+  private fight(): void {
+    const siege = this.siege;
+    if (!siege) return;
+    const gen = this.currentGen();
+    const genName = gen?.NAME ?? siege.general;
+    if (!genName) {
+      this.hintText = '攻城戰：找不到參戰主將，請回大地圖。';
+      this.refresh();
+      return;
+    }
+    const intel = this.intel;
+    const bstr = intel?.str ?? Math.min(100, 50 + Math.floor((this.targetCity?.DEFENSE ?? 300) / 8));
+    const bint = intel?.int ?? Math.max(30, 140 - bstr);
+    const rosterA = this.queue
+      .map((slot) => slot.general)
+      .filter((name): name is string => !!name);
+    if (rosterA.length === 0) rosterA.push(genName);
+    const rosterB = [intel?.name ?? '守備隊', ...(intel?.officers ?? []).map((o) => o.name)]
+      .filter((name, i, all) => !!name && all.indexOf(name) === i)
+      .slice(0, 4);
+    const loadout: BattleLoadout = {
+      gen: genName,
+      genStr: gen?.STR ?? 80,
+      genInt: gen?.INT ?? 60,
+      genLevel: gen ? this.levelOf(gen) : 20,
+      troop: this.troop,
+      form: this.form,
+      // 戰場只認總數（`BattleLoadout.soldiers`）：就是抵達兵團的兵數，一兵不多一兵不少
+      soldiers: Math.max(1, Math.round(Number(siege.troops) || 1)),
+      wise: this.wise,
+      home: siege.from,
+      bgen: intel?.name ?? '守備隊',
+      btroop: this.enemyTroop(),
+      bform: this.enemyForm(),
+      bsoldiers: this.enemySoldiers(),
+      bstr,
+      bint,
+      rosterA,
+      rosterB,
+      indexA: 0,
+      indexB: 0,
+      armyId: siege.armyId,
+    };
+    const payload: BattleLoadoutWithCols = { ...loadout, cols: this.deployCols() };
+    // 快照是一次性的：進 Battle 前清掉，避免「返回大地圖 → 再進編成」又走攻城分支
+    GameState.clearDeploySiege();
+    GameState.clearDeployMarch();
+    this.siege = null;
+    GameState.startBattle(this.targetCity?.NAME ?? siege.target, payload);
+  }
+
+  /**
+   * [R231] 攻城戰前準備按「返回大地圖」＝放棄攻城。
+   *
+   * 口徑同 web `campaign.html` 的確認框「退兵」＋`refundArmy()`：
+   * 部隊退回出發城，`cities[from].troops = min(600, troops + 抵達兵數)`，然後清快照回大地圖。
+   * （web deploy.html 的返回只是 `campaign.html?sel=`，但那時部隊還沒撤；Cocos 這裡已撤隊，
+   *   所以按 campaign 的「退兵」語義把兵退回，避免玩家白丟一支部隊。）
+   */
+  private abandonSiege(): void {
+    const siege = this.siege;
+    GameState.clearDeploySiege();
+    GameState.clearDeployMarch();
+    this.siege = null;
+    if (siege?.from) GameState.refundSiegeTroops(siege.from, siege.troops);
+    director.loadScene('Campaign');
   }
 
   // -------------------------------------------------------------------------

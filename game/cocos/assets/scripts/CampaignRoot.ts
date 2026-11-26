@@ -2777,6 +2777,10 @@ export class CampaignRoot extends Component {
       GameState.setDeployFrom(selected);
       GameState.setDeployTarget(selected);
       GameState.setDeployArmy(attack.id);
+      // [R231] 進的是守城戰編成：清掉可能殘留的「攻城戰前準備 / 派兵」上下文，
+      // 否則 DeployRoot 會優先走攻城或派兵分支。
+      GameState.clearDeploySiege();
+      GameState.clearDeployMarch();
       director.loadScene('Deploy');
       return;
     }
@@ -2813,6 +2817,9 @@ export class CampaignRoot extends Component {
           this.refresh();
           return;
         }
+        // [R231] 這是「從出發城重新派兵」的路，先清掉可能殘留的攻城快照；
+        // 抵達戰（城下已有部隊）走下面的 setDeploySiege 分支。
+        GameState.clearDeploySiege();
         GameState.setDeployMarch({ from, target: selected, pathIndex });
         GameState.setDeployFrom(from);
         GameState.setDeployTarget(selected);
@@ -2834,15 +2841,20 @@ export class CampaignRoot extends Component {
         director.loadScene('Deploy');
         return;
       }
-      // 進攻不能走 setDeployArmy()：DeployRoot.ts:1594 會把 armyId 當「守城戰」語義（defend=true），
-      // 這裡先撤隊，攻城結果由 BattleRoot 的 recordBattleResult（省略 armyId）處理。
-      GameState.removeArmy(siege.id);
-      this.save = GameState.loadSave();
+      // 進攻不能走 setDeployArmy()：DeployRoot.ts 會把 armyId 當「守城戰」語義（defend=true），
+      // 攻城結果由 BattleRoot 的 recordBattleResult（帶 armyId）處理。
+      // [R231] 守衛必須在撤隊之前判：舊碼先 removeArmy 再判接壤，不接壤就把部隊白丟了。
       if (GameState.distanceFromOwned(selected, this.paths) !== 1) {
         this.hintText = '不接壤：只能打與我方相鄰的城。';
         this.refresh();
         return;
       }
+      // [R231] 撤隊後把「剛抵達的這支兵團」寫成攻城戰前準備快照（將/兵/armyId 全帶走）。
+      // 舊碼只寫 setDeployMarch，Deploy 屏按「出征」會再派一支新兵團 → 新兵團又走到城下 → 再彈編成。
+      GameState.removeArmy(siege.id);
+      this.save = GameState.loadSave();
+      GameState.clearDeployMarch();
+      GameState.setDeploySiege(this.siegeSnapshotOf(siege, selected, siege.from));
       // 敵情在大地圖這一刻定下來（web campaign.html 出征同樣是 `battleSetup(...)` → bgen/bstr/bint）。
       // 傳給 DeployRoot 可以省一次查表，也讓「编成屏 / 戰鬥屏 / 城市卡」三處显示同一組数。
       const intel = this.enemyIntelOf(selected);
@@ -4412,7 +4424,11 @@ export class CampaignRoot extends Component {
     const from = saveOwnedOr(this.save, army.from);
     GameState.removeArmy(army.id);
     this.save = GameState.loadSave();
-    GameState.setDeployMarch({ from, target, pathIndex: army.pathIndex });
+    // [R231] 抵達戰的上下文＝「這支剛抵達的兵團」，不是「從出發城重新派兵」。
+    // 舊碼只寫 setDeployMarch：Deploy 屏按「出征」會再 dispatchMarch 一支新兵團，
+    // 新兵團走到目標又觸發抵達 → 每抵達一次彈一次編成（本 bug 的根因）。
+    GameState.clearDeployMarch();
+    GameState.setDeploySiege(this.siegeSnapshotOf(army as CampaignArmy, target, from));
     GameState.setDeployFrom(from);
     GameState.setDeployTarget(target);
     GameState.setDeployArmy(null);
@@ -4433,6 +4449,25 @@ export class CampaignRoot extends Component {
     this.hintText = this.clampHint(`兵 臨 城 下：${army.general ?? '我軍'} ${army.troops} 兵 抵 ${target}，進入編成。`, 160);
     this.refresh();
     director.loadScene('Deploy');
+  }
+
+  /**
+   * [R231] 抵達兵團 → 攻城戰前準備快照。
+   *
+   * 兵團抵達時已被 `removeArmy()`，Deploy 屏只能靠這份快照還原參戰部隊：
+   * 主將/隨軍/兵數/站位與 `armyId`（戰後 `recordBattleResult` 用來清部隊，已不在存檔時是 no-op）。
+   */
+  private siegeSnapshotOf(army: CampaignArmy, target: string, from: string): GameState.DeploySiege {
+    return {
+      from,
+      target,
+      pathIndex: army.pathIndex,
+      armyId: army.id,
+      general: army.general ?? '',
+      officers: Array.isArray(army.officers) ? army.officers.filter((name) => !!name).slice(0, 4) : [],
+      troops: Math.max(1, Math.round(Number(army.troops) || 1)),
+      advisor: army.advisor ?? '',
+    };
   }
 
   /** 舊入口（測試與對照用）：按月推進一步。正式流程已改成逐幀，見 `stepArmiesFrame()`。 */

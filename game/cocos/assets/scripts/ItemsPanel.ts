@@ -1376,9 +1376,23 @@ export class ItemsPanel extends Component {
       this.toast('背包裡沒有這件');
       return;
     }
-    const next = on ? equipItem(clean, seq) : unequipSlot(clean, slot);
-    this.setEquipsOf(name, next);
-    this.bag.add(seq);
+    // [R231] 裝備要真的把它從背包移出去：
+    // 舊寫法不管裝或卸都 `bag.add(seq)`，所以同一件可以同時掛在兩個武將身上。
+    // 現在：裝上 → 從背包刪掉（且把別人身上的同一件先摘掉）；卸下 → 回到背包。
+    if (on) {
+      for (const owner of Object.keys(this.save.equip ?? {})) {
+        if (owner === name) continue;
+        const table = normalizeEquips(this.save.equip[owner]);
+        const found = equippedSlot(table, seq);
+        if (found) this.setEquipsOf(owner, unequipSlot(table, found));
+      }
+      if (typeof current === 'number' && current !== seq) this.bag.add(current);
+      this.setEquipsOf(name, equipItem(clean, seq));
+      this.bag.delete(seq);
+    } else {
+      this.setEquipsOf(name, unequipSlot(clean, slot));
+      this.bag.add(seq);
+    }
     this.persist();
     this.refresh();
   }

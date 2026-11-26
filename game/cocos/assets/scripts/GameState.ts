@@ -1050,6 +1050,56 @@ export function clearDeployMarch(): void {
 }
 
 /**
+ * [R231] 抵達敵城/關卡的「攻城戰前準備」快照。
+ *
+ * 兵團走到目標後會先 `removeArmy()` 再進 Deploy；編成屏必須用這份快照把剛抵達的
+ * 主將/隨軍/兵數/armyId 原樣帶進 Battle，而不是讓玩家從出發城重新派一支新兵團
+ * （重派 → 新兵團再走一次 → 再進編成，就是「到達一次彈一次」的循環）。
+ */
+export interface DeploySiege {
+  from: string;
+  target: string;
+  pathIndex: number;
+  armyId: string;
+  general: string;
+  officers: string[];
+  troops: number;
+  advisor?: string;
+}
+
+let deploySiege: DeploySiege | null = null;
+
+export function setDeploySiege(siege: DeploySiege | null): void {
+  deploySiege = siege;
+}
+
+export function peekDeploySiege(): DeploySiege | null {
+  return deploySiege;
+}
+
+export function clearDeploySiege(): void {
+  deploySiege = null;
+}
+
+/**
+ * [R231] 放棄攻城：把抵達兵團的兵退回出發城。
+ *
+ * 與 web `campaign.html` 的 `refundArmy()` 同口徑：
+ * `cities[from].troops = min(cap, troops + army.troops)`（cap 預設 600，即 CITY_TROOP_CAP）。
+ * 部隊在抵達時就已經 `removeArmy()`，這裡只回寫兵數；出發城不在存檔就返回 0。
+ */
+export function refundSiegeTroops(from: string, troops: number, cap = CITY_TROOP_CAP): number {
+  const save = loadSave();
+  const state = save.cities[from];
+  if (!state) return 0;
+  const before = Math.max(0, Math.floor(numberOr(state.troops, 0)));
+  const add = Math.max(0, Math.floor(numberOr(troops, 0)));
+  state.troops = Math.min(Math.max(0, Math.floor(cap)), before + add);
+  persistSave();
+  return state.troops - before;
+}
+
+/**
  * 編成屏按「出征」：用選好的隊列派一支兵團。
  *
  * `general` = 第 1 槽（主將），`officers` = 其餘槽（隨軍，最多 4 人）；
@@ -1385,5 +1435,6 @@ export function resetCache(): void {
   deployFrom = null;
   deployEnemy = null;
   deployArmy = null;
+  deploySiege = null;
   pendingLaunch = null;
 }
