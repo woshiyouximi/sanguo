@@ -366,10 +366,22 @@ export class BattleRoot extends Component {
           const alive = party.filter((n) => !deadSet.has(n));
           if (alive.length > 0) {
             const won = this.settlement.winner === 'A';
+            const defend = this.launch?.defend === true;
             const target = won
               ? String(this.launch?.city ?? '')
               : String(this.launch?.home ?? '');
-            if (target && this.launch?.defend !== true) {
+            if (defend) {
+              // [R246] 守城戰：這座城本來就是我的，名冊裡正是守城的自己人。
+              // 贏了把存活者寫回本城（recordBattleResult 已不再把守城勝當「打下城」）；
+              // 輸了城已易手，殘部撤到還握在手裡的第一座城 —— 舊碼 `defend !== true` 把兩種
+              // 情況整塊跳過，守城贏／輸都會讓守將從所有列表消失。
+              if (won) {
+                if (target) returnGeneralsToCity(target, alive);
+              } else {
+                const refuge = String(loadSave().owned?.[0] ?? '');
+                if (refuge) returnGeneralsToCity(refuge, alive);
+              }
+            } else if (target) {
               // [R245] 勝利用台账交接（清旧主 + 记接管 + 写存活者），敗仗只還人回出發城。
               if (won) handoffCapture(target, alive);
               else returnGeneralsToCity(target, alive);

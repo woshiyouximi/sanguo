@@ -21,6 +21,12 @@ export const RUN_SCOPED_KEYS = [
   'roster', // 每城在职武将（含 `_moved`）
   'acted', // 逐将年令：今年已行动
   'away', // 在途武将
+  // [R246] 下面三个也是「一局之内」的键：不清就会把上一局的死亡/俘虏状态、
+  // 「这座城我打下来过」的标记、以及抵达待战的围城快照带进新局 ——
+  // 新局里同名武将会因为旧的 '死'/'俘' 被名册自愈剔掉，看起来就是「开局将都没了」。
+  'generalStatus', // 逐将生死/被俘（'死' | '俘'）
+  'takenOver', // 城名 → 接管月份（R244）
+  'siege', // 抵达待战的围城快照（R231）
 ] as const;
 
 export type RunScopedKey = (typeof RUN_SCOPED_KEYS)[number];

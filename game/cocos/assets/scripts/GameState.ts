@@ -1441,7 +1441,10 @@ export function updateArmy(id: string, patch: Partial<CampaignArmy>): boolean {
  */
 function absorbArmyPeople(bag: unknown, army: CampaignArmy, city: string): void {
   if (!city || !army) return;
-  const save = bag as unknown as { roster?: Record<string, unknown> };
+  const save = bag as unknown as {
+    roster?: Record<string, unknown>;
+    generalStatus?: Record<string, unknown>;
+  };
   const names: string[] = [];
   if (army.general) names.push(String(army.general));
   for (const name of army.officers ?? []) {
@@ -1449,6 +1452,12 @@ function absorbArmyPeople(bag: unknown, army: CampaignArmy, city: string): void 
     if (n && names.indexOf(n) < 0) names.push(n);
   }
   if (names.length === 0) return;
+  // [R246] 能走到這裡＝這個人剛打完仗還活著（或隨軍落城）：舊的「死/俘」判定必須撤掉，
+  // 否則名冊自愈（repairRoster）與攻城交接（Ledger.handoffCapture 的 isGone 過濾）
+  // 會把活人當屍體剔掉，看起來仍是「打完仗將就沒了」。
+  if (save.generalStatus && typeof save.generalStatus === 'object') {
+    for (const name of names) delete save.generalStatus[name];
+  }
   if (!save.roster || typeof save.roster !== 'object') save.roster = {};
   const roster = save.roster as Record<string, unknown>;
   for (const key of Object.keys(roster)) {
@@ -1523,10 +1532,19 @@ export function recordBattleResult(
   if (won) {
     if (!save.owned.includes(city)) save.owned.push(city);
     // [R244] 打下來的城：記接管月份並清掉前主人守將，否則守城戰名單會冒出敵人
-    markCityTaken(save, city);
+    // [R246] **守城戰贏了不是「打下一座城」**：這座城本來就是我的，名冊裡正是守城的自己人；
+    // 舊碼不分 defend 一律 markCityTaken（刪整城名冊 + 記接管），而 BattleRoot 的還人塊又用
+    // `defend !== true` 擋掉 ⇒ 守城勝利 = 守將從所有列表消失（agent 復現：roster 變 {}）。
+    if (!defend) markCityTaken(save, city);
   } else if (defend) {
     // 守城戰輸了要丟城；野戰輸了不掉城（與 web 一致：web 只在 defend 失敗時移除 owned）
     save.owned = save.owned.filter((name) => name !== city);
+    // [R246] 城易手：城裡的名冊與守將快照不能再留著我的人，否則面板會把敵城當我城顯示、
+    // 下個月還會從名冊把人編進守城戰。活著的殘部由 BattleRoot 撤到還握在手裡的城。
+    const lostRoster = save.roster as Record<string, unknown> | undefined;
+    if (lostRoster && Object.prototype.hasOwnProperty.call(lostRoster, city)) delete lostRoster[city];
+    const lostState = save.cities?.[city];
+    if (lostState) lostState.officers = [];
   }
   if (armyId) {
     const fought = save.armies.find((army) => army.id === armyId);
@@ -1726,6 +1744,12 @@ export function handoffCapture(city: string, survivors: readonly string[]): void
   const target = String(city ?? '').trim();
   if (!target) return;
   const save = loadSave();
+  // [R246] 先撤掉存活者身上殘留的「死/俘」：Ledger.handoffCapture 會用 isGone 過濾存活者，
+  // 舊局留下的錯誤判定會讓剛打贏的將被當成死人剔掉（名冊看起來又空了）。
+  const fate = save.generalStatus as Record<string, unknown> | undefined;
+  if (fate && typeof fate === 'object') {
+    for (const name of survivors) delete fate[String(name ?? '').trim()];
+  }
   Ledger.handoffCapture(save as unknown as Record<string, unknown>, target, survivors);
   // 交了城也要把 `_moved` 印記清乾淨：否則那批將在內政頁仍被判「已調走」
   const roster = save.roster as Record<string, unknown> | undefined;
