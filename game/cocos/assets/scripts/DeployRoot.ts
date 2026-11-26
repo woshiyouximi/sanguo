@@ -64,6 +64,7 @@ import {
   DEPLOY_FIELD_SLOTS,
   DEPLOY_SLOTS,
   hasQueue,
+  makeSlot,
   moveSlot,
   queueOf,
   saveQueue,
@@ -584,7 +585,15 @@ export class DeployRoot extends Component {
       }
       const anyGeneral = rows.filter((gen) => gen.NAME !== '盜賊');
       const major = this.majorOf(data, save, ctx);
+      // 在外部隊的武將不再進候選（原作：出征的武將不在出發城守城；空城是被允許的）
+      const away = new Set<string>();
+      for (const army of GameState.armies()) {
+        if (army.side !== 'A') continue;
+        if (army.general) away.add(army.general);
+        for (const name of army.officers ?? []) away.add(name);
+      }
       const pool = (homeRows.length > 0 ? homeRows : anyGeneral)
+        .filter((gen) => !away.has(gen.NAME))
         .slice()
         .sort((a, b) => {
           // 太守优先，其次 STR+INT（web deploy.html 的 officersOf 排序）
@@ -601,7 +610,8 @@ export class DeployRoot extends Component {
       //  · 存過隊列 → 用存檔的第 1 槽（玩家調過的順序不能被「候選第一人」頂回去）
       //  · 沒存過   → 用當前選中的候選第一位
       const stored = hasQueue(save as unknown as DeployQueueSave);
-      this.queue = queueOf(save as unknown as DeployQueueSave, pool.slice(0, DEPLOY_SLOTS).map((g) => g.NAME));
+      // 沒存過隊列時只預選主將（原作是玩家自己勾選隨軍；不再自動塞滿 5 人）
+      this.queue = queueOf(save as unknown as DeployQueueSave, pool.slice(0, 1).map((g) => g.NAME));
       if (stored && this.queue[0]) {
         const head = this.queue[0]!.general;
         const index = pool.findIndex((g) => g.NAME === head);
@@ -1260,18 +1270,22 @@ export class DeployRoot extends Component {
       const row = Math.floor(index / GEN_COLS);
       const x = GEN_X + col * (GEN_W + 8);
       const y = GEN_Y + row * (GEN_H + 8);
-      const selected = index === this.selectedGen;
+      const headName = this.queue[0]?.general;
+      const inQueue = this.queue.some((slot) => slot.general === gen.NAME);
+      const selected = headName ? headName === gen.NAME : index === this.selectedGen;
       // w7-cocos-render3：3×2 二維色域（104×52 的格子每格約 34×26 設計像素）
       this.cellGrid(g, x, y, GEN_W, GEN_H, selected ? '#4A3A20' : '#22282F', selected ? '#1D1509' : '#171C22', 6, 12, selected ? 244 : 214);
       this.paintBands(g, topSheen(x + 1, y + 1, GEN_W - 2, selected ? '#FBEBBE' : '#9FB4CC', selected ? 60 : 22));
       // w7-cocos-render2：格內四邊暗角 + 底緣一道黑線，讓金屬片有厚度
       this.paintBands(g, edgeBands({ x, y, w: GEN_W, h: GEN_H }, '#000000', 70, 5, 2));
       this.paintBands(g, topSheen(x + 2, y + GEN_H - 2, GEN_W - 4, '#000000', 80));
-      this.strokeRect(g, x, y, GEN_W, GEN_H, selected ? COLORS.gold : COLORS.line, selected ? 2 : 1);
+      // 已勾選隨軍：右側金條（左側被縮略立繪蓋住）；主將（第 1 槽）金框更亮
+      if (inQueue) this.fillRect(g, x + GEN_W - 6, y, 6, GEN_H, COLORS.gold, selected ? 255 : 160);
+      this.strokeRect(g, x, y, GEN_W, GEN_H, selected ? COLORS.gold : inQueue ? COLORS.goldDim : COLORS.line, selected ? 2 : 1);
       const label = this.genLabels[index];
       if (label) {
         label.string = gen.NAME;
-        label.color = rgba(selected ? COLORS.goldLight : COLORS.textDim);
+        label.color = rgba(inQueue ? (selected ? COLORS.goldLight : COLORS.text) : COLORS.textDim);
         // 左侧 34px 让给缩略立绘，姓名居中在右半格
         label.node.setPosition(x + 36 + (GEN_W - 36) / 2 - HALF_W, HALF_H - (y + GEN_H / 2), 0);
       }
@@ -1837,9 +1851,32 @@ export class DeployRoot extends Component {
         return;
       }
       if (button.kind === 'gen') {
-        this.selectedGen = button.index;
+        const gen = this.generals[button.index];
+        if (!gen) return;
+        const at = this.queue.findIndex((slot) => slot.general === gen.NAME);
+        if (at < 0) {
+          if (this.queue.length >= DEPLOY_SLOTS) {
+            this.hintText = `出陣最多 ${DEPLOY_SLOTS} 人；先在出陣順序裡移掉一位。`;
+            this.refresh();
+            return;
+          }
+          this.queue = [...this.queue, makeSlot(gen.NAME)];
+        } else if (at === 0) {
+          // 再點一次主將 = 取消他（下一位移上來當主將）
+          this.queue = this.queue.filter((_, i) => i !== 0);
+        } else {
+          // 點已勾選的副將 = 升為主將（移到第 1 槽）
+          const slot = this.queue[at]!;
+          this.queue = [slot, ...this.queue.filter((_, i) => i !== at)];
+        }
+        const headName = this.queue[0]?.general;
+        const headIndex = headName ? this.generals.findIndex((row) => row.NAME === headName) : -1;
+        if (headIndex >= 0) this.selectedGen = headIndex;
+        this.applyQueueHead();
+        this.persistQueue();
         this.applyGeneral();
         this.loadPortrait();
+        this.refresh();
         return;
       }
       if (button.kind === 'troop') {
