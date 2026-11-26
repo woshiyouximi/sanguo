@@ -2786,7 +2786,8 @@ export function step(world: World): void {
       else world.stats.genHitsB++;
       // R46：普攻伤害按 `0x43EC54(t, a)` 算 —— 武将走 `(rand%(str-str/2)+str/2)/10`，
       // 士兵走 `战力×4/0xC0`（骑兵 ×1.2），下限 1，公式里没有防御项（docs/04b4:216-240）
-      // R37 保護主將（`army+0x84 |= 0x10`）：挨打方主将减伤，系数见 `strategy.ts` 的 takenMul。[推測]
+      // 軍師技「保護主將」（Execute 46）原作只置 `army+0x84 |= 0x10` 并打「士兵可以保護主將」；
+      // 0x10 在整份 EXE 里没有读取点（work/guard10 三套扫描 0 命中），故 `takenMul` 恒 1、不减伤。
       const taken = world.army?.[to.side]?.takenMul ?? 1;
       const dmg = Math.max(1, Math.round(basicDamage(world, from) * taken));
       // R67：落地不再就地 `g.hp -= dmg`，改走 `applyDamage()`：

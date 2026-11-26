@@ -826,8 +826,9 @@ function applyOp(world: World, op: StrategyOp): void {
       return;
     }
     case 'guarded': {
-      const army = world.army[op.side];
-      if (army) army.takenMul = 0.75;
+      // 原作 Execute 46（軍師技「保護主將」）只做两件事：`army+0x84 |= 0x10`，并打印
+      // 「士兵可以保護主將」（strategy.ts:302 / 0x44E12F）。全 EXE 里 0x10 没有读取点
+      // （work/guard10 的 test/and/or + SIB + bt 三套扫描 0 命中），所以这里不再发明减伤。
       return;
     }
     case 'scatter': {
