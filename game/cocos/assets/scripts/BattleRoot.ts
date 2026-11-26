@@ -35,6 +35,8 @@ import { BattleHud } from './BattleHud';
 import { BattleWeather, ScreenTint } from './BattleWeather';
 import { camera, createWorld, settle, step, QI_MAX, TICK_HZ } from './core/battle';
 import { sangoRng } from './core/sango_rng';
+import { buildTauntSeq, regionFromCamera, tauntEnabled } from './core/open_taunt';
+import type { TauntLine } from './core/open_taunt';
 import { installArmyOrders } from './core/army_cmd';
 import { applyWise, applyWiseOnBattleStart } from './core/wises';
 import type { World } from './core/battle';
@@ -114,6 +116,32 @@ export class BattleRoot extends Component {
   private loading = false;
   private accumulator = 0;
   private camX = 35;
+
+  /** 开场叫阵（原作 SYSTEM.SO#StartBattle）：B 敵將先喊 → A 我將接話，播完鏡頭回我方主將。 */
+  private tauntSeq: TauntLine[] | null = null;
+  private tauntI = 0;
+  private tauntT = 0;
+  private readonly tauntOn = tauntEnabled(BattleRoot.queryValue('taunt'));
+
+  /** 讀 URL / 小遊戲啟動參數裡的一個鍵（取不到回 null）。`?taunt=0` 用它關掉叫陣。 */
+  private static queryValue(key: string): string | null {
+    try {
+      const g = globalThis as unknown as {
+        window?: { location?: { search?: string } };
+        wx?: { getLaunchOptionsSync?: () => { query?: Record<string, string> }; getEnterOptionsSync?: () => { query?: Record<string, string> } };
+      };
+      const search = g.window?.location?.search ?? '';
+      if (search) {
+        const v = new URLSearchParams(search).get(key);
+        if (v !== null) return v;
+      }
+      const query = g.wx?.getLaunchOptionsSync?.()?.query ?? g.wx?.getEnterOptionsSync?.()?.query;
+      if (query && query[key] !== undefined) return String(query[key]);
+    } catch {
+      // 宿主不支持取參數：當作沒帶
+    }
+    return null;
+  }
 
   private gBase: Graphics | null = null;
   private gA: Graphics | null = null;
@@ -244,6 +272,13 @@ export class BattleRoot extends Component {
 
     // dt 夹紧：切后台/首帧可能给一个巨大的 dt，绝不允许一次补几百 tick
     this.accumulator += Math.min(dt, 0.1);
+    // 开场叫阵：演出期间不推进 step（原作喊话时部队是静止的），镜头由 tickTaunt 硬切
+    if (this.tauntSeq) {
+      this.tickTaunt(dt);
+      this.redraw();
+      this.weatherLayer?.update(dt);
+      return;
+    }
     const stepDt = 1 / TICK_HZ;
     let steps = 0;
     while (this.accumulator >= stepDt && steps < 5) {
@@ -423,6 +458,8 @@ export class BattleRoot extends Component {
       this.weatherLayer?.setWeather(world.weather as Weather);
       this.audioMark = battleAudioMark(world);
       this.audio?.playTerrainBgm(world.terrain);
+      // 叫阵放在最后：它要读 createWorld 后的主将位置，并且会把 camX 直接钉到说话方
+      this.beginTaunt();
       this.audio?.playBattleAmbience(world.terrain);
       // labelStatus 现在只有 360px 宽（控制台左上角），长句会被 SHRINK 压得看不清。
       // 战斗中这一行说"怎么打"，结算后由 redraw() 改成"点哪返回"。
@@ -435,6 +472,94 @@ export class BattleRoot extends Component {
     } finally {
       this.loading = false;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // 开场叫阵：B 敵將先喊 → A 我將接話（原作 SYSTEM.SO#StartBattle @0x2108）
+  // 台詞/編號規則在 core/open_taunt.ts（與 web main.js:798-845 同一份），
+  // 差別只在這裡是 Cocos：鏡頭直接釘 `camX`（不做插值，硬切才是原作的換機位），
+  // 台詞框由 BattleHud.showTaunt() 畫在戰場最底部。
+  // -------------------------------------------------------------------------
+
+  /** 主將單位在縱深軸上的位置（格）；找不到回 0。 */
+  private generalX(side: 'A' | 'B'): number {
+    const w = this.world;
+    if (!w) return 0;
+    for (let i = 0; i < w.units.length; i += 1) {
+      const u = w.units[i];
+      if (u.isGeneral && u.side === side) return u.x;
+    }
+    return 0;
+  }
+
+  /** 排一段叫陣；`?taunt=0` 或沒主將時直接不演（回 false）。 */
+  private beginTaunt(): boolean {
+    const w = this.world;
+    this.tauntSeq = null;
+    this.tauntI = 0;
+    this.tauntT = 0;
+    this.hud?.hideTaunt();
+    if (!this.tauntOn || !w) return false;
+    const ax = this.generalX('A');
+    const bx = this.generalX('B');
+    const near = regionFromCamera(ax, this.camX);
+    const far = regionFromCamera(bx, this.camX);
+    const seq = buildTauntSeq({
+      near,
+      far,
+      // 與戰鬥亂數分開：叫陣開/關不能改變 step() 的 rand 序列（同 web main.js:809）
+      seed: ((this.launch?.seed ?? 20261124) * 2654435761) >>> 0,
+      aName: w.sides.A.general?.name || '',
+      bName: w.sides.B.general?.name || '',
+    });
+    if (seq.length === 0) return false;
+    this.tauntSeq = seq;
+    this.camX = this.generalX(seq[0].side);
+    this.bg?.setCamX(this.camX);
+    this.showTauntLine();
+    return true;
+  }
+
+  private showTauntLine(): void {
+    const seq = this.tauntSeq;
+    if (!seq) return;
+    const line = seq[this.tauntI];
+    if (!line) return;
+    const name = line.side === 'B' ? this.world?.sides.B.general?.name : this.world?.sides.A.general?.name;
+    this.hud?.showTaunt(name || (line.side === 'B' ? '敵將' : '我將'), line.text);
+  }
+
+  /** 每幀推進叫陣；真正在演的期間回 true（update 用它擋掉 step）。 */
+  private tickTaunt(dt: number): boolean {
+    const seq = this.tauntSeq;
+    if (!seq) return false;
+    const line = seq[this.tauntI];
+    if (!line) { this.endTaunt(); return false; }
+    this.tauntT += dt;
+    if (this.tauntT * TICK_HZ < Math.max(30, line.holdTicks)) return true;
+    this.tauntT = 0;
+    this.tauntI += 1;
+    if (this.tauntI < seq.length) {
+      // 下一句：鏡頭硬切到說話方（原作「誰喊話切到誰」）
+      this.camX = this.generalX(seq[this.tauntI].side);
+      this.bg?.setCamX(this.camX);
+      this.showTauntLine();
+      return true;
+    }
+    this.endTaunt();
+    return false;
+  }
+
+  /** 播完：收台詞框、鏡頭回我方主將（= camera() 的錨點），把 tick 累加器清零。 */
+  private endTaunt(): void {
+    this.tauntSeq = null;
+    this.tauntI = 0;
+    this.tauntT = 0;
+    this.hud?.hideTaunt();
+    if (this.world) this.camX = camera(this.world);
+    this.bg?.setCamX(this.camX);
+    this.accumulator = 0;
+    this.redraw();
   }
 
   // -------------------------------------------------------------------------

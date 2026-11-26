@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cocos 版（variant=cocos）：同一个 WebView 壳 + MainActivity，只是 assets\www 换成
+     game\cocos-build\web-mobile 的构建产物（index.html 为真正入口，campaign.html 是跳转壳）。
+     包名加 .cocos 后缀，好让主包（web 版）和它装在同一台机器上互不覆盖；
+     versionCode 5 / versionName 1.5 与主包 1.4 分开记，问题反馈时才说得清是哪个包。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sanguo.webview.cocos"
+    android:versionCode="5"
+    android:versionName="1.5">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:allowBackup="true"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name_cocos"
+        android:supportsRtl="false"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <!-- 全限定名：包名变了，".MainActivity" 会解析到 com.sanguo.webview.cocos.MainActivity（不存在） -->
+        <activity
+            android:name="com.sanguo.webview.MainActivity"
+            android:configChanges="orientation|keyboardHidden|screenSize"
+            android:enableOnBackInvokedCallback="false"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

@@ -4612,6 +4612,16 @@ function handleMarchEvents(batch) {
         const q = new URLSearchParams({ city: a.to, from: a.from });
         if (mine) q.set('amorale', String(moraleOf(save, mine.name)));
         if (mine) q.set('lv', String(generalLevelOf(mine.name)));
+        // 兵團兵已經在 dispatchArmy() 時離開出發城，必須把數字帶進編成頁：
+        // 沒有 ?troops= 時 deploy.html 會認不出兵團入口（它在 removeArmy 之後才載入，
+        // 「找 save.armies 裡已抵達的兵團」那條兜底也失效），退回 city 模式拿城裡
+        // 剩下的兵 —— 表現就是「部隊明明帶了 N 兵，出戰只有守軍殘兵」。
+        q.set('troops', String(Math.max(0, Math.trunc(Number(a.troops) || 0))));
+        // 主將用兵團自己那名（dispatchArmy 存的 a.general），別讓編成頁重挑一個
+        const leader = (a.general || (mine && mine.name) || '').trim();
+        if (leader) q.set('a', leader);
+        const offs = (Array.isArray(a.officers) ? a.officers : []).filter(Boolean);
+        if (offs.length) q.set('officers', offs.join(','));
         // R75/R78：敵軍兵力/等級用同一個 enemySetup 算好再透傳（deploy 只讀 ?bsoldiers=/?blevel=）
         const enemy = enemySetup(a.to, a.troops);
         q.set('bsoldiers', String(enemy.enemyTroops));

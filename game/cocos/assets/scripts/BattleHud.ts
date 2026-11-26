@@ -187,6 +187,9 @@ export const HUD_UI_DIR = 'ui/battle';
 
 export type HudTex = 'slot' | 'slot_off' | 'cmd_on' | 'cmd_off' | 'port' | 'msg' | 'sep';
 
+/** 开场叫阵台词框：与 web `battleView.ts` 的 `TAUNT_BANNER` 同几何（设计坐标，左上角起） */
+export const TAUNT_BANNER = { x: 40, y: 790, w: 670, h: 138 };
+
 /**
  * 每张图的九宫内缩（= 原图边框宽度，见 `work\battleui\_make.py`）。
  *
@@ -486,6 +489,11 @@ export class BattleHud {
   /** 有肖像时右下角的 Lv 小徽章：深色底板（Graphics）+ 12px 金字（`caption` 角色）。 */
   private readonly faceBadgeGfx: Graphics;
   private faceBadge!: Label;
+  /** 开场叫阵台词框（常驻节点、默认隐藏；叫阵期间由 BattleRoot 驱动） */
+  private readonly tauntRoot: Node;
+  private readonly tauntWho: Label;
+  private readonly tauntTag: Label;
+  private readonly tauntLine: Label;
   private readonly slotSprites: Sprite[] = [];
   private readonly assaultSprite: Sprite;
   private readonly retreatSprite: Sprite;
@@ -622,6 +630,38 @@ export class BattleHud {
     );
     badgeNode.active = false;
     this.faceBadge.node.active = false;
+
+    // ---- 开场叫阵台词框（几何照 web `TAUNT_BANNER`；只在叫阵期间显示）----
+    this.tauntRoot = makeNode('TauntBanner', this.consoleRoot);
+    const tauntGfx = this.tauntRoot.addComponent(Graphics);
+    transformOf(this.tauntRoot).setContentSize(DESIGN_W, DESIGN_H);
+    tauntGfx.fillColor = hexColor('#06080E', 219);          // web: rgba(6,8,14,.86)
+    tauntGfx.strokeColor = hexColor(COLORS.gold, 235);
+    tauntGfx.lineWidth = 2;
+    tauntGfx.roundRect(
+      TAUNT_BANNER.x - HALF_W, HALF_H - (TAUNT_BANNER.y + TAUNT_BANNER.h),
+      TAUNT_BANNER.w, TAUNT_BANNER.h, 8,
+    );
+    tauntGfx.fill();
+    tauntGfx.stroke();
+    this.tauntWho = this.makeLabel(
+      this.consoleRoot, 'TauntWho', 'subtitle',
+      TAUNT_BANNER.x + 18, TAUNT_BANNER.y + 26, 220, 'left', COLORS.goldLight,
+    );
+    this.tauntTag = this.makeLabel(
+      this.consoleRoot, 'TauntTag', 'caption',
+      TAUNT_BANNER.x + TAUNT_BANNER.w - 18, TAUNT_BANNER.y + 26, 90, 'right', COLORS.gold,
+    );
+    this.tauntTag.string = '叫 陣';
+    this.tauntLine = this.makeLabel(
+      this.consoleRoot, 'TauntLine', 'subtitle',
+      TAUNT_BANNER.x + TAUNT_BANNER.w / 2, TAUNT_BANNER.y + TAUNT_BANNER.h / 2 + 16,
+      TAUNT_BANNER.w - 56, 'center', COLORS.text,
+    );
+    this.tauntRoot.active = false;
+    // 三个 Label 挂在 consoleRoot 上（不在 tauntRoot 里，避免摆位受父节点缩放影响），
+    // 所以收起时必须逐个关——R212 首验只关了底板，播完还剩「關羽 / 叫 陣 / 台词」浮在阵上。
+    this.setTauntLabels(false);
 
     // ---- 主将信息块（web drawConsole：名字 116,1036 / 武智 1052 / 在陣右對齊 366,1036）----
     // 坐标对齐说明：web 的 `fillText` 给的是**基线**，Cocos 的 `placeOn` 给的是**盒中心**
@@ -1190,6 +1230,30 @@ export class BattleHud {
     // 右上元信息：出征/守城 + 连胜 + 军师技（这些原来挤在 labelGeneral 的同一行里）
     const streak = `連勝 ${world.record.streak}（最高 ${world.record.bestStreak}）`;
     this.metaLine.string = `${modeName} · ${streak}${wiseNote ? ` · 軍師技 ${wiseNote}` : ''}`;
+  }
+
+  /**
+   * 开场叫阵的台词框：战场最底部通栏（web `battleView.ts` 的 `TAUNT_BANNER`
+   * x40 y790 w670 h138 同几何），左上角说话方名牌 + 右侧「叫陣」小字。
+   * 只在叫阵期间显示，播完由 `hideTaunt()` 收掉——战斗控制台不受影响。
+   */
+  showTaunt(who: string, line: string): void {
+    this.tauntWho.string = who || '';
+    this.tauntLine.string = line || '';
+    this.tauntRoot.active = true;
+    this.setTauntLabels(true);
+  }
+
+  /** 底板与三个 Label 一起开关（Label 不在 tauntRoot 下，单独摆位） */
+  private setTauntLabels(on: boolean): void {
+    this.tauntWho.node.active = on;
+    this.tauntTag.node.active = on;
+    this.tauntLine.node.active = on;
+  }
+
+  hideTaunt(): void {
+    this.tauntRoot.active = false;
+    this.setTauntLabels(false);
   }
 
   /**

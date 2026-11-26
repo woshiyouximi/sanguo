@@ -3,4 +3,6 @@
     <string name="app_name">三國群英傳2</string>
     <!-- 只在 AndroidManifest.smoke.xml（烟雾包）里用：桌面图标上能一眼分出装的是哪个包 -->
     <string name="app_name_smoke">三國群英傳2 煙霧測試</string>
+    <!-- 只在 AndroidManifest.cocos.xml（Cocos 构建版）里用：和 web 主包并存时靠名字区分 -->
+    <string name="app_name_cocos">三國群英傳2 COCOS</string>
 </resources>

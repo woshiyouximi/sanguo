@@ -15,8 +15,9 @@
 param(
   # main  = 完整游戏包 → dist\android\sanguo-debug.apk
   # smoke = 最小烟雾包 → dist\android\sanguo-smoke.apk（< 1 MB，assets\www 只有一页 ES5 探针）
-  # 两者共用同一份 java / 同一个 classes.dex，只有 assets、清单（包名/应用名）、输出文件名不同。
-  [ValidateSet('main', 'smoke')]
+  # cocos = Cocos 构建版 → dist\android\sanguo-cocos.apk（assets\www = game\cocos-build\web-mobile）
+  # 三者共用同一份 java / 同一个 classes.dex，只有 assets、清单（包名/应用名）、输出文件名不同。
+  [ValidateSet('main', 'smoke', 'cocos')]
   [string]$Variant = 'main'
 )
 
@@ -61,6 +62,7 @@ $AlignedApk  = Join-Path $BuildDir 'aligned.apk'
 $WebDir      = Join-Path $Root 'game\web'
 $DataDir     = Join-Path $Root 'game\data'
 $DistDir     = Join-Path $Root 'game\dist'
+$CocosWwwDir = Join-Path $Root 'game\cocos-build\web-mobile'
 
 $KeystoreDir = Join-Path $ApkDir 'keystore'
 $Keystore    = Join-Path $KeystoreDir 'debug.jks'
@@ -79,14 +81,26 @@ $StartedAt   = Get-Date
 # 如果 sanguo-smoke.apk 打开是 SHELL OK，而主包黑屏，那问题在页面/WebView 内核，不在壳。
 if ($Variant -eq 'smoke') {
   $IsMain    = $false
+  $IsCocos   = $false
   $Manifest  = Join-Path $ApkDir 'AndroidManifest.smoke.xml'
   $AssetsDir = Join-Path $ApkDir 'smoke'          # ZipPack 把这里的内容包成 assets\...
   $WwwDir    = Join-Path $AssetsDir 'www'
   $OutApk    = Join-Path $OutDir 'sanguo-smoke.apk'
   $PkgName   = 'com.sanguo.webview.smoke'
   $MaxApk    = 1000000
+} elseif ($Variant -eq 'cocos') {
+  # Cocos 版：www 换成 Cocos 构建产物，独立 assets 目录，绝不覆盖主包的 apk\assets\www
+  $IsMain    = $false
+  $IsCocos   = $true
+  $Manifest  = Join-Path $ApkDir 'AndroidManifest.cocos.xml'
+  $AssetsDir = Join-Path $ApkDir 'cocos'
+  $WwwDir    = Join-Path $AssetsDir 'www'
+  $OutApk    = Join-Path $OutDir 'sanguo-cocos.apk'
+  $PkgName   = 'com.sanguo.webview.cocos'
+  $MaxApk    = 0
 } else {
   $IsMain    = $true
+  $IsCocos   = $false
   $Manifest  = Join-Path $ApkDir 'AndroidManifest.xml'
   $AssetsDir = Join-Path $ApkDir 'assets'
   $WwwDir    = Join-Path $AssetsDir 'www'
@@ -94,6 +108,7 @@ if ($Variant -eq 'smoke') {
   $PkgName   = 'com.sanguo.webview'
   $MaxApk    = 0
 }
+$IsFull = ($IsMain -or $IsCocos)   # 「有整站素材」的两个变体共用清理/统计口径
 
 # keytool / apksigner.bat 都靠 JAVA_HOME 或 PATH 找 java，先把本次会话指到 JDK 17
 $env:JAVA_HOME = $JdkHome
@@ -157,10 +172,10 @@ Write-Host "  build-tools: $BuildTools"
 Write-Host "  输出     : $OutApk"
 
 # ===================== [1/10] 清理 + 复制站点 =====================
-Write-Step '1/10' '清理 build\ 与 assets\www\，把 game\web + game\data + game\dist 平铺进 assets\www'
+Write-Step '1/10' '清理 build\ 与 assets\www\，把站点素材平铺进 assets\www'
 
 # 注意：smoke 变体**不能**删 $WwwDir——那里是手写的烟雾页，删了就没了
-foreach ($p in @($BuildDir, $(if ($IsMain) { $WwwDir } else { $null }))) {
+foreach ($p in @($BuildDir, $(if ($IsFull) { $WwwDir } else { $null }))) {
   if (-not $p) { continue }
   if (Test-Path -LiteralPath $p) {
     Remove-Item -LiteralPath $p -Recurse -Force
@@ -175,7 +190,37 @@ New-Item -ItemType Directory -Force -Path $KeystoreDir | Out-Null
 # 站点根 = game\web 的平铺副本。为什么还要 data 与 dist：页面里 fetch('../data/x.json')、
 # import '../dist/core/x.js' 在"页面位于站点根"时归一化成 /data/、/dist/，所以这两棵树必须
 # 也平铺到 assets\www 下，否则 APK 里会 404（浏览器本地跑时它们是 game\data、game\dist）。
-if ($IsMain) {
+if ($IsCocos) {
+# Cocos 版：整站就是 game\cocos-build\web-mobile 的产物（index.html 入口）。
+# 壳的 ENTRY 写死 /campaign.html?rel=1，所以这里补一张同名跳转页，dex 不用改。
+if (-not (Test-Path -LiteralPath (Join-Path $CocosWwwDir 'index.html'))) {
+  throw "缺 Cocos 构建产物：$CocosWwwDir\index.html（先跑 tools\build_wechat.ps1 -Mode preview）"
+}
+# 必须先建目录：目标不存在时 `Copy-Item -Path x\* -Destination (新目录)` 会把第一个子目录
+# 改名成目标名（PS 的「容器复制到叶子」怪癖，报 Container cannot be copied onto existing leaf item）。
+New-Item -ItemType Directory -Force -Path $WwwDir | Out-Null
+Copy-Item -Path (Join-Path $CocosWwwDir '*') -Destination $WwwDir -Recurse -Force
+$shim = @'
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>三國群英傳2</title>
+<style>html,body{margin:0;height:100%;background:#0E1116;color:#D8B36A;
+font:16px/1.6 system-ui,sans-serif;display:flex;align-items:center;justify-content:center}</style>
+</head><body><div>載入中…</div>
+<script>location.replace('index.html');</script>
+</body></html>
+'@
+# 注意：Set-Content -Encoding utf8 在 PS 5.1 会写 BOM，HTML 里 BOM 无害（浏览器按 UTF-8 读）
+Set-Content -LiteralPath (Join-Path $WwwDir 'campaign.html') -Value $shim -Encoding utf8
+
+$wwwFiles = @(Get-ChildItem -LiteralPath $WwwDir -Recurse -File -Force)
+$wwwBytes = [long](($wwwFiles | Measure-Object -Property Length -Sum).Sum)
+Write-Host ("  cocos assets\www : {0:N0} 个文件 / {1}" -f $wwwFiles.Count, (Format-Size $wwwBytes))
+$bundleDirs = @('assets', 'cocos-js', 'src', 'subpackages') |
+  Where-Object { Test-Path -LiteralPath (Join-Path $WwwDir $_) }
+Write-Host ("  构建目录   : {0}" -f ($bundleDirs -join ' / '))
+} elseif ($IsMain) {
 Copy-Item -LiteralPath $WebDir  -Destination $WwwDir -Recurse -Force
 Copy-Item -LiteralPath $DataDir -Destination (Join-Path $WwwDir 'data') -Recurse -Force
 Copy-Item -LiteralPath $DistDir -Destination (Join-Path $WwwDir 'dist') -Recurse -Force
@@ -333,7 +378,12 @@ $zip = [System.IO.Compression.ZipFile]::OpenRead($OutApk)
 try {
   $entries = @($zip.Entries)
   Write-Host ("  条目总数     : {0:N0}" -f $entries.Count)
-  $must = if ($IsMain) {
+  $must = if ($IsCocos) {
+    # Cocos 3.8 web-mobile 的入口是 index.html + 带 hash 的 application.<hash>.js / index.<hash>.js，
+    # 名字随构建变化，所以这里只钉「一定存在」的两个，其余交给下面的 cocos-js / bundle 计数断言。
+    @('classes.dex', 'AndroidManifest.xml', 'resources.arsc',
+      'assets/www/index.html', 'assets/www/campaign.html')
+  } elseif ($IsMain) {
     @('classes.dex', 'AndroidManifest.xml', 'resources.arsc',
       'assets/www/index.html', 'assets/www/campaign.html',
       'assets/www/main.js', 'assets/www/audio.js', 'assets/www/release.js',
@@ -373,6 +423,28 @@ try {
 
   $sfxEntries = @($entries | Where-Object { $_.FullName -like 'assets/www/assets/audio/sfx/*' })
   Write-Host ("  sfx 条目     : {0} 个" -f $sfxEntries.Count)
+  } elseif ($IsCocos) {
+  # Cocos 包：构建产物必须都在，且不能混进 web 版的散件（main.js / dist/ / data/meta.json）
+  $webLeak = @($entries | Where-Object {
+      $_.FullName -ceq 'assets/www/main.js' -or $_.FullName -ceq 'assets/www/data/meta.json' -or
+      $_.FullName -like 'assets/www/dist/*' })
+  Write-Host ("  web 散件泄漏 : {0} 个条目（必须是 0）" -f $webLeak.Count)
+  if ($webLeak.Count -ne 0) { throw "Cocos 包里混进 web 版文件：$($webLeak[0].FullName)" }
+  $bundleJs = @($entries | Where-Object { $_.FullName -like 'assets/www/cocos-js/*' })
+  $bundleRes = @($entries | Where-Object { $_.FullName -like 'assets/www/assets/*' })
+  $appJs = @($entries | Where-Object { $_.FullName -like 'assets/www/application.*.js' })
+  $appNames = ($appJs | ForEach-Object { $_.FullName -replace '^assets/www/', '' }) -join ', '
+  Write-Host ("  application.js: {0} 个（带 hash：{1}）" -f $appJs.Count, $appNames)
+  if ($appJs.Count -lt 1) { throw "缺 assets/www/application.<hash>.js" }
+  Write-Host ("  cocos-js     : {0} 个条目" -f $bundleJs.Count)
+  Write-Host ("  bundle 资源  : {0} 个条目 / {1}" -f $bundleRes.Count,
+    (Format-Size ([long](($bundleRes | Measure-Object -Property Length -Sum).Sum))))
+  # 本作这份 web-mobile 构建只有一个 cocos-js/cc.<hash>.js（1.56 MB）+ src/ 六个小文件，
+  # 所以门槛按「有一个 cc.js、bundle 资源够多」来钉，不按目录条目数猜。
+  if ($bundleJs.Count -lt 1) { throw "缺 cocos-js/cc.<hash>.js" }
+  if ($bundleRes.Count -lt 100) { throw "bundle 资源条目不足 100 个：$($bundleRes.Count)" }
+  $shimEntry = $entries | Where-Object { $_.FullName -ceq 'assets/www/campaign.html' } | Select-Object -First 1
+  Write-Host ("  跳转壳页     : {0:N0} B" -f $shimEntry.Length)
   } else {
   # 烟雾包：必须没有游戏素材，且整包 < 1 MB —— 它只是「壳 + 一页探针」
   $leak = @($entries | Where-Object { $_.FullName -like 'assets/www/dist/*' -or $_.FullName -like 'assets/www/assets/*' })

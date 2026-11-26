@@ -16,6 +16,7 @@ dist/
 # apk/ 里只收「壳的源码」（java/res/清单/工具/校验脚本）；assets 是 game/web 的拷贝、
 # build 是中间产物、keystore 是签名私钥（绝不进库）。
 apk/assets/
+apk/cocos/
 apk/build/
 apk/keystore/
 apk/*.log
