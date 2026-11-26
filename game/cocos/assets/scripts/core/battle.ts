@@ -576,6 +576,8 @@ export interface World {
   status: Record<Side, 0 | 2 | 3>;
   /** 哪一侧已经下达撤退令（`world.status[side] === 2` 的镜像，便于 `checkOver` 快速判断） */
   fled: Record<Side, boolean>;
+  /** [R234] 撤退令下达时的 tick（-1 = 没下过）。用来给「走不出场地」兜底收场 */
+  fledTick: Record<Side, number>;
   /**
    * 突击态（全軍突擊，R137）：哪一侧已经下了全军突击令。缺省两侧都是 false。
    *
@@ -1060,6 +1062,7 @@ export function createWorld(opts: CreateOptions): World {
     weather: normalizeWeather(opts.weather ?? (opts.month !== undefined ? weatherOf(opts.month, terrain) : 0)),
     status: { A: 0, B: 0 },
     fled: { A: false, B: false },
+    fledTick: { A: -1, B: -1 },
     // R137 全軍突擊：缺省两侧都没突击，`allRush()` 置位（原作 0x120 的 0x10000 位）
     rush: { A: false, B: false },
     record: { ...EMPTY_RECORD, ...(opts.record ?? {}) },
@@ -2884,6 +2887,7 @@ export function requestRetreat(world: World, side: Side): boolean {
   // R37 十面埋伏：`foeArmy+0x84 |= 4`「敵方無法退兵」→ 撤退令直接不成立（原文如此）
   if ((world.army?.[side]?.flags ?? 0) & ARMY_FLAG.noRetreat) return false;
   world.fled[side] = true;
+  world.fledTick = { ...world.fledTick, [side]: world.tick };
   world.status = { ...world.status, [side]: 2 } as Record<Side, 0 | 2 | 3>;
   // R137：撤退令覆盖突击命令 —— 原作 `0x4447B7` 是「全军转 cmd 8」，即把命令字整支改写，
   // 突击态自然被顶掉；这里同步清掉布尔态，免得 HUD 一边「突击中」一边往后退。
@@ -2992,6 +2996,23 @@ function checkOver(world: World): void {
     return;
   }
   if (world.fled.B && !bLeft) {
+    finish(world, 'A', 'retreat');
+    return;
+  }
+  // R234：撤退令下达后迟迟走不出场地 → 保底收场。
+  //
+  // 原作 `0x43BFE7` 是逐单位退场：走出边界即 `exited`，`checkOver()` 见「该侧没有单位」判负。
+  // 但那要求每个单位都能真的走到边界；地块被友军/地形堵死、或路径逻辑异常时会出现
+  // 「撤退中但永远退不出去」——制作人实测「全军撤退后卡死」就是这个表现（界面上命令全灰、
+  // 提示「全軍撤退」，但战斗既不结束也不响应）。
+  // 原作不存在「永远退不出去」的合法态，所以最多宽限 900 tick（15 秒，够整队走完满场），
+  // 超时即按撤退判负（双方都在撤 → 平手）。
+  const RETREAT_GRACE_TICKS = 900;
+  if (world.fled.A && world.fledTick.A >= 0 && world.tick - world.fledTick.A >= RETREAT_GRACE_TICKS) {
+    finish(world, world.fled.B ? 'draw' : 'B', 'retreat');
+    return;
+  }
+  if (world.fled.B && world.fledTick.B >= 0 && world.tick - world.fledTick.B >= RETREAT_GRACE_TICKS) {
     finish(world, 'A', 'retreat');
     return;
   }
