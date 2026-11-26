@@ -113,3 +113,15 @@ test('[R235] 出征（切 Deploy）不得讓時鐘走表：navLock 要擋 clockR
   const endAt = seg2.indexOf('this.endInterior()');
   assert.ok(guardAt > 0 && endAt > guardAt, 'onClose 要在 endInterior 之前早退');
 });
+
+test('[R236] 出征不得收束內政窗口（否則一按出征其餘武將就不能做內政）', () => {
+  const cp = readFileSync(join(process.cwd(), 'cocos/assets/scripts/CityPanel.ts'), 'utf8');
+  const at = cp.indexOf('private deployTo(');
+  assert.ok(at > 0, '找不到 deployTo');
+  // 取 deployTo 到 cmdAutoSheet 之間
+  const end = cp.indexOf('private cmdAutoSheet', at);
+  const seg = cp.slice(at, end > at ? end : at + 800);
+  assert.equal(seg.includes('M.markMonthActed('), false, 'deployTo 不得再呼叫 markMonthActed（會鎖死整個內政窗口）');
+  assert.ok(seg.includes('this.persist()'), '仍要把選定目標/存檔寫回');
+  assert.ok(seg.includes('onDeploy(target)'), '仍要交給 CampaignRoot 走 march');
+});

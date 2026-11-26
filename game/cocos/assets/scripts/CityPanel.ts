@@ -1821,12 +1821,12 @@ export class CityPanel extends Component {
       this.refresh();
       return;
     }
-    // [P0-4] 出征收束本月內政窗口（web `city.html:1217-1218`：`markMonthActed` 後跳 deployUrl）。
+    // [R236] 出征**不佔內政窗口**：原作「出征」是大地圖指令、內政是另一套場景，
+    // 兩者不互相吃額度；而我們把出征放在城內頁，若照 web 舊口徑 `markMonthActed()` 收束整個窗口，
+    // 玩家一按出征，其餘武將就再也不能搜索/開發（製作人實測：「出征后内政就无法进行了」）。
+    // 出發的將自然變成「在途」（`awayNameSet`），已無法再做內政，不需要再鎖窗口。
     const save = this.save;
-    if (save) {
-      M.markMonthActed(save, false);
-      this.persist();
-    }
+    if (save) this.persist();
     // 交給 CampaignRoot 走既有 `doAction('march')`（敵情/出發城都在那裡定）
     onDeploy(target);
   }
