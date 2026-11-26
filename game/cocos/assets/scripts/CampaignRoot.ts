@@ -1661,6 +1661,9 @@ export class CampaignRoot extends Component {
   /** 對峙偵測用（web `stationNoticed`，campaign.html:4402）：同一對部隊只記一次，之後才結算 */
   private stationNoticed = new Set<string>();
 
+  /** [R225b] 逐幀行軍：已提示過的抵達部隊（避免每幀重複寫提示條） */
+  private readonly arrivedNoticed = new Set<string>();
+
   onLoad(): void {
     // 底图先建，siblingIndex 0/1/2 → 永远在 Graphics 和 Label 之下（不用改别人的节点顺序）
     this.buildArt();
@@ -2596,6 +2599,9 @@ export class CampaignRoot extends Component {
     if (!this.save || n <= 0) return;
     const before = this.clockT;
     this.clockT = Math.max(0, this.clockT - n);
+    // [R225b] 原作兵團是「每幀推進」（0x41AFAB），不是按月跳；先走行軍再處理月邊界。
+    this.stepArmiesFrame(n);
+    if (this.clockPaused) { this.clockT = Math.max(0, this.clockT); return; }
     const monthBefore = Math.floor((3600 - before) / 300);
     const monthAfter = Math.floor((3600 - this.clockT) / 300);
     for (let m = monthBefore + 1; m <= monthAfter; m += 1) {
@@ -2613,20 +2619,10 @@ export class CampaignRoot extends Component {
     if (!this.save) return false;
     const from = this.save.month;
     const income = GameState.advanceMonth(this.cities, { data: this.data });
-    const moved = this.advanceArmiesMonth();
-    if (moved.battle) {
-      this.save = GameState.loadSave();
-      if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
-      this.clockPaused = true;
-      this.hintText = this.clampHint('遭 遇 戰：已進入戰場（戰鬥結算後回到大地圖）。', 160);
-      this.refresh();
-      return false;
-    }
     const ai = this.runMapAi();
     if (!ai) this.spawnRaid();
     this.save = GameState.loadSave();
     this.recordAiBattleLog(ai);
-    if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
     const arriving = this.save.owned
       .map((city) => GameState.arrivedAt(city, 'B').map((army) => ({ army, city })))
       .reduce((acc, list) => acc.concat(list), [] as Array<{ army: Army; city: string }>);
@@ -4187,21 +4183,20 @@ export class CampaignRoot extends Component {
    *      （campaign.html:4390：兵多者勝率 clamp(0.15,0.85)、勝方留一半兵力）——**僅調試用，
    *      正式版必須真打**。
    */
-  private advanceArmiesMonth(): {
+  private advanceArmies(stepFor: (army: CampaignArmy) => number): {
     still: CampaignArmy[];
     arrived: CampaignArmy[];
     logs: BattleLogLine[];
     notes: string[];
-    /** 本幀是否已發起遭遇戰（true → `endInterior()` 必須立刻收手，場景馬上切到 Battle） */
+    /** 本幀是否已發起遭遇戰（true → 呼叫端必須立刻收手，場景馬上切到 Battle） */
     battle: boolean;
   } {
-    const scenario = this.scenarioLike();
     const logs: BattleLogLine[] = [];
     const notes: string[] = [];
     const month = this.save?.month ?? 1;
     let battleStarted = false;
     const armies = GameState.armies();
-    const moves = planArmyMoves(armies, (army) => armyStep(scenario, army.pathIndex));
+    const moves = planArmyMoves(armies, stepFor);
     // 只寫回 progress，不重排順序（`applyArmyProgress` 保證 id 對得上，錯開的九宮格不會抖）
     GameState.applyArmyProgress(moves.map((move) => ({ id: move.a.id, progress: move.next })));
     let blockedCount = 0;
@@ -4276,6 +4271,56 @@ export class CampaignRoot extends Component {
    * 出發城的主將名：存檔運行時的 `cities[城].major` 優先 → 劇本表（**本局**劇本號）→ `''`。
    * 舊碼是 `garrisonOf(this.data, 0, city)`：劇本號恆 0，換劇本/換勢力後會取錯太守。
    */
+  /**
+   * [R225b] 每幀行軍：原作兵團每幀推進
+   * （`0x41AFAB`：`+0x9A` 倒數 → 到 0 推一格 → 重裝 `4980/[+0x82]` tick；`+0x9E`=2 行軍中）。
+   * 這裡把「整段路 marchMonths 個月（300 tick/月）」攤到每 tick，progress 連續增長；
+   * 抵達 / 被駐紮敵軍封鎖 / 對峙 / 遭遇戰仍沿用 `planArmyMoves()` 的規則。
+   */
+  private stepArmiesFrame(n: number): void {
+    if (!this.save || n <= 0) return;
+    const scenario = this.scenarioLike();
+    const res = this.advanceArmies((army) => {
+      const step = armyStep(scenario, army.pathIndex);
+      const months = Math.max(1, Math.round(1 / Math.max(1e-6, step)));
+      return n / (months * 300);
+    });
+    if (res.logs.length > 0) this.pushBattleLog(res.logs);
+    if (res.battle) {
+      this.save = GameState.loadSave();
+      this.clockPaused = true;
+      this.hintText = this.clampHint('遭 遇 戰：已進入戰場（戰鬥結算後回到大地圖）。', 160);
+      this.refresh();
+      return;
+    }
+    let arrivedNew: CampaignArmy | null = null;
+    for (const army of res.arrived) {
+      if (army.side !== 'A' || this.arrivedNoticed.has(army.id)) continue;
+      this.arrivedNoticed.add(army.id);
+      arrivedNew = army;
+    }
+    if (arrivedNew) {
+      const target = armyAtCity(arrivedNew);
+      this.hintText = this.clampHint(
+        target ? `部隊已到 ${target} 城下：點該城 →「攻 城 戰」。` : '部隊已抵達目的地。',
+        160,
+      );
+      this.refresh();
+    }
+  }
+
+  /** 舊入口（測試與對照用）：按月推進一步。正式流程已改成逐幀，見 `stepArmiesFrame()`。 */
+  private advanceArmiesMonth(): {
+    still: CampaignArmy[];
+    arrived: CampaignArmy[];
+    logs: BattleLogLine[];
+    notes: string[];
+    battle: boolean;
+  } {
+    const scenario = this.scenarioLike();
+    return this.advanceArmies((army) => armyStep(scenario, army.pathIndex));
+  }
+
   private leaderOf(city: string): string {
     const major = O.cityMajorNameOf(this.save, city, this.rosterCtx());
     if (major) return major;

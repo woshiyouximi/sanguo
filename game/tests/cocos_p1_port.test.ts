@@ -137,9 +137,12 @@ test('[F4][R225] 時間由 update(dt) 的原作時鐘推進（endInterior 只重
   assert.ok(tickStart > 0, '缺 monthTick()');
   const tick = src.slice(tickStart, src.indexOf('private enterInterior', tickStart));
   const a = tick.indexOf('GameState.advanceMonth(this.cities');
-  const b = tick.indexOf('this.advanceArmiesMonth()');
-  const c = tick.indexOf('this.runMapAi()');
-  assert.ok(a > 0 && b > a && c > b, 'monthTick() 的順序必須是 advanceMonth → advanceArmiesMonth → runMapAi');
+  const b = tick.indexOf('this.runMapAi()');
+  assert.ok(a > 0 && b > a, 'monthTick() 的順序必須是 advanceMonth → runMapAi（行軍已移到 stepArmiesFrame）');
+  // [R225b] 行軍改成逐幀：stepClock 每 tick 先 stepArmiesFrame(n)，monthTick 只做經濟/AI
+  assert.match(src, /const step = armyStep\(scenario, army\.pathIndex\);/);
+  assert.match(src, /private stepArmiesFrame\(n: number\): void \{/);
+  assert.match(src, /months \* 300/);
   // 原作常量：一年 3600 tick（0x41B849）
   assert.match(src, /private clockT = 3600;/);
   // T==0 → 進內政（原作 0x41B6CF）

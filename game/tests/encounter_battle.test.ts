@@ -56,7 +56,8 @@ function fnBody(src: string, name: string): string {
   return '';
 }
 
-const ADVANCE = fnBody(COCOS, 'advanceArmiesMonth');
+const ADVANCE = fnBody(COCOS, 'advanceArmies');
+const FRAME = fnBody(COCOS, 'stepArmiesFrame');
 const START_BATTLE = fnBody(COCOS, 'startEncounterBattle');
 const APPLY = fnBody(COCOS, 'applyPendingEncounter');
 const MONTH_TICK = fnBody(COCOS, 'monthTick');
@@ -73,7 +74,7 @@ test('源码契约：純邏輯區 [[ENCOUNTER_CORE]] 存在，且 AUTO_ENCOUNTER
 });
 
 test('源码契约：遭遇分支走 startEncounterBattle（進 Battle），Math.random 只剩調試兜底', () => {
-  assert.ok(ADVANCE, '找不到 advanceArmiesMonth()');
+  assert.ok(ADVANCE, '找不到 advanceArmies()');
   // ① 遭遇分支必須有真打入口
   assert.ok(ADVANCE.includes('startEncounterBattle(a, b)'), '對峙分支沒有調 startEncounterBattle(a, b)');
   // 真打入口在 Math.random 之前（先嚐試真打，只有 debugDice 才落到舊擲骰）
@@ -85,7 +86,7 @@ test('源码契约：遭遇分支走 startEncounterBattle（進 Battle），Math
   assert.ok(ADVANCE.includes('autoEncounterOn('), '舊擲骰前沒有 autoEncounterOn(...) 開關判斷');
   assert.ok(/debugDice/.test(ADVANCE), '舊擲骰兜底沒有 debugDice 分支');
   // 返回「本幀是否已發起戰鬥」，供 endInterior 早退
-  assert.match(ADVANCE, /battle:\s*battleStarted/, 'advanceArmiesMonth() 回傳值缺少 battle 標記');
+  assert.match(ADVANCE, /battle:\s*battleStarted/, 'advanceArmies() 回傳值缺少 battle 標記');
 });
 
 test('源码契约：戰鬥入口用 GameState.startBattle(BattleLaunch)，不再只擲骰', () => {
@@ -116,13 +117,19 @@ test('源码契约：戰後回寫函數存在（寫 lastBattle + 復原勝方部
   assert.ok(atApply < atFlow, 'applyPendingEncounter() 必須排在 resolveCaptureFlow() 之前（先寫 lastBattle）');
 });
 
-test('源码契约：monthTick() 遇戰立刻收手（不繼續跑剩餘月份/AI）', () => {
+test('源码契约：[R225b] 行軍逐幀推進，遇戰由 stepArmiesFrame() 立刻收手', () => {
+  // 行軍已從 monthTick 移到每 tick 的 stepArmiesFrame（原作 0x41AFAB 逐幀）
   assert.ok(MONTH_TICK, '找不到 monthTick()');
-  assert.ok(MONTH_TICK.includes('moved.battle'), 'monthTick() 沒檢查 moved.battle');
-  const atCheck = MONTH_TICK.indexOf('moved.battle');
-  const atAi = MONTH_TICK.indexOf('this.runMapAi()');
-  assert.ok(atCheck >= 0 && atAi >= 0, 'monthTick() 找不到 moved.battle 或 runMapAi');
-  assert.ok(atCheck < atAi, 'moved.battle 早退必須排在 runMapAi() 之前');
+  assert.ok(!MONTH_TICK.includes('advanceArmies('), 'monthTick() 不應再推行軍（已移到 stepArmiesFrame）');
+  assert.ok(FRAME, '找不到 stepArmiesFrame()');
+  assert.ok(FRAME.includes('this.advanceArmies('), 'stepArmiesFrame() 沒推行軍');
+  const atBattle = FRAME.indexOf('res.battle');
+  const atRefresh = FRAME.indexOf('this.refresh()', atBattle);
+  assert.ok(atBattle >= 0, 'stepArmiesFrame() 沒檢查 res.battle');
+  assert.ok(atRefresh > atBattle, 'stepArmiesFrame() 遇戰必須先收手再刷新');
+  assert.ok(FRAME.includes('this.clockPaused = true'), 'stepArmiesFrame() 遇戰要暫停時鐘');
+  // 逐幀步長：一整段 marchMonths 個月（300 tick/月）攤到每 tick
+  assert.match(FRAME, /months \* 300/, 'stepArmiesFrame() 步長沒按 300 tick/月 折算');
 });
 
 /** 抽出純邏輯區並剝掉型別後真跑（Node >=22.6 的型別剝離；這裡不 import cc） */
