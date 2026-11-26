@@ -2432,6 +2432,23 @@ export class CampaignRoot extends Component {
   }
 
   /**
+   * 某城的「带兵武将名」：先取运行时人事（在城、未被俘），再退剧本守将/太守。
+   * AiRunner 的候选只带兵、不带将名，这里补上——AI 来犯时不再统一显示「來犯之將」。
+   */
+  private cityGeneralName(name: string): string {
+    const save = this.save;
+    try {
+      const runtime = O.officersOfCity(save, name, this.rosterCtx());
+      if (runtime[0]?.name) return runtime[0].name;
+    } catch (err) {
+      console.warn('[CampaignRoot] cityGeneralName 失敗', err);
+    }
+    if (!this.data) return '';
+    const table = garrisonOf(this.data as unknown as GarrisonData, this.scenIdx, name);
+    return table?.officers?.[0]?.name ?? table?.major ?? '';
+  }
+
+  /**
    * 年稅預覽（正月結算）。
    *
    * web 真源：`campaign.html:5437-5448` `advanceMonth()` 內的年稅：
@@ -2834,8 +2851,9 @@ export class CampaignRoot extends Component {
     for (const row of out.incoming) {
       const pathIndex = pathBetween(this.scenarioLike(), row.from, row.to);
       if (pathIndex === null) continue;
-      // 有将带兵就用将名，没有就占位（与 spawnRaid 同口径）
-      const general = row.cand?.generals?.[0] ?? '來犯之將';
+      // 有将带兵就用将名；AiRunner 的 cand.generals 目前不填，所以从出发城的运行时人事里取，
+      // 再退到太守/势力名——不再一律显示「來犯之將」
+      const general = row.cand?.generals?.[0] || this.cityGeneralName(row.from) || `${row.force || '敵軍'}將`;
       const army: Army = {
         id: GameState.nextArmyId('B'),
         side: 'B',
@@ -2874,7 +2892,7 @@ export class CampaignRoot extends Component {
         pathIndex,
         progress: 0,
         troops: Math.max(20, Math.min(100, Math.round(candidate.troops * 0.6))),
-        general: intel?.name ?? '來犯之將',
+        general: intel?.name || this.cityGeneralName(candidate.from) || '敵軍將',
       };
       // 隨軍武將：web `spawnAiArmy()`（campaign.html:4255）也帶 officers（但不任命軍師）
       const officers = this.armyRosterFor(candidate.from, army.general ?? '');
