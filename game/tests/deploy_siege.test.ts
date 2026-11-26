@@ -162,16 +162,13 @@ test('[R231] 按「出 戰」走 fight()：直接 startBattle 並帶 armyId，�
   assert.ok(FIGHT.includes('cols: this.deployCols()'), '仍要帶前/中/後站位');
 });
 
-test('[R231] 「返回大地圖」=放棄攻城：退款回出發城 + 清快照 + 不產生新兵團', () => {
-  assert.ok(ABANDON.length > 100, '找不到 abandonSiege()');
-  assert.ok(ABANDON.includes('GameState.refundSiegeTroops(siege.from, siege.troops)'), '兵要退回出發城（web refundArmy 口徑）');
-  assert.ok(ABANDON.includes('GameState.clearDeploySiege()'), '清攻城快照');
-  assert.ok(ABANDON.includes("director.loadScene('Campaign')"), '回大地圖');
-  assert.ok(!ABANDON.includes('dispatchMarch(') && !ABANDON.includes('setDeployMarch('), '返回不能產生新兵團');
-  const back = DR.slice(DR.indexOf("if (button.kind === 'back') {"), DR.indexOf("if (button.kind === 'go') {"));
-  assert.ok(back.includes('if (this.siege)'), '返回按鈕要判攻城模式');
-  assert.ok(back.includes('this.abandonSiege();'), '攻城模式的返回走放棄攻城');
-  assert.ok(DR.includes("const action = this.siege ? '出 戰' : '出 征';"), '按鈕文案：攻城模式是「出 戰」不是「出 征」');
+test('[R231/R234b] 「返回大地圖」=放棄攻城：改派返程兵團回出發城（不再立刻退款）', () => {
+  const fn = bodyOf(DR, 'private abandonSiege');
+  assert.ok(fn.length > 0, '找不到 abandonSiege');
+  assert.ok(/pushReturnArmy\(\s*siege\.target\s*,\s*siege\.from/.test(fn), '要用 siege.target→siege.from 派返程兵團');
+  assert.ok(fn.includes('clearDeploySiege()'), '要清攻城快照');
+  assert.equal(fn.includes('refundSiegeTroops'), false, '不得再退款回城（會讓將立刻又能編去打別城）');
+  assert.ok(fn.includes("loadScene('Campaign')"), '回到大地圖');
 });
 
 test('[R231] 攻城模式標題/標籤與派兵模式分開（不再顯示「出征編成」）', () => {
@@ -180,4 +177,33 @@ test('[R231] 攻城模式標題/標籤與派兵模式分開（不再顯示「出
   const refresh = bodyOf(DR, 'private refresh(): void');
   assert.ok(refresh.includes('if (this.siege)'), 'labelTarget 要有攻城分支');
   assert.ok(refresh.includes('抵達'), '要寫明這支兵團是抵達城下的部隊');
+});
+
+test('R232c 編成候選池的在途集合包含攻城快照（不能只看 GameState.armies）', () => {
+  assert.ok(
+    DR.includes('const away = O.awayNameSet(save)'),
+    'DeployRoot 的 away 必須走 O.awayNameSet(save)（save.away ∪ armies ∪ siege）',
+  );
+  assert.equal(
+    DR.includes('for (const army of GameState.armies())'),
+    false,
+    '舊寫法（只看 armies）不得回來：抵達城下的兵團已 removeArmy，只在 save.siege 裡',
+  );
+  assert.ok(DR.includes('save.siege'), '註解要寫明 save.siege 這個來源');
+  assert.ok(DR.includes('removeArmy'), '註解要寫明 removeArmy 造成的因果');
+});
+
+test('R234b 放棄攻城改派返程兵團（不再立刻退款回城）', () => {
+  const gs = READ('cocos/assets/scripts/GameState.ts');
+  assert.ok(gs.includes('export function pushReturnArmy'), 'GameState 要有 pushReturnArmy');
+  // 返程兵團不能扣出發城的兵（那是 dispatchMarch 的語義）
+  const fn = bodyOf(gs, 'export function pushReturnArmy');
+  assert.ok(fn.includes('addArmy(army)'), '要 push 進 save.armies');
+  assert.equal(fn.includes('state.troops ='), false, '返程不得改出發城兵（那是派兵語義）');
+  assert.equal(fn.includes('deployMarch'), false, '返程不看 deployMarch 快照');
+
+  const fn2 = bodyOf(DR, 'private abandonSiege');
+  assert.ok(fn2.includes('pushReturnArmy'), 'abandonSiege 要改成派返程兵團');
+  assert.equal(fn2.includes('refundSiegeTroops'), false, '不得再立刻退款回城（會讓將馬上又能編去打別城）');
+  assert.ok(fn2.includes('clearDeploySiege'), '仍要清快照（避免戰前準備殘留）');
 });

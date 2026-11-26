@@ -1181,6 +1181,38 @@ export function dispatchMarch(general: string, officers: string[], troops: numbe
 }
 
 /**
+ * R234b：放棄攻城時，把「已在城下」的部隊編成一支**返程兵團**走回出發城
+ * （到城由 `stepArmiesFrame()` 的自家城分支 `enterCityWithArmy()` 自動併入守軍）。
+ *
+ * 為什麼不用 `dispatchMarch()`：那是「從城裡派兵」——會在出發城扣兵；
+ * 而這裡部隊本來就在外（抵達時已被 `removeArmy()` 抽出，只存在 `save.siege` 快照裡）。
+ *
+ * 為什麼不直接退兵回城：使用者實測「打 A 城點返回大地圖後，這些將立刻又能編去打 B」——
+ * 因為當時是立刻退款回城。改成返程兵團後，這批將在回程途中仍算「在途」（`awayNameSet`），
+ * 不會出現在其它城的編成候選池裡。
+ */
+export function pushReturnArmy(from: string, to: string, general: string, officers: string[], troops: number): boolean {
+  const save = loadSave();
+  if (!from || !to) return false;
+  const army: CampaignArmy = {
+    id: nextArmyId('A'),
+    side: 'A',
+    from,
+    to,
+    pathIndex: 0,
+    progress: 0,
+    troops: Math.max(0, Math.round(numberOr(troops, 0))),
+    general: general || undefined,
+    officers: (Array.isArray(officers) ? officers : []).filter((name) => !!name).slice(0, 4),
+    advisor: '',
+    stationed: false,
+  };
+  addArmy(army);
+  persistSave();
+  return true;
+}
+
+/**
  * 讀裝備加成用的兩份 localStorage 資料（F-05）：
  *   - `sanguo_equip_items_v1`：物品表快照（`ItemsPanel.open()` 寫入的 `data/items` 列）；
  *   - `sanguo_items_v1`：物品存檔 `{equip:{名:{槽:Sequence}}, bag}`（裝備的權威來源）。

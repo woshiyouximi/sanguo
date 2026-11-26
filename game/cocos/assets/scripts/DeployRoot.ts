@@ -603,12 +603,10 @@ export class DeployRoot extends Component {
       const anyGeneral = rows.filter((gen) => gen.NAME !== '盜賊');
       const major = this.majorOf(data, save, ctx);
       // 在外部隊的武將不再進候選（原作：出征的武將不在出發城守城；空城是被允許的）
-      const away = new Set<string>();
-      for (const army of GameState.armies()) {
-        if (army.side !== 'A') continue;
-        if (army.general) away.add(army.general);
-        for (const name of army.officers ?? []) away.add(name);
-      }
+      // R232c：不能只看 `GameState.armies()`——抵達城下的兵團已被 `removeArmy()` 移出 `save.armies`，
+      // 只留在 `save.siege` 快照裡；只看 armies 會讓「派往 A 的將」在攻打 B 時重新出現在候選池
+      // （使用者實測：第二支隊伍編成界面出現第一支的武將）。統一走 `O.awayNameSet()`（save.away ∪ armies ∪ siege）。
+      const away = O.awayNameSet(save);
       const pool = (homeRows.length > 0 ? homeRows : anyGeneral)
         .filter((gen) => !away.has(gen.NAME))
         .slice()
@@ -2170,7 +2168,11 @@ export class DeployRoot extends Component {
     GameState.clearDeploySiege();
     GameState.clearDeployMarch();
     this.siege = null;
-    if (siege?.from) GameState.refundSiegeTroops(siege.from, siege.troops);
+    // R234b：不再立刻退款回城（那會讓這批將馬上又能編去打別城），改派一支返程兵團；
+    // 部隊與將在回程途中仍算在途，到城才併入守軍。
+    if (siege?.from && siege.target) {
+      GameState.pushReturnArmy(siege.target, siege.from, siege.general ?? '', siege.officers ?? [], siege.troops ?? 0);
+    }
     director.loadScene('Campaign');
   }
 
