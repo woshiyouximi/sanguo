@@ -1121,6 +1121,13 @@ export class BattleRoot extends Component {
       'GeneralStats',
       'HpValue',
       'MpValue',
+      // 顶栏已经有双方兵力条与體/氣条：底卡不再重复「兵/體/技」三行数字
+      'CardTroopA',
+      'CardHpA',
+      'CardSkillA',
+      'CardTroopB',
+      'CardHpB',
+      'CardSkillB',
       'CmdBtnAssault',
       'CmdBtnRetreat',
       'CmdLabelAssault',
