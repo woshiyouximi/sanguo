@@ -310,11 +310,41 @@ let preloaded: { bin: ArrayBuffer | Uint8Array; symbols: SoSymbols } | undefined
  * （`game/web/main.js` 里已接），否则 `cast()` 会抛"尚未加载"。
  * 之所以不做成同步 XHR：微信小游戏环境不支持，而且会阻塞首帧。
  */
+/**
+ * `DATA_URL` 在 web 是 `URL`、在 Cocos 镜像里是字符串；统一拼成字符串。
+ *
+ * 为什么不用 `new URL(name, DATA_URL)`：Cocos native 的 `URL` 是 jsb-adapter 的垫片，
+ * 构造时用 `document.createElementNS('a')` 取 `protocol`，native 没有真锚点 ⇒
+ * `Cannot read properties of undefined (reading 'toLowerCase')`（R224 P0-2）。
+ */
+function dataUrl(name: string): string {
+    const base = String(DATA_URL);
+    return base.endsWith('/') ? base + name : `${base}/${name}`;
+}
+/**
+ * 把相对 `base` 解析成绝对地址。
+ *
+ * 优先用真 `URL`（web 的 `../data/` 要靠它）；native 的 URL 垫片会抛，退回字符串拼接
+ * ——native 侧这个地址只会喂给 `fetch` 垫片，垫片按后缀匹配、根本不看前缀。
+ */
+function resolveBase(base: string): string {
+    const href = typeof location !== 'undefined' ? String(location.href) : '';
+    try {
+        if (typeof URL === 'function')
+            return new URL(base, href).toString();
+    }
+    catch {
+        // native：URL 垫片不可用，走下面的手拼
+    }
+    const dir = href.replace(/[?#].*$/, '').replace(/[^/]*$/, '');
+    return dir + base;
+}
 export async function initMagicProgram(base = 'data/'): Promise<void> {
     if (cachedProgram || preloaded)
         return;
-    const binUrl = new URL('magic_so.bin', new URL(base, location.href)).toString();
-    const symUrl = new URL('magic_so.symbols.json', new URL(base, location.href)).toString();
+    const root = resolveBase(base);
+    const binUrl = (root.endsWith('/') ? root : `${root}/`) + 'magic_so.bin';
+    const symUrl = (root.endsWith('/') ? root : `${root}/`) + 'magic_so.symbols.json';
     const [binRes, symRes] = await Promise.all([fetch(binUrl), fetch(symUrl)]);
     if (!binRes.ok || !symRes.ok)
         throw new Error(`magic_so 加载失败: ${binRes.status}/${symRes.status}`);
@@ -329,6 +359,16 @@ export async function initMagicProgram(base = 'data/'): Promise<void> {
  */
 export function setMagicProgram(program: SoProgram | undefined): void {
     cachedProgram = program;
+}
+/**
+ * 直接塞原始字节（Cocos 原生/小游戏用）。
+ *
+ * native 里 `fetch` 是垫片、`URL` 是垫片，走 `initMagicProgram()` 会连环踩坑；垫片那边
+ * 已经能从 `res` bundle 读到 `magic_so.{bin,symbols}`，直接交给这里最稳。
+ */
+export function primeMagicProgram(bin: ArrayBuffer | Uint8Array, symbols: SoSymbols): void {
+    preloaded = { bin, symbols };
+    cachedProgram = undefined;
 }
 /** 读取 `game/data/magic_so.{bin,symbols.json}`（进程内缓存）。 */
 export function loadMagicProgram(): SoProgram {
@@ -352,11 +392,11 @@ export function loadMagicProgram(): SoProgram {
                 throw new Error(`magic_so 加载失败: ${u} (${xhr.status})`);
             return xhr.responseText;
         };
-        const binText = getText(new URL('magic_so.bin', DATA_URL).toString());
+        const binText = getText(dataUrl('magic_so.bin'));
         const bytes = new Uint8Array(binText.length);
         for (let i = 0; i < binText.length; i++)
             bytes[i] = binText.charCodeAt(i) & 0xff;
-        const sym = JSON.parse(getText(new URL('magic_so.symbols.json', DATA_URL).toString()));
+        const sym = JSON.parse(getText(dataUrl('magic_so.symbols.json')));
         cachedProgram = SoProgram.fromJson(bytes, sym);
         return cachedProgram;
     }

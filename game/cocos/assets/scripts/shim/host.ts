@@ -20,7 +20,7 @@
  */
 import { Asset, BufferAsset, JsonAsset } from 'cc';
 import { getResBundle } from '../DataLoader';
-import { initMagicProgram } from '../core/smartscript/runtime';
+import { primeMagicProgram } from '../core/smartscript/runtime';
 
 /** 假 origin：只在没有真 `location`（微信小游戏 / 原生）时用。 */
 const FAKE_ORIGIN = 'https://cocos.local/';
@@ -113,7 +113,9 @@ export function installHostShim(): void {
 export async function preloadMagicProgram(): Promise<boolean> {
   installHostShim();
   try {
-    await initMagicProgram('data/');
+    const bin = await loadBundleAsset('data/magic_so', BufferAsset);
+    const sym = await loadBundleAsset('data/magic_so.symbols', JsonAsset);
+    primeMagicProgram(bin.buffer(), sym.json as unknown as Parameters<typeof primeMagicProgram>[1]);
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

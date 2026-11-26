@@ -41,6 +41,7 @@ import {
   Vec3,
 } from 'cc';
 import { addOutline, addVeil, ArtBg, ArtSprite, loadFrame } from './ArtLayer';
+import { latchTap } from './InputLatch';
 import { isGate } from './CityModel';
 import { loadGameData } from './DataLoader';
 // 漸層近似（w5-render）：Cocos 沒有 CSS gradient，用多段色帶逼近
@@ -1812,10 +1813,12 @@ export class DeployRoot extends Component {
     for (const button of this.buttons) {
       if (x < button.x || x > button.x + button.w || y < button.y || y > button.y + button.h) continue;
       if (button.kind === 'back') {
+        latchTap();
         director.loadScene('Campaign');
         return;
       }
       if (button.kind === 'go') {
+        latchTap();
         this.persistQueue();
         this.march();
         return;

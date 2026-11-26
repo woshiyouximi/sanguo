@@ -32,6 +32,7 @@ import { addOutline, addVeil, ArtBg, loadFrame } from './ArtLayer';
 // 漸層近似（w5-render）：Cocos 沒有 CSS gradient，用多段色帶逼近
 import { Band, doubleEdge, edgeBands, hBands, innerEdge, lightGrid, topSheen, vBands, WARM, wash } from './Draw';
 import { CityPanel, CITY_EXTRAS_KEY } from './CityPanel';
+import { latchTap, tapLatched } from './InputLatch';
 import { loadGameData } from './DataLoader';
 import { resolveEnemyIntel } from './EnemyIntel';
 import type { EnemyIntel } from './EnemyIntel';
@@ -3405,6 +3406,9 @@ export class CampaignRoot extends Component {
   // -------------------------------------------------------------------------
 
   private onTouch(event: EventTouch): void {
+    // 【r224 P0-1】同一幀的點擊已經被別的场景（出征编成頁）認領，大地圖不再處理：
+    // 否則「出征」那一擊會順帶打到「內政終了」，把剛開的局推過一年，並在換月鏈路裡炸掉輸入。
+    if (tapLatched()) return;
     // 【r224】全屏暗幕（城池一覽/勢力圖/存檔位/名冊）開著時，大地圖不吃任何點擊。
     // 暗幕不再掛 BlockInputEvents（那會讓全局 input 完全收不到事件，見 showSheetScrim），
     // 穿透改由這裡擋；暗幕節點只在面板開著時存在。

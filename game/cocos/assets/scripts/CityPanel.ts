@@ -677,7 +677,9 @@ export class CityPanel extends Component {
     this.applyHall();
     this.registerTouch();
 
-    this.bag = M.parseItemsSave(this.readBagRaw()).bag;
+    const parsedBag = M.parseItemsSave(this.readBagRaw()).bag;
+    // 空背包的存档会解析出 null / undefined（R224 P0-1 崩溃点之一），统一收敛成空数组
+    this.bag = Array.isArray(parsedBag) ? parsedBag : [];
     this.ctx = {
       generals: (options.data.generals ?? []) as unknown as M.CityGeneral[],
       items: (options.data.items ?? []) as unknown as M.CityItem[],
@@ -851,7 +853,7 @@ export class CityPanel extends Component {
       auto: isRecord(extras.auto) ? (extras.auto as Record<string, number>) : {},
       autoMonth: M.intOr(extras.autoMonth, 0, 0),
       lastActionMonth: M.intOr(extras.lastActionMonth, 0, 0),
-      bag: this.bag.slice(),
+      bag: Array.isArray(this.bag) ? this.bag.slice() : [],
     };
     M.ensureExtras(save);
     // [F3] 依當前行軍部隊重算 away（出征 / 回城 / 退兵都反映在同一個 save.armies 上）
