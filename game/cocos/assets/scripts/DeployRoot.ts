@@ -2,8 +2,12 @@
  * 出征编成屏（Cocos Creator 3.8）。
  *
  * 对齐 `game/web/deploy.html`：
- *   - 主将候选按「出發城（web 的 `?from`）→ city_by_times[0] / status_by_times[0]」过滤，
- *     太守优先、再按武+智降序，取前 12；
+ *   - 主将候选人 = **出發城**（web 的 `?from` / `takeDeployFrom()`）的存檔運行時人事
+ *     （`OfficersOfCity.officersOfCity(save, home, …)`，与物品页/内政页同一个唯一入口；
+ *     存檔還沒人事紀錄才退回劇本表 `city_by_times`），太守优先、再按武+智降序，取前 12；
+ *   - 敌方（目標城）的守將/守軍/敵情才從目標城算：`cityGarrisonTroops` / `resolveEnemyIntel`
+ *     / `takeDeployEnemy()`——「出發城」與「目標城」不能混用（實機回報：從平原打樂陵，
+ *     主將卡卻顯示守方黃巾的張角那一列）；
  *   - 兵种/阵形按该将的 `UseForce` / `BattleArray` 做白名单：**没学的格子置灰「未學」且点不到**；
  *   - 军师技一栏取 `listWisdomChoices()`（等级默认 20，同 web 的 `qs.lv || 20`），
  *     选中值随 loadout 传下去，进战斗后由 `applyWise(world,'A',seq)` 生效；
@@ -43,6 +47,7 @@ import { loadGameData } from './DataLoader';
 import { Band, edgeBands, gridWeave, lightGrid, topSheen, vBands } from './Draw';
 import { cityGarrisonTroops, resolveEnemyIntel } from './EnemyIntel';
 import type { EnemyIntel } from './EnemyIntel';
+import { garrisonOf } from './core/garrison';
 import type { GarrisonData } from './core/garrison';
 // F-07 站位型別：直接吃 core 的 `GeneralCol`（'front'|'mid'|'back'），不複製第二份聯合型別
 import type { GeneralCol } from './core/battle';
@@ -67,6 +72,9 @@ import {
 } from './core/deploy_queue';
 import type { DeployQueue, DeployQueueSave } from './core/deploy_queue';
 import { listWisdomChoices, WISE_UNIMPLEMENTED, wiseHintOf } from './core/wises';
+// [Bug A] 城市駐將的唯一入口（純邏輯、零 cc 依賴）：出發城名單要走**存檔運行時人事**，
+// 不是 generals.json 的靜態 `CITY`（那張是第 1 劇本快照，黃巾之亂的張角會被當成平原守將）。
+import * as O from './OfficersOfCity';
 import * as GameState from './GameState';
 import type { BattleLoadout, CampaignCity, CampaignGeneral, CampaignScenario } from './GameState';
 import type { GameData } from './types';
@@ -77,7 +85,7 @@ import { makeNineSlice, placeDesign } from './UiSkin';
 import { scenarioLevelOf } from './ScenarioLevels';
 // [P0-2] 劇本號的執行期來源：與 `CampaignRoot.start()` 的 `runScenarioIndex()` 同一份 RunSetup
 // （ScenarioLevels 也在用它；本頁不再恆取第 1 劇本）
-import { scenarioIndex as runScenarioIndex } from './RunSetup';
+import { playerForce as runPlayerForce, scenarioIndex as runScenarioIndex } from './RunSetup';
 
 const { ccclass, property } = _decorator;
 
@@ -509,18 +517,49 @@ export class DeployRoot extends Component {
       this.home = from ?? save.owned[0] ?? targetName;
 
       const rows = data.generals as unknown as GeneralRow[];
-      const atHome = rows.filter(
-        (gen) =>
-          gen.NAME !== '盜賊' &&
-          timeAt(gen.city_by_times, this.scenIdx) === this.home &&
-          timeAt(gen.status_by_times, this.scenIdx) !== '未',
-      );
-      const owned = rows.filter(
-        (gen) => gen.NAME !== '盜賊' && typeof gen.CITY === 'string' && save.owned.includes(gen.CITY),
-      );
+      // [Bug A] 主将/将列一律来自**出發城**（this.home）的存檔運行時人事：
+      // 運行時 roster（`OfficersOfCity`，與物品頁/內政頁同一入口）→ 分劇本城市表 →
+      // garrison.json 的出發城出戰名單。舊碼用 generals.json 靜態 `CITY` 過濾（第 1 劇本快照），
+      // 守方武將會被當成我方候選；`owned` 那條 fallback 還可能混進黃巾之亂的將。
+      const byName = new Map<string, GeneralRow>();
+      for (const gen of rows) {
+        if (gen.NAME && gen.NAME !== '盜賊') byName.set(gen.NAME, gen);
+      }
+      const ctx: O.OfficersCtx = {
+        generals: data.generals,
+        scenIdx: this.scenIdx,
+        // `CampaignSave` 型別沒列 roster（`GameState.normalize()` 的白名單外鍵），實際存檔有
+        roster: O.mergeRosters((save as unknown as { roster?: unknown }).roster),
+        playerForce: runPlayerForce(),
+        scenarioCities: scenario.cities,
+      };
+      let homeRows: GeneralRow[] = [];
+      try {
+        homeRows = O.officerNamesOfCity(save, this.home, ctx)
+          .map((name) => byName.get(name))
+          .filter((gen): gen is GeneralRow => !!gen);
+      } catch (err) {
+        console.warn('[DeployRoot] 出發城運行時人事讀取失敗，退回劇本表', err);
+      }
+      if (homeRows.length === 0) {
+        // 存檔還沒有人事紀錄（例如直接開 Deploy 場景）：用「分劇本城市表」過濾出發城
+        homeRows = rows.filter(
+          (gen) =>
+            gen.NAME !== '盜賊' &&
+            timeAt(gen.city_by_times, this.scenIdx) === this.home &&
+            timeAt(gen.status_by_times, this.scenIdx) !== '未',
+        );
+      }
+      if (homeRows.length === 0) {
+        // 最後才退 garrison.json（同一劇本、同一座出發城）的出戰名單
+        const homeTable = garrisonOf(data, this.scenIdx, this.home);
+        homeRows = (homeTable?.officers ?? [])
+          .map((officer) => byName.get(officer.name))
+          .filter((gen): gen is GeneralRow => !!gen);
+      }
       const anyGeneral = rows.filter((gen) => gen.NAME !== '盜賊');
-      const major = this.majorOf(data);
-      const pool = (atHome.length > 0 ? atHome : owned.length > 0 ? owned : anyGeneral)
+      const major = this.majorOf(data, save, ctx);
+      const pool = (homeRows.length > 0 ? homeRows : anyGeneral)
         .slice()
         .sort((a, b) => {
           // 太守优先，其次 STR+INT（web deploy.html 的 officersOf 排序）
@@ -873,7 +912,7 @@ export class DeployRoot extends Component {
     return this.generals[this.selectedGen] ?? null;
   }
 
-  /** 等级：`General.level` 数据表里没有，web 用 `qs.lv || 20`，这里同口径取 20。 */
+  /** 等级：`General.level` 数据表里没有（generals.json 无 level 欄位），走分劇本起始等級表。 */
   private levelOf(gen: CampaignGeneral | null): number {
     const raw = gen ? (gen as CampaignGeneral & { level?: number }).level : undefined;
     const own = typeof raw === 'number' && Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
@@ -883,7 +922,20 @@ export class DeployRoot extends Component {
     return clamp(own > 0 ? own : fallback, 1, 99);
   }
 
-  private majorOf(data: GameData): string {
+  /**
+   * **出發城**（`this.home`）的太守，不是目標城：web `deploy.html` 的主将候选同样是
+   * 「出發城太守優先」。舊碼讀 `this.targetCity`（目標/守方）：從平原打樂陵時太守永遠是
+   * 空串，主将就被 STR+INT 排序帶成關羽（更舊的版本甚至帶出黃巾之亂的張角那一列）。
+   *
+   * 來源順序：存檔運行時 `major`（`cityMajorNameOf`）→ 劇本表 `MAJOR` → garrison.json 出發城列。
+   */
+  private majorOf(data: GameData, save: unknown, ctx: O.OfficersCtx): string {
+    try {
+      const runtime = O.cityMajorNameOf(save, this.home, ctx);
+      if (runtime) return runtime;
+    } catch (err) {
+      console.warn('[DeployRoot] 出發城太守讀取失敗，退回 garrison.json', err);
+    }
     try {
       // 太守只有 garrison.json 里有；缺表时为空串，排序自然退回 STR+INT。
       const table = (data as GarrisonData).garrison;
@@ -891,7 +943,7 @@ export class DeployRoot extends Component {
       const scenario = list.find((row) => row && (row as { scenario?: number }).scenario === this.scenIdx) as
         | { cities?: Record<string, { major?: string }> }
         | undefined;
-      const city = this.targetCity ? scenario?.cities?.[this.targetCity.NAME] : undefined;
+      const city = scenario?.cities?.[this.home];
       return typeof city?.major === 'string' ? city.major : '';
     } catch {
       return '';

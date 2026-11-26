@@ -92,6 +92,8 @@ import { generalLevel, listWisdomChoices, wiseHintOf } from './core/wises';
 // [AI] 大地圖 AI 編排層（見 project/102_Cocos_AI移植.md §5.3 的宿主補丁）
 import { PLAYER_FORCE, runMonth as runAiMonth } from './AiRunner';
 import { consumeFreshStart, playerForce as runPlayerForce, scenarioIndex as runScenarioIndex } from './RunSetup';
+// [Bug B] 分劇本起始等級（R85 唯一口徑）：generals.json 沒有 level 欄位，帶兵上限不能靠它反推
+import { scenarioLevelOf } from './ScenarioLevels';
 import type { AiMonthOutcome, AiRunnerGarrison } from './AiRunner';
 // `AiSave` 不必再 import：`CityRuntime.officers` 升成物件陣列後，`CampaignSave` 可直接賦給它。
 import type {
@@ -3502,14 +3504,24 @@ export class CampaignRoot extends Component {
   // 不在本檔直接改 `this.save` —— 存檔是 GameState 的快取物件，旁路改會漏 persist。
   // -------------------------------------------------------------------------
 
-  /** 主將等級（`core/wises.generalLevel`；找不到武將 → 0，面板顯示 Lv0 而不是崩） */
+  /**
+   * 主將等級（R85 唯一口徑）：`scenarioLevelOf()` 的分劇本起始等級表。
+   *
+   * 為什麼不能直接吃 `core/wises.generalLevel()`：`generals.json` 的 401 條**沒有 `level` 欄位**，
+   * `generalLevel()` 對所有武將都回 1 ⇒ `troopCapOf(1)` = 5 兵。實機回報「城 244 兵出征只有
+   * 5 兵」就是這條：等級錯成 1，帶兵上限跟著錯成 5。分劇本表（TIMES1..5 的 BaseEXP 反推）
+   * 才是 Lv2/2/4/6/8 的真值，與編成屏 `DeployRoot.levelOf()`、web `generalLevelOf()` 同一條。
+   *
+   * 表沒載入時 `scenarioLevelOf(name, own)` 回 `own`（= 舊行為 1），退化但不崩。
+   */
   private armyGeneralLevel(name: string): number {
     const gen = this.generals.find((row) => row.NAME === name);
     if (!gen) return 0;
     try {
-      return generalLevel(gen);
+      const own = generalLevel(gen);
+      return scenarioLevelOf(gen.NAME, Math.max(1, own));
     } catch {
-      return 0;
+      return 1;
     }
   }
 
@@ -3758,9 +3770,13 @@ export class CampaignRoot extends Component {
   /**
    * 出征 = 派出一支 A 方部隊（web `dispatchArmy()`，campaign.html:2829）。
    *
-   * 與舊實作的差別：以前 `doAction('march')` 直接 `loadScene('Deploy')`，等於「沒有部隊」，
-   * 兵團指令 5 項與駐紮整層在 Cocos 側永遠沒有對象。現在出兵數 = 出發城主將帶兵上限
-   * （`troopCapOf(level)`，與 web `dispatchCapOf()` 同一條公式），守軍不足就拒絕。
+   * 出兵數 = **min(出發城現有守軍, 出發城主將帶兵上限)**；上限 `troopCapOf(等級)`
+   * = `min(等級×5, 100)`，與 web `dispatchCapOf()` 同一條公式。
+   *
+   * 舊碼兩個坑（實機回報「城 244 兵只帶 5 兵」）：
+   *  1. 等級走 `core/wises.generalLevel()`，但 `generals.json` 沒有 `level` 欄位 →
+   *     一律回 1 ⇒ 上限 5 兵（現在走 `scenarioLevelOf()`，見 `armyGeneralLevel()`）；
+   *  2. 城兵 < 上限時直接拒絕出征；現在改成「全帶」，扣兵也只扣實際帶走的 `taken`。
    */
   private dispatchArmyTo(target: string): void {
     if (!this.save) return;
@@ -3779,8 +3795,10 @@ export class CampaignRoot extends Component {
     const leader = this.leaderOf(from);
     const cap = Math.max(1, Math.round(M.troopCapOf(this.armyGeneralLevel(leader))));
     const garrison = this.troopsOf(from);
-    if (garrison < cap) {
-      this.hintText = `守軍不足 ${cap} 兵（主將帶兵上限），先徵兵再出征。`;
+    // 城兵不足上限 → 全帶；只有真的沒兵才拒絕（不再要求「守軍 >= 上限」）
+    const taken = Math.min(cap, Math.max(0, Math.round(garrison)));
+    if (taken < 1) {
+      this.hintText = `${from} 沒有兵可出征（主將帶兵上限 ${cap}），先徵兵再出征。`;
       this.refresh();
       return;
     }
@@ -3793,25 +3811,25 @@ export class CampaignRoot extends Component {
       to: target,
       pathIndex,
       progress: 0,
-      troops: cap,
+      troops: taken,
       general: leader || undefined,
       officers,
       advisor: '',
       stationed: false,
     } as GameState.CampaignArmy);
-    // 守軍扣掉出征的兵（web: `save.cities[from].troops -= cap`）
+    // 守軍扣掉實際帶走的兵（web: `save.cities[from].troops -= cap`；本作 cap 可能大於城兵 → 扣 taken）
     const state = this.save.cities[from];
-    if (state) state.troops = Math.max(0, Math.round(state.troops - cap));
+    if (state) state.troops = Math.max(0, Math.round(state.troops - taken));
     this.save = GameState.loadSave();
     this.armySel = id;
     this.pushBattleLog([
       battleLogLine(
         this.save.month,
-        `我 軍 出 征：${from} → ${target}（${cap} 兵，${armyMonths(this.scenarioLike(), pathIndex)} 個月）`,
+        `我 軍 出 征：${from} → ${target}（${taken} 兵，${armyMonths(this.scenarioLike(), pathIndex)} 個月）`,
         'info',
       ),
     ]);
-    this.hintText = `我軍出征：${from} → ${target}（${cap} 兵，${armyMonths(this.scenarioLike(), pathIndex)} 個月）。點部隊下兵團指令。`;
+    this.hintText = `我軍出征：${from} → ${target}（${taken} 兵，${armyMonths(this.scenarioLike(), pathIndex)} 個月）。點部隊下兵團指令。`;
     this.refresh();
   }
 
