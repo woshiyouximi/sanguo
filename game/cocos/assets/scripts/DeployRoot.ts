@@ -584,7 +584,12 @@ export class DeployRoot extends Component {
       } catch (err) {
         console.warn('[DeployRoot] 出發城運行時人事讀取失敗，退回劇本表', err);
       }
-      if (homeRows.length === 0) {
+      // [R245] 這座城是我們打下來的（`takenOver`）就只認名冊：劇本表/garrison.json 裏的駐將是
+      // **前主人**的，回落過去就會讓敵將混進出戰候選（製作人：「所有在城這裡的 AI 隊伍我都可以編為隊伍出戰」）。
+      const takenOverHome = !!(
+        save as unknown as { takenOver?: Record<string, unknown> }
+      ).takenOver?.[this.home];
+      if (homeRows.length === 0 && !takenOverHome) {
         // 存檔還沒有人事紀錄（例如直接開 Deploy 場景）：用「分劇本城市表」過濾出發城
         homeRows = rows.filter(
           (gen) =>
@@ -593,7 +598,7 @@ export class DeployRoot extends Component {
             timeAt(gen.status_by_times, this.scenIdx) !== '未',
         );
       }
-      if (homeRows.length === 0) {
+      if (homeRows.length === 0 && !takenOverHome) {
         // 最後才退 garrison.json（同一劇本、同一座出發城）的出戰名單
         const homeTable = garrisonOf(data, this.scenIdx, this.home);
         homeRows = (homeTable?.officers ?? [])
@@ -607,6 +612,15 @@ export class DeployRoot extends Component {
       // 只留在 `save.siege` 快照裡；只看 armies 會讓「派往 A 的將」在攻打 B 時重新出現在候選池
       // （使用者實測：第二支隊伍編成界面出現第一支的武將）。統一走 `O.awayNameSet()`（save.away ∪ armies ∪ siege）。
       const away = O.awayNameSet(save);
+      // [R245] 敵軍（side 'B'）的將同樣不能編進我方隊伍：舊 `awayNameSet()` 只收 side 'A'，
+      // 圍城的敵將於是可以被拉進守城/出戰名單。
+      for (const army of GameState.armies()) {
+        if (army.general) away.add(String(army.general));
+        for (const officer of army.officers ?? []) {
+          const name = typeof officer === 'string' ? officer : String((officer as { name?: unknown })?.name ?? '');
+          if (name) away.add(name);
+        }
+      }
       const pool = (homeRows.length > 0 ? homeRows : anyGeneral)
         .filter((gen) => !away.has(gen.NAME))
         .slice()

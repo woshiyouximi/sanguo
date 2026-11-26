@@ -43,7 +43,7 @@ import { WEATHER_NAME } from './core/weather';
 import type { Weather } from './core/weather';
 import { loadGameData } from './DataLoader';
 import { GeneralMarkers } from './GeneralMarkers';
-import { consumeBattleLaunch, loadSave, markGeneralGone, persistSave, recordBattleResult, returnGeneralsToCity } from './GameState';
+import { consumeBattleLaunch, handoffCapture, loadSave, markGeneralGone, persistSave, recordBattleResult, returnGeneralsToCity } from './GameState';
 import type { BattleLaunch, DuelCarry } from './GameState';
 import { queuePostBattle } from './SurrenderModel';
 import {
@@ -369,7 +369,11 @@ export class BattleRoot extends Component {
             const target = won
               ? String(this.launch?.city ?? '')
               : String(this.launch?.home ?? '');
-            if (target && this.launch?.defend !== true) returnGeneralsToCity(target, alive);
+            if (target && this.launch?.defend !== true) {
+              // [R245] 勝利用台账交接（清旧主 + 记接管 + 写存活者），敗仗只還人回出發城。
+              if (won) handoffCapture(target, alive);
+              else returnGeneralsToCity(target, alive);
+            }
           }
           const post = this.settlement.post;
           if (this.settlement.winner === 'B' && post) {

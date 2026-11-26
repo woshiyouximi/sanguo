@@ -14,6 +14,7 @@ import type { BattleRecord } from './core/battle';
 import { GENERAL_RECORD_MAX } from './core/roster';
 import type { ReinforceConfig } from './core/strategy';
 import { clearRunScoped } from './core/run_scoped';
+import * as Ledger from './RosterLedger';
 import { advanceOneMonth } from './core/advance_month';
 import type { MonthContext, MonthCivicTick, MonthReport, MonthSaveLike } from './core/advance_month';
 import {
@@ -1665,6 +1666,88 @@ export function markGeneralGone(names: readonly string[], status: '死' | '俘')
     if (moved && typeof moved === 'object') for (const name of list) delete moved[name];
   }
   persistSave();
+}
+
+/* ======================================================================
+ * [R245] 狀態台账入口：所有「武將在哪」的寫入都應該走這裡（設計見 project/221）
+ *
+ * 四份真相（名冊 / 城守將快照 / 在途兵團 / 圍城快照）裡，名冊是面板唯一來源；
+ * 這幾個函數把它拉回「一名武將恰好一個位置」，並補上月結兜底。
+ * ==================================================================== */
+
+/** [R245] 台账体检：重疊 / 幽靈 / 復活 / 失蹤（測試與實機自檢共用） */
+export function ledgerAudit(): ReturnType<typeof Ledger.audit> {
+  return Ledger.audit(loadSave() as unknown as Record<string, unknown>);
+}
+
+/**
+ * [R245] 名冊自愈：把「已死/已俘」與「敵軍兵團裡的將」從各城名冊摘掉。
+ *
+ * 為什麼要自愈：舊存檔裡已經被污染的城（例如打下的樂陵留著袁紹的人）不會因為
+ * 新代碼上線就自動乾淨，而這些名字正是「守城戰能編入敵將」的來源。
+ */
+export function repairRoster(): { removed: number; cities: number } {
+  const save = loadSave();
+  const fate = (save.generalStatus ?? {}) as Record<string, string>;
+  const enemy = new Set(Ledger.namesInArmies(save as unknown as Record<string, unknown>, 'B'));
+  const roster = (save.roster && typeof save.roster === 'object' ? save.roster : null) as Record<string, unknown> | null;
+  if (!roster) return { removed: 0, cities: 0 };
+  let removed = 0;
+  let cities = 0;
+  for (const city of Object.keys(roster)) {
+    if (city === '_moved') continue;
+    const row = roster[city];
+    if (!Array.isArray(row)) continue;
+    const kept: string[] = [];
+    for (const item of row) {
+      const name = typeof item === 'string' ? item.trim() : '';
+      if (!name) continue;
+      const status = String(fate[name] ?? '');
+      if (status === '死' || status === '俘' || enemy.has(name)) {
+        removed += 1;
+        continue;
+      }
+      kept.push(name);
+    }
+    if (kept.length !== row.length) {
+      roster[city] = Array.from(new Set(kept));
+      cities += 1;
+    }
+  }
+  if (removed > 0) persistSave();
+  return { removed, cities };
+}
+
+/**
+ * [R245] 攻城交接（單一入口）：舊主清空 + 記接管月份 + 存活者寫進新城。
+ * 與 `returnGeneralsToCity()` 的差別：這裡處理「城易手」的整件事，戰敗還人仍走後者。
+ */
+export function handoffCapture(city: string, survivors: readonly string[]): void {
+  const target = String(city ?? '').trim();
+  if (!target) return;
+  const save = loadSave();
+  Ledger.handoffCapture(save as unknown as Record<string, unknown>, target, survivors);
+  // 交了城也要把 `_moved` 印記清乾淨：否則那批將在內政頁仍被判「已調走」
+  const roster = save.roster as Record<string, unknown> | undefined;
+  const moved = roster?._moved as Record<string, unknown> | undefined;
+  if (moved && typeof moved === 'object') {
+    for (const name of survivors) delete moved[String(name ?? '').trim()];
+  }
+  persistSave();
+}
+
+/**
+ * [R245] 月結兜底：敵軍已抵達我方城下、玩家沒點守城戰 → 按兵力自動出結果。
+ * 不做的話敵軍會永遠懸在 `progress >= 1`（製作人：「只要我不触发守城战，AI 就无法攻城」）。
+ */
+export function resolvePendingSieges(): ReturnType<typeof Ledger.resolvePendingSieges> {
+  const save = loadSave();
+  const outcomes = Ledger.resolvePendingSieges(save as unknown as Record<string, unknown>, {
+    troopsOf: (city) => Math.max(0, Math.round(numberOr(save.cities?.[city]?.troops, 0))),
+    defenseOf: (city) => Math.max(0, Math.round(numberOr((save.cities?.[city] as unknown as { DEFENSE?: unknown; defense?: unknown })?.DEFENSE ?? (save.cities?.[city] as unknown as { defense?: unknown })?.defense, 0))),
+  });
+  if (outcomes.length > 0) persistSave();
+  return outcomes;
 }
 
 /** [R242] 單將狀態寫入（'死' / '俘' / '' 清除），供名冊狀態與失敗判定共用 */

@@ -184,10 +184,17 @@ test('R232c 編成候選池的在途集合包含攻城快照（不能只看 Game
     DR.includes('const away = O.awayNameSet(save)'),
     'DeployRoot 的 away 必須走 O.awayNameSet(save)（save.away ∪ armies ∪ siege）',
   );
-  assert.equal(
-    DR.includes('for (const army of GameState.armies())'),
-    false,
-    '舊寫法（只看 armies）不得回來：抵達城下的兵團已 removeArmy，只在 save.siege 裡',
+  assert.ok(
+    DR.includes('.filter((gen) => !away.has(gen.NAME))'),
+    '候選池必須用 away 過濾（save.away ∪ armies(side A) ∪ siege）',
+  );
+  // [R245] 這裡允許再補一輪 armies 迴圈，但只能作為「把敵軍（side B）也剔掉」的擴充，
+  // 不能退化成「只靠 armies 建 away」。
+  const aug = DR.indexOf('for (const army of GameState.armies())');
+  assert.ok(aug > 0, '要補剔所有兵團（含敵軍）的將');
+  assert.ok(
+    DR.slice(Math.max(0, aug - 400), aug).includes('[R245]'),
+    '這段擴充要帶 R245 註解，說明它是在 awayNameSet 之外補敵軍',
   );
   assert.ok(DR.includes('save.siege'), '註解要寫明 save.siege 這個來源');
   assert.ok(DR.includes('removeArmy'), '註解要寫明 removeArmy 造成的因果');

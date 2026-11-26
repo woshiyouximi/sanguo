@@ -1846,6 +1846,14 @@ export class CampaignRoot extends Component {
       // 之後所有面板（物品/武將名冊/勢力/君主/城池列表）都從存檔讀運行時人事，
       // 不再吃 `garrisonOf(data, 0, 城)` 或 `general.CITY` 這種劇本 0 的靜態表。
       this.seedRuntimeOfficers();
+      // [R245] 台账自愈：旧存档里被污染的城（打下的城里留着前主人的将、阵亡将还挂在名册）
+      // 不会因为新代码上线就自动干净，开局扫描一次，扫出来的名字不再进出征/守城候选池。
+      try {
+        const fixed = GameState.repairRoster();
+        if (fixed.removed > 0) console.log('[R245] roster repair', fixed);
+      } catch {
+        /* 自愈失败不该挡住开局 */
+      }
       this.buildCityLabels();
       // 城名 Label 是在 start() 才建的，siblingIndex 比 onLoad 建的戰報 Label 大 → 會蓋住戰報，
       // 這裡把戰報整組提回最上層。
@@ -2733,6 +2741,25 @@ export class CampaignRoot extends Component {
     const arriving = this.save.owned
       .map((city) => GameState.arrivedAt(city, 'B').map((army) => ({ army, city })))
       .reduce((acc, list) => acc.concat(list), [] as Array<{ army: Army; city: string }>);
+    // [R245] 圍城兜底：敵軍抵達後過了寬限月還沒人應戰，就按兵力自動出結果。
+    // 舊碼 side 'B' 的抵達沒有任何結算路徑，玩家不點「守 城 戰」敵軍就永遠懸在城下
+    // （製作人：「只要我不触发守城战，AI 就无法攻城」）。
+    const settled = GameState.resolvePendingSieges();
+    if (settled.length > 0) {
+      this.save = GameState.loadSave();
+      this.pushBattleLog(
+        settled.map((row) =>
+          battleLogLine(
+            this.save?.month ?? from,
+            row.result === 'captured'
+              ? `${row.city} 失守：${row.attackers} 兵破城（守軍 ${row.defenders}）`
+              : `${row.city} 守住了：敵 ${row.attackers} 兵退走（守軍 ${row.defenders}）`,
+            row.result === 'captured' ? 'lost' : 'hold',
+          ),
+        ),
+      );
+      this.checkMonarchDeath();
+    }
     if (arriving.length > 0 && this.clockT > 300) {
       this.hintText = this.clampHint(`敵軍已到 ${arriving[0].city} 城下：點該城 →「守 城 戰」。`, 160);
     } else if (income > 0) {
