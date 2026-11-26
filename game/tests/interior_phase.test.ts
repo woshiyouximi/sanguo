@@ -12,6 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SRC = join(process.cwd(), 'cocos/assets/scripts/CampaignRoot.ts');
+const src0 = (): string => readFileSync(SRC, 'utf8');
 const src = (): string => readFileSync(SRC, 'utf8');
 
 function bodyOf(source: string, signature: string): string {
@@ -89,4 +90,26 @@ test('[R233] GameState 有 setInteriorPending/isInteriorPending 且写进 save',
   const body = gs.slice(gs.indexOf('export function setInteriorPending'));
   assert.ok(/delete save\.interiorPending/.test(body.slice(0, 500)), 'false 时要删键（不留 false 污染存档）');
   assert.ok(/persistSave\(\)/.test(body.slice(0, 500)), 'setInteriorPending 要落盘');
+});
+
+test('[R235] 出征（切 Deploy）不得讓時鐘走表：navLock 要擋 clockRunning 與 endInterior', () => {
+  const src = src0();
+  // 1) 有 navLock 欄位
+  assert.ok(/private navLock = false;/.test(src), '要有 navLock 欄位');
+  // 2) clockRunning 必須先看 navLock
+  const clock = bodyOf(src, 'private clockRunning');
+  assert.ok(clock.includes('this.navLock'), 'clockRunning 要擋 navLock');
+  // 3) onDeploy 進場先上鎖，再 doAction
+  const at = src.indexOf('onDeploy:');
+  assert.ok(at > 0, '找不到 onDeploy');
+  const seg = src.slice(at, at + 400);
+  const lockAt = seg.indexOf('this.navLock = true');
+  const actAt = seg.indexOf("this.doAction('march')");
+  assert.ok(lockAt > 0 && actAt > lockAt, 'onDeploy 要先 navLock=true 再 doAction');
+  // 4) onClose 在 navLock 時早退，不調 endInterior
+  const oc = src.indexOf('onClose: () => {');
+  const seg2 = src.slice(oc, oc + 900);
+  const guardAt = seg2.indexOf('if (this.navLock)');
+  const endAt = seg2.indexOf('this.endInterior()');
+  assert.ok(guardAt > 0 && endAt > guardAt, 'onClose 要在 endInterior 之前早退');
 });

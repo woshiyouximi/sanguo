@@ -1576,6 +1576,13 @@ export class CampaignRoot extends Component {
    * 不能只看 `clockT <= 0`（新局是 clockT=3600、clockPaused=true 进场的）。
    */
   private interiorPhase = false;
+
+  /**
+   * [R235] 場景切換鎖：從城內頁點「出征」→ `doAction('march')` → `loadScene('Deploy')` 的這段路上，
+   * 大地圖會先渲染一兩幀再被卸掉。若不鎖，`update()` 會把這段時間當「在大地圖且沒開面板」而開始走表，
+   * 於是內政就沒了（製作人實測：內政點出征 → 閃一下大地圖 → 編成回來時已經 2 月）。
+   */
+  private navLock = false;
   /** 頁頭左側「君主 X」：可點，開君主屬性卡（v16-cocos-monarch） */
   private labelMonarch: Label | null = null;
   private labelStats: Label | null = null;
@@ -2599,6 +2606,12 @@ export class CampaignRoot extends Component {
       onClose: () => {
         // 面板已把 gold / 城況 / 內政欄位寫回存檔；這裡只重新讀一次並刷新大地圖
         this.save = GameState.loadSave();
+        // [R235] 出征是「出門」不是「離開內政」：這條路上不要 endInterior()，
+        // 否則時間會在大地圖閃現的那一兩幀開始走（interiorPending 留著，回大地圖時再恢復內政）。
+        if (this.navLock) {
+          this.cityPanel?.hide();
+          return;
+        }
         // [ROSTER_SRC] 內政的任免/派遣/招降/移動改的是 `sanguo_city_v1.roster`；
         // 關面板時把兩份名單與 `cities[城].officers` 同步一次，物品頁/名冊頁立刻同口徑。
         this.seedRuntimeOfficers();
@@ -2620,6 +2633,8 @@ export class CampaignRoot extends Component {
       },
       onDeploy: (target: string) => {
         // 出征沿用大地圖既有的 doAction('march')：敵情、出發城都在那裡定
+        // [R235] 這條路會切到 Deploy 場景：先上鎖，否則大地圖閃現的那一兩幀會把時間走掉
+        this.navLock = true;
         this.cityPanel?.hide();
         this.selected = target;
         this.hintText = '';
@@ -2676,6 +2691,7 @@ export class CampaignRoot extends Component {
   /** 时钟能不能走：内政页/模态暗幕/无存档都不走（原作内政场景不碰 T） */
   private clockRunning(): boolean {
     if (!this.save) return false;
+    if (this.navLock) return false; // [R235] 場景切換中（出征 → Deploy）不許走表
     if (this.clockPaused) return false;
     if (this.cityPanel?.isOpen()) return false;
     if (this.node.children.some((c) => c.name.startsWith('Scrim_'))) return false;
