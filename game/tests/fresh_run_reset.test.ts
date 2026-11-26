@@ -27,3 +27,11 @@ test('[R226b] CampaignRoot 收到 freshRun 時清戰報 + 時鐘歸零', () => {
   assert.ok(seg.includes('this.clockT = 3600'), 'freshRun 要把時鐘歸 3600');
   assert.ok(seg.includes('this.clockPaused = true'), 'freshRun 要先暫停時鐘（等內政頁關掉再走）');
 });
+
+test('[R232] 新局也要清「內政附加欄位」與「物品」兩個獨立鍵（否則第二次開新局會說本月已行動）', () => {
+  const at = CR.indexOf('const freshRun = consumeFreshStart()');
+  const seg = CR.slice(at, at + 1400);
+  assert.ok(seg.includes("removeItem('sanguo_city_v1')"), 'freshRun 要清 sanguo_city_v1（逐將年令/本月已下令/在途）');
+  assert.ok(seg.includes("removeItem('sanguo_items_v1')"), 'freshRun 要清 sanguo_items_v1（背包/裝備）');
+  assert.ok(seg.includes('this.interiorPhase = false'), 'freshRun 要把內政階段旗標清掉');
+});

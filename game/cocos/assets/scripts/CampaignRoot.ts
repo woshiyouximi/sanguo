@@ -1794,8 +1794,18 @@ export class CampaignRoot extends Component {
       this.clockT = 3600;
       this.clockAcc = 0;
       this.clockPaused = true;
+      this.interiorPhase = false;
       this.arrivedNoticed.clear();
       this.stationNoticed.clear();
+      // [R232] 內政與物品的附加欄位另存兩個鍵（見 CityPanel.CITY_EXTRAS_KEY / ItemsModel.BAG_KEY）：
+      // 只清 `sanguo_campaign_v1` 不夠——舊局的「逐將年令 / 本月已下令 / 在途 / 背包」都在這裡，
+      // 新局一進去就會看到「本月已行動（內政窗口已收束）」（制作人实测：连开两局新局）。
+      try {
+        sys.localStorage.removeItem('sanguo_city_v1');
+        sys.localStorage.removeItem('sanguo_items_v1');
+      } catch {
+        // 同上：拿不到 localStorage 時忽略
+      }
     }
       const scenario = (data.scenarios[sci] ?? data.scenarios[0]) as unknown as CampaignScenario | undefined;
       if (!scenario || !Array.isArray(scenario.cities)) {
@@ -2713,9 +2723,10 @@ export class CampaignRoot extends Component {
     this.clockT = 0;
     const home = this.selected ?? this.save.owned[0] ?? '';
     this.pushBattleLog([
-      battleLogLine(this.save.month, '時 間：本年走完（原作 T=0 · 0x41B6CF）→ 進內政', 'year'),
+      // [R232] 戰報是給玩家看的，反匯編位址留在程式註解裡，不要寫進 UI
+      battleLogLine(this.save.month, '時 間：一年過去了 → 進入內政', 'year'),
     ]);
-    this.hintText = this.clampHint('內政時間到了（原作一年 = 3600 tick）：處理完點「返回」回大地圖。', 160);
+    this.hintText = this.clampHint('內政時間到了：安排完搜索／開發／徵兵，點左上「內 政 終 了」再回大地圖。', 160);
     this.refresh();
     if (home) this.openCityPanel(home);
   }
@@ -2731,9 +2742,9 @@ export class CampaignRoot extends Component {
     this.clockT = 3600;
     this.clockAcc = 0;
     this.pushBattleLog([
-      battleLogLine(this.save.month, '內 政 終 了：時間開始流動（原作 0x41BBF5 → T=3600）', 'year'),
+      battleLogLine(this.save.month, '內 政 終 了：時間開始流動', 'year'),
     ]);
-    this.hintText = this.clampHint('內 政 終 了：時間開始流動（一年 ≈ 60 秒，一月 ≈ 5 秒）。', 160);
+    this.hintText = this.clampHint('時間開始流動：部队会按月前进，一年后自动回到内政。', 160);
     this.refresh();
   }
 
