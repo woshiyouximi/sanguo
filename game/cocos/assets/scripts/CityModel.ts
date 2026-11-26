@@ -109,11 +109,17 @@ export interface CitySave {
    */
   goldMigrated?: boolean;
   /**
-   * [F7] 逐令月配額：`{ 命令: 月序 }`。主令每項每月一次；副令（情報／移動）不寫。
-   * 對照 web：原作 0x4A64BC 是「本月已下令」一面旗，Cocos 拆成逐令配額，
-   * 因為主令有 7 條、每條都該能各下一次（web 的 `acted` 是逐將年令，另一套東西）。
+   * [F2] 逐將年令：`{ 將名: 年序 }`。每將每年只能搜索／開發一次（原作指南 L43-44/L106-107；
+   * web 真源 `game/web/city_model.js` 的 `acted` / `markActed`）。年序 = floor((月-1)/12)+1。
    */
-  cmdOrders?: Record<string, number>;
+  acted?: Record<string, number>;
+  /**
+   * [F3] 隨軍將領：`{ 將名: 部隊 id }`。出征後不留在城裡（不能內政），回城時歸還。
+   * web 真源 `city_model.js` 的 `awayNameSet` / `syncAway`：由頁面用 `save.armies` 重算。
+   */
+  away?: Record<string, string>;
+  /** [F3] 行軍中的部隊（`GameState.CampaignSave.armies` 同形；`syncAway` 只讀 side/general/officers/id） */
+  armies?: unknown[];
   [key: string]: unknown;
 }
 
@@ -208,6 +214,12 @@ export interface CityCtx {
   level?: number;
   /** R17：搜索掉落的「執行動作武將」等級（測試/呼叫方明確指定） */
   searchLevel?: number;
+  /**
+   * [F11/P1-1] 開發的**執行武將名**（web `city.html` 的 `doDevelop` 傳 `exec`）。
+   * 開發公式裡 INT/STR 取這名將；太守（`majorOf`）只決定縮放係數。
+   * 缺省時退回太守本人（= 舊行為）。
+   */
+  exec?: string;
   /**
    * [F10] 自治代行用：`quiet` 不寫日誌、`free` 不扣錢（也不做金閘）。
    * 對照 web `runAutonomy()` 的叫法 `search(save, def, {...ctx, quiet:true})`
@@ -387,6 +399,12 @@ export const RECRUIT = {
   PREP_GAIN_PCT: incrVal('prepGainPct'),
   PREP_PER_TROOP: incrVal('prepPerTroop'),
 };
+
+/**
+ * [F13] 金 → 預備兵的兌換率：每 100 金換 1 名預備兵
+ * （web 真源 `game/web/city_model.js:958` 的 `PREP_PER_GOLD`）。
+ */
+export const PREP_PER_GOLD = 100;
 
 /** 兵種：步／騎（面板 0x489138「步兵數」、0x489148「騎兵數」） */
 export const ARMS = ['inf', 'cav'];
@@ -786,8 +804,26 @@ export function ensureExtras<T extends CitySave>(save: T): T {
   }
   save.auto = auto;
   save.autoMonth = intOr(save.autoMonth, 0, 0);
-  // [F7] 逐令月配額：只留本月的紀錄（過月自然失效，不必額外清位）。
-  clearCmdOrders(save);
+
+  // [F2] 逐將年令：{ 將名: 年序 }。年序 = floor((月-1)/12)+1；非正數丟掉（老檔相容）。
+  const rawActed: Record<string, unknown> = isRecord(save.acted) ? save.acted : {};
+  const acted: Record<string, number> = {};
+  for (const [name, v] of Object.entries(rawActed)) {
+    if (typeof name !== 'string' || !name) continue;
+    const y = Math.trunc(num(v));
+    if (y > 0) acted[name] = y;
+  }
+  save.acted = acted;
+
+  // [F3] 隨軍將領：{ 將名: 部隊 id }。id 一律存字串（'' = 舊檔沒有部隊 id）。
+  const rawAway: Record<string, unknown> = isRecord(save.away) ? save.away : {};
+  const away: Record<string, string> = {};
+  for (const [name, id] of Object.entries(rawAway)) {
+    if (typeof name !== 'string' || !name) continue;
+    away[name] = typeof id === 'string' ? id : '';
+  }
+  save.away = away;
+
   // [F16] 遷移標記：舊檔沒有這個鍵 ⇒ false（還在舊錢包口徑）。
   save.goldMigrated = save.goldMigrated === true;
   return save;
@@ -894,6 +930,29 @@ export function refillPrep(
 }
 
 /**
+ * [F13] 金 → 預備兵（原作線，web `city_model.js:973-984` 同式）：
+ *   n = min(floor(本城 money / 100), 預備兵上限 − 現有預備兵)
+ *   有 n 就 `prep += n`、`money -= 100 × n`
+ * 回傳欄位順序與 web 相同（`{ok, city, n, cost, prep, cap, money}`）。
+ * 換月 tick（`autonomyTick`）與「部隊徵兵」入口都走這支；舊的 `refillPrep` 只在 `?loose=1` 保留。
+ */
+export function prepFromMoney(
+  save: CitySave,
+  cityDef: CityDef | null | undefined,
+): { ok: boolean; city?: string; n: number; cost: number; prep: number; cap: number; money: number } {
+  const st = ensureCityState(save, cityDef);
+  if (!st || !cityDef || !cityDef.NAME) return { ok: false, n: 0, cost: 0, prep: 0, cap: 0, money: 0 };
+  const cap = prepCapOf(st.pop);
+  const room = Math.max(0, cap - st.prep);
+  const n = Math.min(Math.floor(Math.max(0, cityMoneyOf(save, cityDef)) / PREP_PER_GOLD), room);
+  if (n > 0) {
+    st.prep += n;
+    st.money -= n * PREP_PER_GOLD;
+  }
+  return { ok: true, city: cityDef.NAME, n, cost: n * PREP_PER_GOLD, prep: st.prep, cap, money: st.money };
+}
+
+/**
  * 部隊徵兵（R12，原作線）：消耗**預備兵** → 部隊兵，分步／騎
  * （04c §2.3 面板 0x489138「步兵數 %d/%d」/ 0x489148「騎兵數 %d/%d」/
  *   0x489164「預備兵 %d」/ 0x489170「總兵數 %d」）。不花金。
@@ -956,6 +1015,8 @@ export function rosterOf(
   const scenIdx = intOr(ctx?.scenIdx, 0, 0);
   const generals = Array.isArray(ctx?.generals) ? ctx.generals : [];
   const moved = (save?.roster?._moved as Record<string, string> | undefined) || {};
+  // [F3] 隨軍將領不在城內（行軍中不能做內政），回城後 syncAway 會把他從 away 移除
+  const away = awayNameSet(save);
   const rawExtra = save?.roster?.[cityName as string];
   const extra = Array.isArray(rawExtra) ? (rawExtra as string[]) : [];
   const extraSet = new Set(extra);
@@ -963,6 +1024,7 @@ export function rosterOf(
   const seen = new Set<string>();
   for (const g of generals) {
     if (!g || !g.NAME || g.NAME === '盜賊') continue;
+    if (away.has(g.NAME)) continue;
     const home = cityOf(g, scenIdx);
     const movedTo = moved[g.NAME] || '';
     if (movedTo) {
@@ -979,6 +1041,7 @@ export function rosterOf(
   }
   for (const name of extra) {
     if (seen.has(name)) continue;
+    if (away.has(name)) continue;
     if (moved[name] && moved[name] !== cityName) continue;
     const g = generalOf(generals, name);
     if (!g) continue;
@@ -1164,17 +1227,21 @@ export function develop(save: CitySave, cityDef: CityDef | null | undefined, ctx
   if (DEV.COST > 0 && cityMoneyOf(save, cityDef) < DEV.COST) return { ok: false, reason: 'gold', cost: DEV.COST };
   if (st.pop >= DEV.POP_CAP && st.def >= DEV.DEF_CAP) return { ok: false, reason: 'saturated', cap: DEV.POP_CAP };
 
-  const exec = generalOf(ctx?.generals, majorOf(save, cityDef));
+  // [F11/P1-1] 執行武將 = 玩家在選將抽屜選的人（web `doDevelop` 傳 `ctx.exec`）；
+  // 沒指定才退回太守。INT/STR 取**執行武將**，縮放係數取**太守**（web 同式）。
+  const major = generalOf(ctx?.generals, majorOf(save, cityDef));
+  const exec = (ctx?.exec && generalOf(ctx.generals, ctx.exec)) || major;
   const intel = num(exec?.INT);
   const str = num(exec?.STR);
-  const eff = majorFactor(intel);
+  const majorIntel = num(major?.INT);
+  const eff = majorFactor(majorIntel);
 
   // 0x427A84：base = rand()%3000 + INT*100，再過太守縮放
   const popBase = randBelow(DEV.POP) + Math.trunc(intel * DEV_FORMULA.PER_INT);
-  const pop = Math.min(DEV.POP_CAP - st.pop, Math.max(0, scaledGain(popBase, intel)));
+  const pop = Math.min(DEV.POP_CAP - st.pop, Math.max(0, scaledGain(popBase, majorIntel)));
   // 0x427947：base = rand()%12 + STR*0.4，再過同一段太守縮放
   const defBase = randBelow(DEV.DEF) + Math.trunc(str * DEV_FORMULA.PER_STR);
-  const def = Math.min(DEV.DEF_CAP - st.def, Math.max(0, scaledGain(defBase, intel)));
+  const def = Math.min(DEV.DEF_CAP - st.def, Math.max(0, scaledGain(defBase, majorIntel)));
   // 0x427B9E 外殼：兩個增量都是 0 就靜默（什麼都沒發生、也不印字）
   if (pop <= 0 && def <= 0) return { ok: false, reason: 'nothing', eff };
 
@@ -1703,6 +1770,7 @@ export function autonomyTick(
   save: CitySave,
   cityDefs: CityDef[] | null | undefined,
   ctx?: CityCtx | null,
+  opts?: { loose?: boolean },
 ): { month: number; refilled: RefillRow[]; auto: AutonomyResult | null; first: boolean } {
   ensureExtras(save);
   const defs = Array.isArray(cityDefs) ? cityDefs.filter(Boolean) : [];
@@ -1711,10 +1779,18 @@ export function autonomyTick(
   if (!(month > last)) return { month, refilled: [], auto: null, first: false };
 
   const refilled: RefillRow[] = [];
+  // [F13] 原作線 = 金 → 預備兵（web `autonomyTick` 的 `prepFromMoney` 分支）；
+  // 舊的「每月白補上限 10%」只在 `?loose=1` 除錯時保留（web 同開關）。
+  const loose = opts?.loose === true;
   for (const def of defs) {
-    const r = refillPrep(save, def);
-    if (r.gained > 0) refilled.push({ city: def.NAME, gained: r.gained, prep: r.prep as number, cap: r.cap });
-    else if (r.ok) refilled.push({ city: def.NAME, gained: 0, prep: r.prep as number, cap: r.cap });
+    if (loose) {
+      const r = refillPrep(save, def);
+      if (r.gained > 0) refilled.push({ city: def.NAME, gained: r.gained, prep: r.prep as number, cap: r.cap });
+      else if (r.ok) refilled.push({ city: def.NAME, gained: 0, prep: r.prep as number, cap: r.cap });
+      continue;
+    }
+    const r = prepFromMoney(save, def);
+    if (r.ok) refilled.push({ city: def.NAME, gained: r.n, prep: r.prep, cap: r.cap });
   }
   save.autoMonth = month;
 
@@ -1838,6 +1914,37 @@ export function withBagItem(raw: unknown, seq: unknown): { equip: Record<string,
   const out = parseItemsSave(raw);
   if (n && !out.bag.includes(n)) out.bag.push(n);
   return out;
+}
+
+/**
+ * [P0-1] 把物品寫進 `localStorage[M.BAG_KEY]` 的值（JSON 字串）。
+ * 與 web `city.html:613-623` 的 `bagAdd(seq)` **同鍵同格式**：
+ *   讀 `sanguo_items_v1` → `JSON.parse` → `withBagItem` → `JSON.stringify` 寫回。
+ * 壞檔／空值都當「新背包」處理（parseItemsSave 會回落 DEFAULT_BAG）。
+ */
+export function bagAddRaw(raw: string | null | undefined, seq: unknown): string {
+  let parsed: unknown = null;
+  if (typeof raw === 'string' && raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+  }
+  return JSON.stringify(withBagItem(parsed, seq));
+}
+
+/** 從 `localStorage[M.BAG_KEY]` 的值讀背包序號（壞檔回落預設背包） */
+export function bagSeqsOf(raw: string | null | undefined): number[] {
+  let parsed: unknown = null;
+  if (typeof raw === 'string' && raw) {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+  }
+  return parseItemsSave(parsed).bag;
 }
 
 /* ======================================================================
@@ -1967,68 +2074,127 @@ export const LOCK_HINT = '本月已行動';
 export const UNLIMITED_HINT = '除錯：不限行動次數（?unlimited=1，不是玩法）';
 
 /* ======================================================================
- * §12b [F7] 逐令月配額（主令 7 條各每月一次；副令 情報／移動 不佔）
+ * §12b [F2/F3] 內政行動配額：逐將「年令」＋隨軍過濾
  *
- * web 真源：`game/web/city.html:754-759` 把 `CMD_ORDER`（7 條）鋪進 #grid、
- * `CMD_SECONDARY`（情報／移動）鋪進 #subgrid；`city.html:796-797` 下令後
- * `M.markMonthActed(...)`，`city.html:548` 的 `readOnly()` 用 `monthLocked` 擋指令。
- * web 另有「逐將年令」（`acted`，每將每年搜/開一次）—— 那套依賴 13 名武將清單的
- * 選將抽屜，Cocos 這一版沒有移植，改用這裡的**逐令**配額（見 REPORT 的已知差異）。
+ * 原作（guide L43-44 / L106-107）：每年 1 月開內政窗，**每名武將每年只能**
+ * 搜索或開發一次；搜索/開發都要先指定執行武將。web 真源：
+ *   - `city_model.js` 的 `acted` / `yearIndexOf` / `actedLocked` / `markActed` / `actedNames`
+ *   - `city_model.js` 的 `away` / `awayNameSet` / `syncAway`（出征的將不在城裡）
+ *   - `city.html:543-549` 的 `inAffairsMonth()` / `readOnly()`（非正月只讀）
+ * 舊 Cocos 版把 F7 誤讀成「主令每項每月一次」（cmdOrders），已在 R21 整段換掉。
  * ==================================================================== */
 
-/** 這條是不是副令（情報／移動）：副令不佔月令、可重複下 */
+/**
+ * 這條是不是副令（情報／移動）。主令 7 條要選執行武將、占該將今年的一次；
+ * 副令免費、不占年令（web `city.html:754-759` 的 #subgrid 同義）。
+ */
 export function isSecondaryCmd(cmd: string): boolean {
   return CMD_SECONDARY.indexOf(String(cmd)) >= 0;
 }
 
-/** 本月這條主令是否已下過（副令永遠 false） */
-export function cmdOrderUsed(save: CitySave | null | undefined, cmd: string): boolean {
-  if (!save || typeof save !== 'object' || Array.isArray(save)) return false;
-  if (isSecondaryCmd(cmd)) return false;
-  const rec = save.cmdOrders;
-  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return false;
-  const month = intOr(save.month, 1, 1);
-  const at = intOr(rec[String(cmd)], 0, 0);
-  return at > 0 && at === month;
+/** 年序 = floor((月-1)/12)+1（1 月 = 第 1 年；web `yearIndexOf` 同式） */
+export function yearIndexOf(save: CitySave | null | undefined): number {
+  return Math.floor((intOr(save && save.month, 1, 1) - 1) / 12) + 1;
 }
 
-/** 記一次主令；已記過回 false（副令不記、也回 false） */
-export function markCmdOrder(save: CitySave | null | undefined, cmd: string): boolean {
+/** 某將上次行動的年序（0 = 沒記過／老檔） */
+export function actedYearOf(save: CitySave | null | undefined, name: string | null | undefined): number {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return 0;
+  if (typeof name !== 'string' || !name) return 0;
+  const rec = isRecord(save.acted) ? (save.acted as Record<string, unknown>) : {};
+  return intOr(rec[name], 0, 0);
+}
+
+/** 這名將「今年」是否已行動（每將每年只能搜索／開發一次） */
+export function actedLocked(save: CitySave | null | undefined, name: string | null | undefined): boolean {
+  const y = actedYearOf(save, name);
+  return y > 0 && y === yearIndexOf(save);
+}
+
+/** 記下「這名將今年已行動」；已鎖過回 false（web `markActed` 同語義） */
+export function markActed(save: CitySave | null | undefined, name: string | null | undefined): boolean {
   if (!save || typeof save !== 'object' || Array.isArray(save)) return false;
-  if (isSecondaryCmd(cmd)) return false;
-  if (cmdOrderUsed(save, cmd)) return false;
-  const rec =
-    save.cmdOrders && typeof save.cmdOrders === 'object' && !Array.isArray(save.cmdOrders)
-      ? save.cmdOrders
-      : (save.cmdOrders = {});
-  rec[String(cmd)] = intOr(save.month, 1, 1);
+  if (typeof name !== 'string' || !name) return false;
+  if (actedLocked(save, name)) return false;
+  if (!isRecord(save.acted)) save.acted = {};
+  (save.acted as Record<string, number>)[name] = yearIndexOf(save);
   return true;
 }
 
-/** 本月已用幾條主令（HUD「月令 n / 7」的分子） */
-export function ordersUsedCount(save: CitySave | null | undefined): number {
-  let used = 0;
-  for (const cmd of CMD_ORDER) {
-    if (cmdOrderUsed(save, cmd)) used += 1;
-  }
-  return used;
+/** 清空逐將年令（換年時呼叫；web `clearActed`） */
+export function clearActed<T extends CitySave | null | undefined>(save: T): T {
+  if (save && typeof save === 'object' && !Array.isArray(save)) save.acted = {};
+  return save;
 }
 
-/** 換月清位：只留本月的紀錄（`ensureExtras` 每次載入都會跑） */
-export function clearCmdOrders<T extends CitySave | null | undefined>(save: T): T {
+/** 今年已行動的將名（HUD「年令 n 人已動」；web `actedNames`） */
+export function actedNames(save: CitySave | null | undefined): string[] {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return [];
+  const rec = isRecord(save.acted) ? save.acted : {};
+  const y = yearIndexOf(save);
+  return Object.keys(rec).filter((n) => intOr(rec[n], 0, 0) === y);
+}
+
+/** 部隊裡「我方(side 'A')」的將名：general ＋ officers[]（web `awayNameSet` 同篩法） */
+function armyGeneralNames(army: unknown): string[] {
+  if (!isRecord(army) || army.side !== 'A') return [];
+  const names: string[] = [];
+  if (typeof army.general === 'string' && army.general) names.push(army.general);
+  if (Array.isArray(army.officers)) {
+    for (const n of army.officers as unknown[]) if (typeof n === 'string' && n) names.push(n);
+  }
+  return names;
+}
+
+/**
+ * 隨軍將名集合：`save.away` 裡有部隊 id 的，∪ `save.armies` 我方部隊的 general/officers
+ * （web `awayNameSet`）。`rosterOf` 用它把行軍中的將從城內名單剔掉。
+ */
+export function awayNameSet(save: CitySave | null | undefined): Set<string> {
+  const set = new Set<string>();
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return set;
+  const away = isRecord(save.away) ? save.away : {};
+  for (const [name, id] of Object.entries(away)) {
+    if (name && String(id || '') !== '') set.add(name);
+  }
+  for (const army of Array.isArray(save.armies) ? save.armies : []) {
+    for (const n of armyGeneralNames(army)) set.add(n);
+  }
+  return set;
+}
+
+/**
+ * 只用 `save.armies` 重算 `save.away`（出征 / 回城 / 退兵時呼叫；web `syncAway`）。
+ * 還在路上的將 → `{ 將名: 部隊 id }`，回城的將自動從 away 消失。
+ */
+export function syncAway<T extends CitySave | null | undefined>(save: T): T {
   if (!save || typeof save !== 'object' || Array.isArray(save)) return save;
-  const rec = save.cmdOrders;
-  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
-    save.cmdOrders = {};
-    return save;
+  const next: Record<string, string> = {};
+  for (const army of Array.isArray(save.armies) ? save.armies : []) {
+    if (!isRecord(army) || army.side !== 'A') continue;
+    const id = typeof army.id === 'string' ? army.id : '';
+    for (const n of armyGeneralNames(army)) next[n] = id;
   }
-  const month = intOr(save.month, 1, 1);
-  const next: Record<string, number> = {};
-  for (const cmd of CMD_ORDER) {
-    if (intOr(rec[cmd], 0, 0) === month) next[cmd] = month;
-  }
-  save.cmdOrders = next;
+  save.away = next;
   return save;
+}
+
+/** 現在是不是正月（原作內政只在每年 1 月開；web `city.html:543` 的 `inAffairsMonth`） */
+export function isAffairsMonth(save: CitySave | null | undefined): boolean {
+  const month = intOr(save && save.month, 1, 1);
+  return ((month - 1) % 12) + 1 === 1;
+}
+
+/** 非正月時給玩家看的提示（web `city.html:550-553` 同文） */
+export const OFF_MONTH_HINT = '非正月：原作內政只在每年 1 月開（大地圖「推進一月」到 1 月再來）。';
+
+/**
+ * 內政是否唯讀：非正月一律唯讀；除錯不限次數時不看 `monthLocked`。
+ * 對照 web `city.html:545-549` 的 `readOnly()`（Cocos 沒有 `?view=1` 的唯讀視圖）。
+ */
+export function readOnly(save: CitySave | null | undefined, unlimited = false): boolean {
+  if (!isAffairsMonth(save)) return true;
+  return !unlimited && monthLocked(save, unlimited);
 }
 
 /* ======================================================================

@@ -64,9 +64,9 @@ import {
   project,
 } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
-import { BattleInput, skillRadius, skillSlotRects, uiToScreen, worldToScreen } from './BattleInput';
+import { BattleInput, skillRadius, uiToScreen, worldToScreen } from './BattleInput';
+import { buildConsoleUi, skillCellRects } from './BattleConsoleUi';
 import type { BattleEffect, FloatTone } from './BattleInput';
-import { buildCmdUi } from './BattleCmdUi';
 import type { CmdBg, CmdText } from './BattleCmdUi';
 import { applyTextRole } from './TextRole';
 import { makeNineSlice, makePanel, placeDesign } from './UiSkin';
@@ -995,10 +995,10 @@ export class BattleRoot extends Component {
       return;
     }
 
-    // ① 选中格金框（技能格坐标与 HUD/命中区同源：BattleInput.skillSlotRects）
+    // ① 选中格金框（技能格坐标与底栏命中区同源：BattleConsoleUi.skillCellRects）
     const idx = this.input.selected;
     if (idx !== null) {
-      const r = skillSlotRects(this.input.slots.length)[idx];
+      const r = skillCellRects(this.input.slots.length)[idx];
       if (r) {
         g.strokeColor = rgba(COLORS.gold, 235);
         g.lineWidth = 3;
@@ -1127,6 +1127,15 @@ export class BattleRoot extends Component {
       'CmdSubAssault',
       'CmdLabelRetreat',
       'CmdSubRetreat',
+      // 技能格改由 BattleConsoleUi 的动态技能行画（按可释放技数出格），HUD 的 8 格让位
+      'SkillSlot1',
+      'SkillSlot2',
+      'SkillSlot3',
+      'SkillSlot4',
+      'SkillSlot5',
+      'SkillSlot6',
+      'SkillSlot7',
+      'SkillSlot8',
     ]);
     const hits: Node[] = [];
     const walk = (node: Node): void => {
@@ -1148,14 +1157,10 @@ export class BattleRoot extends Component {
     // BattleHud.refresh() 每帧都会把老控件的 active 写回 true（syncArt），这里每帧再关一次
     for (const node of this.legacyHidden) node.active = false;
 
-    const model = buildCmdUi(world, {
-      menuOpen: this.input.armyMenuNow,
-      mode: this.input.modeNow,
-      skillCount: this.input.slots.length,
-    });
+    const items = buildConsoleUi(world, this.input.slots, this.input.modeNow);
     const order: string[] = [];
     const alive = new Set<string>();
-    for (const item of model.items) {
+    for (const item of items) {
       if (CARD_TAKEOVER_IDS.has(item.id)) continue;
       order.push(item.id);
       alive.add(item.id);

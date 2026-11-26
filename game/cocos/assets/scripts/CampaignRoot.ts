@@ -99,6 +99,8 @@ import type {
   CampaignScenario,
 } from './GameState';
 import type { GameData } from './types';
+// [P0-2] 內政面板要吃「當前劇本號」與可選的 garrison 表（DataLoader 把它塞在 GameData 的同名 key 上）
+import type { GarrisonScenario } from './CityModel';
 import { DESIGN_H, DESIGN_W } from './view/layout';
 import { COLORS, FONT_FAMILY } from './view/theme';
 
@@ -1254,6 +1256,8 @@ export class CampaignRoot extends Component {
   private selected: string | null = null;
   private hintText = '';
   private actionRects: ActionRect[] = [];
+  /** [P0-2] 本局劇本序號（`RunSetup.scenarioIndex()` 在 `start()` 時記下來） */
+  private scenIdx = 0;
 
   private cityLabels = new Map<string, Label>();
   private cityScreen = new Map<string, { x: number; y: number }>();
@@ -1362,6 +1366,8 @@ export class CampaignRoot extends Component {
       const data = await loadGameData();
       // 剧本索引来自开局选择（RunSetup，标题页/剧本页写入）；越界自动回落 0
       const sci = runScenarioIndex();
+      // [P0-2] 記住劇本號：內政面板的 roster/wildPool/關卡守軍都要按它取（舊碼恆 0）
+      this.scenIdx = sci;
       // R214c：先取出「这一局是不是刚按的开始新局」，initCampaign 与后面自动开内政都要用
       const freshRun = consumeFreshStart();
       const scenario = (data.scenarios[sci] ?? data.scenarios[0]) as unknown as CampaignScenario | undefined;
@@ -1922,8 +1928,8 @@ export class CampaignRoot extends Component {
             primary: true,
             enabled: true,
           },
-          { kind: 'recruit', title: '徵 兵', caption: '本城金 500 → 兵 +40', primary: false, enabled: GameState.cityMoney(this.selected) >= 500 },
-          { kind: 'develop', title: '開 發', caption: '本城金 400 → 民 +3000', primary: false, enabled: GameState.cityMoney(this.selected) >= 400 },
+          { kind: 'recruit', title: '徵 兵', caption: '進城徵兵 · 金→預備兵→兵', primary: false, enabled: true },
+          { kind: 'develop', title: '開 發', caption: '進城開發 · 選將執行', primary: false, enabled: true },
           advance,
         ];
       }
@@ -1932,8 +1938,8 @@ export class CampaignRoot extends Component {
       if (incoming.length > 0) {
         const first = incoming[0];
         return [
-          { kind: 'recruit', title: '徵 兵', caption: '本城金 500 → 兵 +40', primary: false, enabled: GameState.cityMoney(this.selected) >= 500 },
-          { kind: 'develop', title: '開 發', caption: '本城金 400 → 民 +3000', primary: false, enabled: GameState.cityMoney(this.selected) >= 400 },
+          { kind: 'recruit', title: '徵 兵', caption: '進城徵兵 · 金→預備兵→兵', primary: false, enabled: true },
+          { kind: 'develop', title: '開 發', caption: '進城開發 · 選將執行', primary: false, enabled: true },
           {
             kind: 'defend',
             title: '行 軍 中',
@@ -2003,7 +2009,7 @@ export class CampaignRoot extends Component {
   private enemyIntelOf(name: string): EnemyIntel | null {
     if (!this.data) return null;
     try {
-      return resolveEnemyIntel(this.data, 0, name, 100);
+      return resolveEnemyIntel(this.data, this.scenIdx, name, 100);
     } catch (err) {
       console.warn('[CampaignRoot] resolveEnemyIntel 失敗', err);
       return null;
@@ -2046,7 +2052,7 @@ export class CampaignRoot extends Component {
    * 打開內政面板（對應 web `campaign.html` 點自己的城 → `city.html?city=<名>`）。
    * 面板延遲建一次，之後只做 open/hide —— 用顯示/隱藏當頁面切換，不新建 scene。
    */
-  private openCityPanel(cityName: string): void {
+  private openCityPanel(cityName: string, openCmd?: string): void {
     if (!this.data) return;
     if (!this.cityPanel) {
       const node = new Node('CityPanel');
@@ -2056,10 +2062,18 @@ export class CampaignRoot extends Component {
       node.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
       this.cityPanel = node.addComponent(CityPanel);
     }
+    // [P0-2] garrison.json 是 DataLoader 的**可選**增強表：載到了才傳（沒有就讓城 Model 回落 110）
+    const garrisonRaw = (this.data as unknown as { garrison?: unknown }).garrison;
+    const garrison = Array.isArray(garrisonRaw) ? (garrisonRaw as GarrisonScenario[]) : null;
     this.cityPanel.open({
       cityName,
       data: this.data,
       scenario: this.scenarioLike(),
+      // [P0-2] 當前劇本號：內政 roster / wildPool / 關卡守軍全部按它取
+      scenIdx: this.scenIdx,
+      garrison,
+      // [F12/F15] 大地圖「徵兵」「開發」按鈕：進城後直接開對應抽屜
+      openCmd,
       onClose: () => {
         // 面板已把 gold / 城況 / 內政欄位寫回存檔；這裡只重新讀一次並刷新大地圖
         this.save = GameState.loadSave();
@@ -2089,7 +2103,8 @@ export class CampaignRoot extends Component {
    * Cocos 這一版**推進方式逐字一致**：一次跑 N 個月，逐月 `advanceMonth`（年稅/補兵）→
    * `advanceArmiesMonth()`（我軍行軍/抵達）→ `runMapAi()`（AI 月結算/出兵），最後落到次年正月。
    * 不是「月份 +12 就完事」—— 月報、行軍、抵達城下都按 N 次逐月走。
-   * 月令改成「每項主令每月一次」（見 `CityPanel.runCommand`），所以不再有 web 的正月閘門。
+   * 內政窗口回到 web 口徑：原作只在每年正月開（`Saves.monthOfYear(save.month) === 1`），
+   * 面板內部的閘門見 `CityPanel.runCommand`（正月門 + 逐將年令）。
    * `GameState.advanceSteps()` 在 `sanguo_adv_single='1'` 時只走 1 個月（對照 web `?adv=1`）。
    */
   private endInterior(): void {
@@ -2157,17 +2172,15 @@ export class CampaignRoot extends Component {
       return;
     }
     if (kind === 'recruit') {
-      const result = GameState.recruit(selected);
-      this.save = GameState.loadSave();
-      this.hintText = result.message;
-      this.refresh();
+      // [F15] 不再走舊口徑「金 500 → 兵 +40」：進城開徵兵抽屜（金→預備兵→兵，原作線）
+      this.hintText = '';
+      this.openCityPanel(selected, '徵兵');
       return;
     }
     if (kind === 'develop') {
-      const result = GameState.develop(selected);
-      this.save = GameState.loadSave();
-      this.hintText = result.message;
-      this.refresh();
+      // [F12] 開發同樣進城：先任命太守、再選執行將（原作不允許無將代行）
+      this.hintText = '';
+      this.openCityPanel(selected, '開發');
       return;
     }
     if (kind === 'defend') {

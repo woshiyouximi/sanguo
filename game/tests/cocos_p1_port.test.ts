@@ -167,53 +167,79 @@ test('[F7] Cocos CityModel 命令表 = web 7 主令 + 2 副令，物品已併入
   assert.doesNotMatch(src.match(/export const CMD_META[\s\S]*?\n\};/)?.[0] ?? '', /^\s*物品:/m);
 });
 
-test('[F7] Cocos 逐令月配額：每項主令每月一次、副令不占', () => {
+test('[F2/F3] Cocos 逐將年令 + 隨軍過濾 + 正月門（舊 F7 逐令月配額已廢除）', () => {
   const src = cocos('CityModel.ts');
 
-  const isSec = fnBody(src, 'isSecondaryCmd');
-  assert.match(isSec, /CMD_SECONDARY/);
+  // R21：舊的「主令每項每月一次」整套移除（那是對 F7 的誤讀）
+  assert.doesNotMatch(src, /export function cmdOrderUsed/);
+  assert.doesNotMatch(src, /export function markCmdOrder/);
+  assert.doesNotMatch(src, /export function ordersUsedCount/);
+  assert.doesNotMatch(src, /export function clearCmdOrders/);
+  assert.doesNotMatch(src, /save\.cmdOrders/);
 
-  const used = fnBody(src, 'cmdOrderUsed');
-  assert.match(used, /cmdOrders/, 'looks at save.cmdOrders');
-  assert.match(used, /const month = intOr\(save\.month, 1, 1\);/);
-  assert.match(used, /return at > 0 && at === month;/);
+  // F2 逐將年令：save.acted[將] = 年序，一年一次／將
+  const year = fnBody(src, 'yearIndexOf');
+  assert.match(year, /Math\.floor\(\(intOr\(save && save\.month, 1, 1\) - 1\) \/ 12\) \+ 1;/);
+  const locked = fnBody(src, 'actedLocked');
+  assert.match(locked, /yearIndexOf\(save\)/);
+  const mark = fnBody(src, 'markActed');
+  assert.match(mark, /if \(actedLocked\(save, name\)\) return false;/);
+  assert.match(mark, /\(save\.acted as Record<string, number>\)\[name\] = yearIndexOf\(save\);/);
 
-  const mark = fnBody(src, 'markCmdOrder');
-  assert.match(mark, /isSecondaryCmd\(cmd\)/, '副令不記配額');
-  assert.match(mark, /rec\[String\(cmd\)\] = intOr\(save\.month, 1, 1\);/);
+  // ensureExtras 每次讀檔規範化 acted / away（不再清逐令配額；泛型簽名所以直接看源碼字串）
+  assert.match(src, /save\.acted = acted;/);
+  assert.match(src, /save\.away = away;/);
+  assert.doesNotMatch(src, /clearCmdOrders\(save\)/);
 
-  const count = fnBody(src, 'ordersUsedCount');
-  assert.match(count, /for \(const cmd of CMD_ORDER\)/);
-  assert.match(count, /cmdOrderUsed\(save, cmd\)/);
+  // F3 隨軍：awayNameSet 讀 save.away ∪ save.armies 我方(side 'A')；syncAway 按部隊重建
+  const away = fnBody(src, 'awayNameSet');
+  assert.match(away, /save\.away/);
+  assert.match(away, /armyGeneralNames\(army\)/);
+  assert.match(fnBody(src, 'armyGeneralNames'), /army\.side !== 'A'/);
+  // syncAway 是泛型簽名（fnBody 抓不到），直接看源碼字串（全檔唯一）
+  assert.match(src, /save\.away = next;/);
 
-  // ensureExtras 每次讀檔清掉過月的配額
-  assert.match(src, /clearCmdOrders\(save\);/);
+  // 正月門：非正月只讀（web city.html:543-549 的 readOnly 口徑）
+  const ro = fnBody(src, 'readOnly');
+  assert.match(ro, /if \(!isAffairsMonth\(save\)\) return true;/);
+  const affairs = fnBody(src, 'isAffairsMonth');
+  assert.match(affairs, /% 12\) \+ 1 === 1/);
+
+  // rosterOf 用 away 過濾隨軍將
+  assert.match(fnBody(src, 'rosterOf'), /awayNameSet\(save\)/);
 });
 
-test('[F7] Cocos CityPanel：九宮 = 7 主令 + 2 副令、逐令閘門、情報不再吃月令', () => {
+test('[F7] Cocos CityPanel：九宮 = 7 主令 + 2 副令、正月門 + 逐將年令、情報不吃年令', () => {
   const src = cocos('CityPanel.ts');
 
   // cmdList 拼接 SECONDARY
   assert.match(src, /return \(\[\] as string\[\]\)\.concat\(M\.CMD_ORDER, M\.CMD_SECONDARY\);/);
 
-  // 閘門：不是整頁 monthLocked，而是逐令
+  // 閘門：正月門 + 內政窗口收束（不再逐令月配額）
   const run = fnBody(src, 'runCommand');
-  assert.match(run, /M\.isSecondaryCmd\(cmd\)/);
-  assert.match(run, /M\.cmdOrderUsed\(save, cmd\)/);
+  assert.match(run, /M\.readOnly\(save, false\)/);
+  assert.match(run, /M\.OFF_MONTH_HINT/);
+  assert.doesNotMatch(run, /M\.cmdOrderUsed\(/);
   assert.match(run, /case '武將資料':/);
   assert.doesNotMatch(run, /case '物品':/);
 
-  // 情報是副令：不再 consume
+  // 情報是副令：不選將、不吃年令
   const intel = fnBody(src, 'cmdIntel');
-  assert.doesNotMatch(intel, /this\.consume\(\)/);
+  assert.doesNotMatch(intel, /this\.actedBy\(|this\.consume\(\)/);
 
-  // 移動/任命不吃配額（web：免費/副令）
-  assert.doesNotMatch(fnBody(src, 'moveTo'), /this\.acted\(\)/);
-  assert.doesNotMatch(fnBody(src, 'appointTo'), /this\.acted\(\)/);
+  // 移動/任命不吃年令（web：移動是副令、任命免費）
+  assert.doesNotMatch(fnBody(src, 'moveTo'), /this\.actedBy\(|this\.acted\(\)/);
+  assert.doesNotMatch(fnBody(src, 'appointTo'), /this\.actedBy\(|this\.acted\(\)/);
 
-  // HUD 顯示已下條數／7
-  assert.match(src, /\['月令', `\$\{usedOrders\}／\$\{M\.CMD_ORDER\.length\}`/);
-  assert.match(src, /const usedOrders = M\.ordersUsedCount\(save\);/);
+  // 開發/搜索要選執行將、鎖該將今年年令（web pickExec → afterCommand(true, execName)）
+  assert.match(src, /this\.pickExec\('開發', \(name\) => this\.developBy\(name\)\);/);
+  assert.match(src, /this\.pickExec\('搜索', \(name\) => this\.searchBy\(name\)\);/);
+  assert.match(fnBody(src, 'developBy'), /this\.actedBy\(name\)/);
+  assert.match(fnBody(src, 'searchBy'), /this\.actedBy\(name\)/);
+
+  // HUD 顯示「年令 n / 城內將數」（不再是月令 n/7）
+  assert.match(src, /\['年令', `\$\{actedNow\} \/ \$\{roster\.length\}`/);
+  assert.match(src, /const actedNow = M\.actedNames\(save\)\.length;/);
 });
 
 /* ======================================================================
@@ -273,8 +299,10 @@ test('[F16] Cocos CityPanel/CampaignRoot：存檔往返保住遷移標記，UI �
   const panel = cocos('CityPanel.ts');
   assert.match(fnBody(panel, 'mergeSave'), /goldMigrated: gs\.goldMigrated === true,/);
   assert.match(fnBody(panel, 'persist'), /gs\.gold = 0;\s*\n\s*gs\.goldMigrated = true;/);
-  assert.match(panel, /\['金', fmt\(GameState\.nationalGold\(\)\), COLORS\.goldLight\]/);
-  assert.match(panel, /cmdOrders: save\.cmdOrders/);
+  assert.match(panel, /\[['"]金['"], fmt\(GameState\.nationalGold\(\)\), COLORS\.goldLight\]/);
+  // [P1-2] searchSeq 跨屏保存（舊 cmdOrders 逐令配額已廢除）
+  assert.match(panel, /searchSeq: save\.searchSeq/);
+  assert.match(panel, /searchSeq: isRecord\(extras\.searchSeq\)/);
 
   const campaign = cocos('CampaignRoot.ts');
   assert.match(campaign, /國庫 \$\{GameState\.nationalGold\(\)\} 金/);

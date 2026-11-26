@@ -42,6 +42,7 @@ import {
   lordOrderKind,
 } from './BattleCmdUi';
 import type { Cmd6Kind } from './BattleCmdUi';
+import { ARMY_RECTS, consoleHit, globalRects, skillCellRects } from './BattleConsoleUi';
 import { applyArmyCmd, applyArmyCmdKind } from './core/army_cmd';
 import type { ArmyCmdKind } from './core/army_cmd';
 import {
@@ -427,6 +428,38 @@ export function hitTest(ctx: HitContext, tx: number, ty: number, opts?: HitOptio
     return { type: 'restart' };
   }
 
+  // R218 底栏重排：技能格 / 常显部队 6 条 / 全局 4 颗优先（旧的 cmd6/chip 路径保留给老断言）
+  const ch = consoleHit(ctx.world, tx, ty, ctx.slots.length);
+  if (ch) {
+    if (ch.type === 'skill') {
+      const slot = ctx.slots[ch.index ?? -1];
+      if (!slot) return null;
+      const reason = castBlockReason(ctx.world, slot);
+      return { type: 'skill', index: ch.index ?? 0, seq: slot.seq, canCast: reason === null, reason };
+    }
+    if (ch.type === 'armyCmd') {
+      const item = armyMenuItems(ctx.world)[ch.index ?? -1];
+      if (!item) return null;
+      return {
+        type: 'armyCmd',
+        slot: item.slot,
+        label: item.label,
+        kind: item.kind,
+        canUse: item.ok,
+        reason: item.reason,
+      };
+    }
+    const def = cmd6Defs(ctx.world).find((d) => d.kind === ch.kind);
+    return {
+      type: 'cmd6',
+      btn: ch.index ?? -1,
+      kind: ch.kind ?? 'guardLord',
+      label: def?.label ?? '',
+      canUse: ctx.mode === 'fighting',
+      reason: null,
+    };
+  }
+
   let justClosed = false;
   if (ctx.menuOpen === true) {
     const row = armyRowAt(tx, ty);
@@ -488,8 +521,17 @@ export function hitTest(ctx: HitContext, tx: number, ty: number, opts?: HitOptio
 /** 消息栏（web 里是控制台底部的 log 条；点它不许触发"结算重开"） */
 const CONSOLE_CHROME = [MESSAGE_BOX] as const;
 
-/** 是否落在技能格 / 指令台（6 颗 + 2 chip + 第二层面板）/ 消息栏上 */
+/** 是否落在技能格 / 指令台 / 消息栏上 */
 export function isConsoleControl(tx: number, ty: number, skillCount = SKILL_SLOTS): boolean {
+  for (const r of skillCellRects(skillCount)) {
+    if (contains(r, tx, ty)) return true;
+  }
+  for (const r of ARMY_RECTS) {
+    if (contains(r, tx, ty)) return true;
+  }
+  for (const r of globalRects()) {
+    if (contains(r, tx, ty)) return true;
+  }
   for (const r of skillSlotRects(skillCount)) {
     if (contains(r, tx, ty)) return true;
   }
@@ -542,7 +584,8 @@ export class BattleInput {
   bind(world: World): void {
     this.world = world;
     const gen = world.sides.A.general;
-    this.bar = makeSkillBar(world.data, learnedSkillSeqs(world.data, gen.name, gen.level));
+    // 玩家可释放的武将技上限 6 格（R218：8 格是内存容量，不是 UI 槽位）
+    this.bar = makeSkillBar(world.data, learnedSkillSeqs(world.data, gen.name, gen.level, 6));
     this.mode = 'fighting';
     this.menu = false;
     this.selected = null;

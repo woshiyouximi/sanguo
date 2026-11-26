@@ -198,6 +198,18 @@ export interface CityPanelOptions {
   data: GameData;
   /** 當前劇本（`{ cities, paths }`，`core/march` 與 CityModel 共用這個形狀） */
   scenario: M.CityScenario;
+  /**
+   * [P0-2] 當前劇本序號（`RunSetup.scenarioIndex()` 的結果）。
+   * 內政的 roster / wildPool / garrison 全部按這個劇本取；缺省 0 = 舊行為（第一個劇本）。
+   */
+  scenIdx?: number;
+  /** [P0-2] `garrison.json` 原始陣列（關卡守軍兵力按劇本取；沒有就回落 110） */
+  garrison?: M.GarrisonScenario[] | null;
+  /**
+   * [P1-5/F12/F15] 進場直接開哪個抽屜（大地圖「徵兵」「開發」按鈕走同一面版）。
+   * 只接受命令表裡的名字（'徵兵' / '開發'）；開完就清掉，下次開面版不會重播。
+   */
+  openCmd?: string;
   /** 關閉面板：由 `CampaignRoot` 負責隱藏 + 刷新大地圖 */
   onClose: () => void;
   /** 出征：把目標城交回 `CampaignRoot` 走既有的 `doAction('march')` */
@@ -669,18 +681,27 @@ export class CityPanel extends Component {
       items: (options.data.items ?? []) as unknown as M.CityItem[],
       wises: (options.data.wises ?? []) as unknown as M.CityWise[],
       scenario: options.scenario,
-      scenIdx: 0,
+      // [P0-2] 劇本號一路傳進來：roster / wildPool / 關卡守軍都按它取
+      scenIdx: M.intOr(options.scenIdx, 0, 0),
+      garrison: options.garrison ?? null,
       bag: this.bag,
     };
     this.save = this.mergeSave();
     this.closeSheet();
-    // 進頁先補「換月」：預備兵補給 + 自治代行（web city.html 的 autonomyTick）
+    // 進頁先補「換月」：預備兵（金→預備兵，原作線）+ 自治代行（web city.html 的 autonomyTick）
     const tick = M.autonomyTick(this.save, this.cities(), this.ctx);
     if (tick.refilled.length > 0 || tick.auto) {
       M.ensureExtras(this.save);
     }
     this.persist();
     this.refresh();
+    // [F12/F15] 大地圖按鈕進來時直接開對應抽屜（只開一次；runCommand 自己會做正月/收束閘門）
+    const openCmd = options.openCmd;
+    if (openCmd) {
+      options.openCmd = '';
+      const idx = cmdList().indexOf(openCmd);
+      if (idx >= 0) this.runCommand(idx);
+    }
   }
 
   /** 隱藏（不動存檔；`onClose` 由呼叫者決定要不要回寫） */
@@ -796,15 +817,23 @@ export class CityPanel extends Component {
       roster: isRecord(extras.roster) ? (extras.roster as M.Roster) : {},
       appointed: isRecord(extras.appointed) ? (extras.appointed as M.Appointed) : {},
       searchLog: Array.isArray(extras.searchLog) ? (extras.searchLog as M.LogEntry[]) : [],
+      // [P1-2] 搜索次數必須跨屏保存：否則重進內政頁只剩 60 條日誌可數，第 61 次起種子凍結。
+      searchSeq: isRecord(extras.searchSeq) ? (extras.searchSeq as Record<string, number>) : {},
+      searchNonce: M.intOr(extras.searchNonce, 0, 0),
       foundItems: Array.isArray(extras.foundItems) ? (extras.foundItems as number[]) : [],
+      // [F2/F3] 逐將年令 + 隨軍名單（old save 相容：ensureExtras 會補成空物件）
+      acted: isRecord(extras.acted) ? (extras.acted as Record<string, number>) : {},
+      away: isRecord(extras.away) ? (extras.away as Record<string, string>) : {},
+      // [F3] 部隊真源在 GameState：syncAway 用它把行軍中的將從城內名單剔掉
+      armies: Array.isArray(gs.armies) ? gs.armies : [],
       auto: isRecord(extras.auto) ? (extras.auto as Record<string, number>) : {},
       autoMonth: M.intOr(extras.autoMonth, 0, 0),
       lastActionMonth: M.intOr(extras.lastActionMonth, 0, 0),
-      // [F7] 逐令月配額：`{ 命令: 月序 }`，過月由 `ensureExtras` 清掉。
-      cmdOrders: isRecord(extras.cmdOrders) ? (extras.cmdOrders as Record<string, number>) : {},
       bag: this.bag.slice(),
     };
     M.ensureExtras(save);
+    // [F3] 依當前行軍部隊重算 away（出征 / 回城 / 退兵都反映在同一個 save.armies 上）
+    M.syncAway(save);
     return save;
   }
 
@@ -840,12 +869,16 @@ export class CityPanel extends Component {
       roster: save.roster,
       appointed: save.appointed,
       searchLog: save.searchLog,
+      // [P1-2] 搜索計數器與 nonce 跟著戰役檔走（重進頁面／跑完一年都不斷）
+      searchSeq: save.searchSeq,
+      searchNonce: save.searchNonce,
       foundItems: save.foundItems,
+      // [F2/F3] 逐將年令與隨軍名單（跨月保存；換年由 clearActed 清）
+      acted: save.acted,
+      away: save.away,
       auto: save.auto,
       autoMonth: save.autoMonth,
       lastActionMonth: save.lastActionMonth,
-      // [F7] 逐令月配額要跨屏保存（大地圖跑完一年後，下個月自然失效）
-      cmdOrders: save.cmdOrders,
       bag: this.bag,
     };
     try {
@@ -966,13 +999,17 @@ export class CityPanel extends Component {
     const cmds = cmdList();
     const save = this.save;
     const windowClosed = this.locked;
+    // [P0-4] 逐將年令：開發/搜索要指定執行將，城內沒有「今年還沒行動」的將時這兩格變灰。
+    const freeExecs = save
+      ? M.rosterOf(save, this.cityName, this.ctx).filter((g) => !M.actedLocked(save, g.NAME)).length
+      : 0;
     for (let i = 0; i < this.cmdRects.length; i += 1) {
       const rect = this.cmdRects[i];
       const cmd = cmds[i];
       const primary = cmd === '自治';
-      // [F7] 逐令月配額：主令每項每月一次（用過即變灰），副令（情報/移動）不占、恆可用。
-      const used = !!save && !!cmd && !M.isSecondaryCmd(cmd) && M.cmdOrderUsed(save, cmd);
-      const enabled = !windowClosed && !used;
+      const needsExec = cmd === '開發' || cmd === '搜索';
+      const noExec = needsExec && freeExecs <= 0;
+      const enabled = !windowClosed && !noExec;
       const inner = { x: rect.x + 4, y: rect.y + 4, w: rect.w - 8, h: rect.h - 8 };
       const top = enabled ? (primary ? '#4A3520' : '#402D1C') : '#1A1F26';
       const bottom = enabled ? (primary ? '#241809' : '#1A1209') : '#0F1319';
@@ -1130,14 +1167,16 @@ export class CityPanel extends Component {
     genCount: number,
     major: string,
     capTotal: number,
-    usedOrders: number,
+    actedNow: number,
+    awayCount: number,
+    year: number,
   ): string[] {
     const prepFull = st.prep >= prepCap ? '（已滿）' : '';
     return [
-      // [F7] 主令每項每月一次（web `CMD_ORDER` 7 項），情報/移動是副令不占月令。
-      `◇ 月令 ${usedOrders}／${M.CMD_ORDER.length} 已下（情報/移動 不占）`,
+      // [F2] 原作 0x423Cxx：每將每年只能搜索或開發一次（`save.acted[將]=年序`），情報/移動不占。
+      `◇ 第 ${year} 年 · 已行動 ${actedNow}／${genCount} 將（在途 ${awayCount}）`,
       `◇ 城防 ${fmt(st.def)} · 預備兵 ${fmt(st.prep)}／${fmt(prepCap)}${prepFull}`,
-      `◇ 開發 −金${fmt(M.DEV.COST)} · 搜索 −金${fmt(M.SEARCH.COST)}`,
+      `◇ 開發 −金${fmt(M.DEV.COST)} · 搜索 −金${fmt(M.SEARCH.COST)} · 徵兵 金${fmt(M.PREP_PER_GOLD)}→1 預備`,
       `◇ 兵 ${fmt(st.troops)}／${fmt(capTotal)} · 士氣 ${this.moraleOf(major)}／100`,
       `◇ 內政效率 ×${eff.toFixed(2)} · 武將 ${genCount} 員 · 太守 ${major || '—'}`,
     ];
@@ -1150,15 +1189,19 @@ export class CityPanel extends Component {
     const st = M.ensureCityState(save, def);
     if (!st) return;
 
-    this.locked = M.monthLocked(save, false);
+    // [P0-4/正月門] 非正月只讀（web `readOnly()` 同口徑）；出征/自治用掉窗口後同樣鎖住。
+    this.locked = M.readOnly(save, false);
     const caps = M.armCaps(save, def, this.ctx);
     const roster = M.rosterOf(save, this.cityName, this.ctx);
     const major = M.majorOf(save, def) || '—';
     const wise = M.wiseOf(save, def) || '—';
     const eff = M.efficiencyOf(save, def, this.ctx);
     const prepCap = M.prepCapOf(st.pop);
-    // [F7] 本月已下達的主令條數（0–7）；副令（情報/移動）不計。
-    const usedOrders = M.ordersUsedCount(save);
+    // [F2] 逐將年令：`save.acted[將]=年序`，一年一次/將；[F3] 在途（隨軍）的將不算城內人力。
+    const actedNow = M.actedNames(save).length;
+    const year = M.yearIndexOf(save);
+    const awayCount = M.awayNameSet(save).size;
+    const freeExecs = roster.filter((g) => !M.actedLocked(save, g.NAME)).length;
     // [F19] 武將數／上限（10）—— 超編只標紅、不裁切（web `officerCapState`）。
     const officer = M.officerCapState(roster.length);
 
@@ -1180,8 +1223,8 @@ export class CityPanel extends Component {
       ['武將', `${officer.n} / ${officer.cap}`, officer.over ? COLORS.danger : COLORS.text],
       ['疲勞', `${this.tireOf(major)}/100`, this.tireOf(major) >= 60 ? COLORS.danger : COLORS.text],
       ['士氣', `${this.moraleOf(major)}/100`, this.moraleOf(major) < 30 ? COLORS.textFaint : COLORS.text],
-      // [F7] 月令 = 主令已下條數／7（每項每月一次），不再是一月一條的單一 lock。
-      ['月令', `${usedOrders}／${M.CMD_ORDER.length}`, usedOrders >= M.CMD_ORDER.length ? COLORS.textFaint : COLORS.ok],
+      // [P0-4] 年令 = 今年已行動的將數／城內將數（原作逐將年令；不再是「月令 n/7」）。
+      ['年令', `${actedNow} / ${roster.length}`, actedNow >= roster.length ? COLORS.textFaint : COLORS.ok],
     ];
     for (let i = 0; i < fields.length && i < this.hudNames.length; i += 1) {
       const [name, value, color] = fields[i];
@@ -1197,9 +1240,9 @@ export class CityPanel extends Component {
       const meta = M.CMD_META[cmd];
       this.setLabel(this.cmdTags[i], meta?.tag ?? cmd);
       this.setLabel(this.cmdSubs[i], this.cmdSub(cmd, st, save));
-      // [F7] 變灰看的是「這條令本月用過沒有」，不是整頁一月一條。
-      const used = !M.isSecondaryCmd(cmd) && M.cmdOrderUsed(save, cmd);
-      const dull = this.locked || used;
+      // [P0-4] 只在「需要用將」的命令上按年令變灰（開發/搜索要選執行將）；情報/移動不占年令。
+      const needsExec = cmd === '開發' || cmd === '搜索';
+      const dull = this.locked || (needsExec && freeExecs === 0);
       const tag = this.cmdTags[i];
       if (tag) tag.color = rgba(dull ? COLORS.textFaint : COLORS.goldLight);
       const sub = this.cmdSubs[i];
@@ -1210,7 +1253,7 @@ export class CityPanel extends Component {
     // 算出的「提示」行填滿 —— web 基準是最長連續空白 130px，Cocos 原本 347px。
     // 這些行不是新玩法：全部取自資訊卡既有欄位與 CMD_META 既有常數（開發/搜索成本）。
     const logs = M.recentLog(save, LOG_ROWS);
-    const tips = this.tipsOf(st, prepCap, eff, roster.length, major, caps.total, usedOrders);
+    const tips = this.tipsOf(st, prepCap, eff, roster.length, major, caps.total, actedNow, awayCount, year);
     for (let i = 0; i < LOG_ROWS; i += 1) {
       const row = logs[i];
       const tipIndex = i - logs.length - (logs.length === 0 ? 1 : 0);
@@ -1226,18 +1269,22 @@ export class CityPanel extends Component {
     // v18-cocos-layout：原本這裡寫「本月令 可下」，與資訊卡第 12 格「月令 可下」重複；
     // 改成 web 結果卡的右上標註「最近 6 條」。
     this.setLabel(this.lblLogState, `最近 ${LOG_ROWS} 條`);
+    // [P0-4/正月門] 非正月只讀（web `readOnlyHint()` 同文案）；正月內政按逐將年令。
+    const affairsMonth = M.isAffairsMonth(save);
     this.setLabel(
       this.lblHint,
-      this.locked
-        ? `${M.LOCK_HINT} · 回大地圖「內政終了」跑完一年`
-        : `主令 ${usedOrders}／${M.CMD_ORDER.length} 已下 · 情報/移動 不占月令`,
+      !affairsMonth
+        ? M.OFF_MONTH_HINT
+        : this.locked
+          ? `${M.LOCK_HINT} · 回大地圖「內政終了」跑完一年`
+          : `正月內政 · 每將今年一次（已行動 ${actedNow} 人，情報/移動 不占）`,
     );
 
     // 朝堂紀要帶（w7-cocos-render2）：全部取自資訊卡已有的欄位，不引入新數據源
     this.setLabel(this.lblBandTitle, '朝 堂 紀 要');
     this.setLabel(
       this.lblBandNote,
-      `${this.locked ? '內政已終了' : `月令 ${usedOrders}／${M.CMD_ORDER.length}`} · 國庫 ${fmt(GameState.nationalGold())}`,
+      `${!affairsMonth ? '非正月 · 只讀' : this.locked ? '內政已終了' : `年令 第 ${year} 年`} · 國庫 ${fmt(GameState.nationalGold())}`,
     );
     this.setLabel(this.lblBandText, `太守 ${major} · 軍師 ${wise} · 武將 ${roster.length} 員 · 內政效率 ×${eff.toFixed(2)}`);
     this.setLabel(
@@ -1295,24 +1342,64 @@ export class CityPanel extends Component {
   }
 
   /**
-   * 吃一條月令（[F7] 主令每項每月一次；副令情報/移動不占，由 `runCommand` 擋掉）。
+   * [P0-4/F2] 記「這名將今年已行動」：`save.acted[將] = 年序`（一年一次/將，web `markActed`）。
    *
-   * 舊碼是 `M.markMonthActed()`（一月一條，任一條命令就鎖整頁）—— 那是用戶抱怨的口徑；
-   * web 是 `CMD_ORDER` 7 項各每月一次（`city.html:754-759`），所以這裡改成逐令配額。
-   * 「內政窗口收束」（`monthLocked`）仍只由「出征／自治」觸發（web 同）。
+   * 舊碼用 `markMonthActed`（一月一條，任一條命令鎖整頁）與 [F7] 誤移植的「主令每項每月一次」
+   * 逐令月配額，兩者都已廢除；原作是**逐將年令**。內政窗口收束（`monthLocked`）仍只由
+   * 「出征／自治」觸發（web 同）。
    */
-  private consume(cmd: string): void {
+  private actedBy(name: string): void {
     const save = this.save;
     if (!save) return;
-    M.markCmdOrder(save, cmd);
+    M.markActed(save, name);
+    this.closeSheet();
     this.persist();
     this.refresh();
   }
 
-  /** 命令成功：關抽屜 + 吃這條令的月配額 + 存檔 */
-  private acted(cmd: string): void {
-    this.closeSheet();
-    this.consume(cmd);
+  /** [P0-1] 搜到寶物／兵符：寫進 `localStorage['sanguo_items_v1']`（與 web `bagAdd` 同鍵同格式） */
+  private bagAdd(seq: number): void {
+    const n = M.num(seq);
+    if (!n) return;
+    try {
+      const raw = sys.localStorage.getItem(M.BAG_KEY);
+      const next = M.bagAddRaw(raw, n);
+      sys.localStorage.setItem(M.BAG_KEY, next);
+      this.bag = M.bagSeqsOf(next);
+      if (this.ctx) this.ctx.bag = this.bag;
+    } catch (err) {
+      console.warn('[CityPanel] 背包寫入失敗', err);
+    }
+  }
+
+  /**
+   * [P0-4/F2] 選執行武將（原作「每項主令都要指定人，不能空手代行」）：只列今年還沒行動的城內將。
+   * 沒有可用將 → 記一條提示並取消命令（不吃年令、不扣金）。
+   */
+  private pickExec(title: string, cb: (name: string) => void): void {
+    const save = this.save;
+    if (!save) return;
+    const all = M.rosterOf(save, this.cityName, this.ctx);
+    const free = all.filter((g) => !M.actedLocked(save, g.NAME));
+    if (!free.length) {
+      const used = all.filter((g) => M.actedLocked(save, g.NAME)).map((g) => g.NAME);
+      this.note(
+        title,
+        used.length
+          ? `沒有可用的武將：${used.join('、')} 今年已經行動過（每將每年只能搜索或開發一次）。`
+          : '這座城沒有可用的武將（在路上的不算，F3）。',
+      );
+      this.persist();
+      this.refresh();
+      return;
+    }
+    const rows: SheetRow[] = free.map((g) => ({
+      text: `${g.NAME}（統 ${fmt(g.STR)} · 智 ${fmt(g.INT)}）`,
+      act: () => {
+        cb(g.NAME);
+      },
+    }));
+    this.openSheet(`執行武將（${title}）`, rows);
   }
 
   private runCommand(index: number): void {
@@ -1321,16 +1408,14 @@ export class CityPanel extends Component {
     const cmd = cmdList()[index];
     if (!save || !def || !cmd) return;
 
-    // [F7] 逐令閘門：主令每項每月一次，副令（情報/移動）不占月令。
-    // 整頁仍受「內政窗口是否已收束」約束（出征／自治用掉窗口後要回大地圖跑完一年）。
-    const windowClosed = M.monthLocked(save, false);
-    const secondary = M.isSecondaryCmd(cmd);
-    if (windowClosed || (!secondary && M.cmdOrderUsed(save, cmd))) {
+    // [P0-4] 兩道閘：①正月門 —— 非正月只讀（web `readOnly()` 同口徑）；②窗口收束 ——
+    // 出征/自治用掉窗口後要回大地圖「內政終了」跑完一年。逐將年令在具體命令裡由 pickExec 處理。
+    if (M.readOnly(save, false)) {
       this.note(
         cmd,
-        windowClosed
+        M.isAffairsMonth(save)
           ? `${M.LOCK_HINT}（內政窗口已收束）—— 回大地圖「內政終了」跑完一年。`
-          : `${cmd}：本月已下過這條令（每項每月一次）。情報/移動是副令，不占月令。`,
+          : M.OFF_MONTH_HINT,
       );
       this.persist();
       this.refresh();
@@ -1377,8 +1462,32 @@ export class CityPanel extends Component {
     const save = this.save;
     const def = this.def();
     if (!save || !def) return;
-    const r = M.develop(save, def, this.ctx);
+    // [P0-4/原作] 沒有太守不能開發（web `doDevelop` 同文案；太守提供效率倍率）
+    if (!M.majorOf(save, def)) {
+      this.note('開發', '需先任命太守：沒有太守不能開發（原作不允許無太守代行）。');
+      this.persist();
+      this.refresh();
+      return;
+    }
+    // [P0-4/F2] 先選執行將（今年還沒行動的城內將）
+    this.pickExec('開發', (name) => this.developBy(name));
+  }
+
+  private developBy(name: string): void {
+    const save = this.save;
+    const def = this.def();
+    if (!save || !def) return;
+    if (M.actedLocked(save, name)) {
+      this.closeSheet();
+      this.note('開發', `${name} 今年已行動（每將每年只能搜索或開發一次），換一位。`);
+      this.persist();
+      this.refresh();
+      return;
+    }
+    // [P1-1] 執行將 = 玩家選的這名將（舊碼永遠用太守）；效率倍率仍看太守（web 同公式）。
+    const r = M.develop(save, def, { ...this.ctx, exec: name });
     if (!r.ok) {
+      this.closeSheet();
       this.note('開發', r.reason === 'gold' ? `金不足（需 ${fmt(r.cost)}）。` : '人口飽和、防禦力最高了。');
       this.persist();
       this.refresh();
@@ -1386,16 +1495,26 @@ export class CityPanel extends Component {
     }
     // [F7] 開發成本 R85 起為 0（原作不花金），所以成功文案要分「不耗金 / 扣 N 金」兩種。
     const cost = Math.max(0, Math.trunc(M.num(r.cost)));
-    this.note('開發', `人口增加 ${fmt(r.pop)} 人，防禦力增加 ${fmt(r.def)}。${cost > 0 ? `（金 -${fmt(cost)}）` : '（不耗金）'}`);
-    this.acted('開發');
+    this.note(
+      '開發',
+      `${name} 執行：人口增加 ${fmt(r.pop)} 人，防禦力增加 ${fmt(r.def)}。${cost > 0 ? `（金 -${fmt(cost)}）` : '（不耗金）'}`,
+    );
+    this.actedBy(name);
   }
 
   private cmdEnlistSheet(): void {
     const save = this.save;
     const def = this.def();
     if (!save || !def) return;
+    // [P0-3/F13] 原作線：進徵兵頁先結算「金 → 預備兵」（web `prepFromMoney`：100 金 = 1 預備兵）。
+    const conv = M.prepFromMoney(save, def);
     const st = M.ensureCityState(save, def);
     if (!st) return;
+    if (conv.ok && conv.n > 0) {
+      this.note('徵兵', `金 -${fmt(conv.cost)} → 預備兵 +${fmt(conv.n)}（共 ${fmt(conv.prep)}／${fmt(conv.cap)}）。`);
+      // 先落盤：玩家若在抽屜按「取消」，這筆「金→預備兵」的結算不能丟。
+      this.persist();
+    }
     const caps = M.armCaps(save, def, this.ctx);
     const room = caps.total - st.troops;
     const maxInf = Math.max(0, Math.min(caps.inf - st.inf, room, st.prep));
@@ -1438,22 +1557,45 @@ export class CityPanel extends Component {
       '徵兵',
       `${label} +${fmt(r.n)}（預備兵 -${fmt(r.taken)}）。步 ${fmt(st?.inf)}／騎 ${fmt(st?.cav)}，共 ${fmt(st?.troops)}／${fmt(M.RECRUIT.CAP)}。`,
     );
-    this.acted('徵兵');
+    // [P0-4] 徵兵不是「將的一令」（web `doRecruit` → `afterCommand(false)`）：不吃逐將年令。
+    this.closeSheet();
+    this.persist();
+    this.refresh();
   }
 
   private cmdSearch(): void {
     const save = this.save;
     const def = this.def();
     if (!save || !def) return;
-    const r = M.search(save, def, this.ctx);
+    // [P0-4/F2] 先選執行將（搜索結果不看執行將，但這名將今年的年令會被鎖；web 同）
+    this.pickExec('搜索', (name) => this.searchBy(name));
+  }
+
+  private searchBy(name: string): void {
+    const save = this.save;
+    const def = this.def();
+    if (!save || !def) return;
+    if (M.actedLocked(save, name)) {
+      this.closeSheet();
+      this.note('搜索', `${name} 今年已行動（每將每年只能搜索或開發一次），換一位。`);
+      this.persist();
+      this.refresh();
+      return;
+    }
+    const r = M.search(save, def, { ...this.ctx, exec: name });
     if (!r.ok) {
+      this.closeSheet();
       this.note('搜索', r.reason === 'gold' ? `金不足（需 ${fmt(r.cost)}）。` : '這裡不能搜索。');
       this.persist();
       this.refresh();
       return;
     }
-    // 成功的日誌由 CityModel.search() 自己寫（含種子結果），這裡只吃「搜索」這條令
-    this.acted('搜索');
+    // [P0-1] 命中寶物／兵符：真的寫進背包（web `city.html:1026 bagAdd(r.seq)`）。
+    // `foundItems` 仍由 CityModel.search() 記錄（日誌用）；成功日誌也由它自己寫（含種子結果）。
+    if ((r.kind === 'treasure' || r.kind === 'talisman') && M.num(r.seq) > 0) {
+      this.bagAdd(M.num(r.seq));
+    }
+    this.actedBy(name);
   }
 
   private cmdMoveSheet(): void {
@@ -1627,10 +1769,9 @@ export class CityPanel extends Component {
       this.refresh();
       return;
     }
-    // [F7] 出征收束本月內政窗口（web `city.html:1217-1218`：`markMonthActed` 後跳 deployUrl）。
+    // [P0-4] 出征收束本月內政窗口（web `city.html:1217-1218`：`markMonthActed` 後跳 deployUrl）。
     const save = this.save;
     if (save) {
-      M.markCmdOrder(save, '出征');
       M.markMonthActed(save, false);
       this.persist();
     }
@@ -1673,8 +1814,7 @@ export class CityPanel extends Component {
     }
     const detail = r.ran.map((x) => `${x.city}+${fmt(x.pop)}人`).join('、');
     this.note('自治', `${r.text}  ${detail}`);
-    // [F7] 自治是主令（占「自治」這一條的月配額），且照 web 收束本月內政窗口。
-    M.markCmdOrder(save, '自治');
+    // [P0-4] 自治照 web 收束本月內政窗口（web `openAuto` → `afterCommand(true)` → `markMonthActed`）。
     M.markMonthActed(save, false);
     this.closeSheet();
     this.persist();
