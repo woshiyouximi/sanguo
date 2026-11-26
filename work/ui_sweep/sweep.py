@@ -158,7 +158,7 @@ def tapdiff(act):
 
 def dump_save(name):
     out = os.path.join(WORK, 'save_%s.json' % name)
-    raw = sh([ADB, '-s', DEV, 'shell', 'run-as', PKG, 'cat', 'databases/jsb.sqlite']).stdout
+    raw = sh([ADB, '-s', DEV, 'shell', 'run-as %s cat databases/jsb.sqlite | base64' % PKG]).stdout
     try:
         blob = base64.b64decode(b''.join(raw.split()), validate=False)
         fd, path = tempfile.mkstemp(suffix='.sqlite')
