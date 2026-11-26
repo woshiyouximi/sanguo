@@ -1579,12 +1579,26 @@ export class DeployRoot extends Component {
   }
 
   /** 落盤：存檔的 `deployQueue` 是唯一真身（v3 可選字段，舊檔沒有也能讀）。 */
+  /**
+   * [R238] 隊列裡「畫面上不存在」的將要濾掉。
+   *
+   * 病根：`deployQueue` 是跨局/跨城持久化的，玩家這次候選池只有 1 個將時，
+   * 隊列裡仍可能躺著上一局勾過的 4 個名字（畫面上只畫 `this.generals`，所以看不出來）。
+   * `march()` 直接把 `this.queue` 當隨軍名單 ⇒ 那 4 個「看不見的將」被一起派出去，
+   * 抵達後的攻城編成按快照重建隊列就變成 5 個人（製作人實測：出征 1 人、到達 5 人）。
+   */
+  private liveQueue(): DeployQueue[number][] {
+    const names = new Set(this.generals.map((gen) => gen.NAME));
+    return this.queue.filter((slot) => !!slot.general && names.has(slot.general));
+  }
+
   private persistQueue(): void {
     // [R231] 攻城戰前準備不改寫存檔 deployQueue：參戰兵團是抵達部隊，不是城裡的派兵隊列
     if (this.siege) return;
     this.syncQueueFromUi();
     const save = GameState.loadSave() as unknown as DeployQueueSave;
-    saveQueue(save, this.queue);
+    // [R238] 只落盤「畫面上真正存在的將」，否則存檔會一直夾帶看不見的舊名字
+    saveQueue(save, this.liveQueue());
     GameState.persistSave();
   }
 
@@ -1995,7 +2009,8 @@ export class DeployRoot extends Component {
     // 兵團出征：編成屏只負責選將/排序/兵力，按「出征」才真的把兵團派出去
     if (GameState.peekDeployMarch()) {
       this.persistQueue();
-      const officers = this.queue
+      // [R238] 只派「畫面上勾得到」的隨軍將：隊列可能夾帶上一局留下的隱形名字
+      const officers = this.liveQueue()
         .map((slot) => slot.general)
         .filter((name): name is string => !!name && name !== gen.NAME);
       if (GameState.dispatchMarch(gen.NAME, officers, this.soldiers + this.cavalry)) {

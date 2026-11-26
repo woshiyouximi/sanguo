@@ -75,7 +75,7 @@ test('F-07 DeployRoot：站位按武將名讀寫 COL_KEY（默認中列，不塞
   // 進屏就讀（在 start() 裡），與 web 進頁載入站位同語義
   assert.match(src, /this\.loadCols\(\);/);
   // deployQueue 仍只存原本三欄（站位獨立存，避免 saveQueue() 剝掉 col）
-  assert.match(src, /saveQueue\(save, this\.queue\)/);
+  assert.match(src, /saveQueue\(save, this\.(liveQueue\(\)|queue)\)/);
 });
 
 // ---------------------------------------------------------------------------

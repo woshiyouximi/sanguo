@@ -220,3 +220,16 @@ test('R237 攻城戰前準備先鎖人（不得先套存檔隊列再鎖）', () 
   assert.ok(DR.includes('if (!this.siege && stored && this.queue[0])'), 'stored 分支要加 !this.siege 守卫');
   assert.ok(DR.includes('else if (!this.siege && pool[0]'), '自动预选也要加 !this.siege 守卫');
 });
+
+test('R238 出征只派畫面上存在的將（隊列不得夾帶隱形舊名字）', () => {
+  const marchAt = DR.indexOf('if (GameState.peekDeployMarch())');
+  assert.ok(marchAt > 0, '找不到 march 出徵分支');
+  const seg = DR.slice(marchAt, marchAt + 900);
+  assert.ok(seg.includes('this.liveQueue()'), 'march() 的 officers 要用 liveQueue()');
+  assert.equal(seg.includes('this.queue\n        .map((slot) => slot.general)'), false, '不要直接用 this.queue');
+  assert.ok(DR.includes('private liveQueue(): DeployQueue[number][]'), '要有 liveQueue() 實作');
+  // persistQueue 也要濾
+  const pAt = DR.indexOf('private persistQueue');
+  const pSeg = DR.slice(pAt, pAt + 600);
+  assert.ok(pSeg.includes('this.liveQueue()'), 'persistQueue 要寫 liveQueue()');
+});
