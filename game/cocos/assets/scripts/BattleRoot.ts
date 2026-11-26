@@ -19,12 +19,14 @@ import {
   input,
   Input,
   Label,
+  LabelOutline,
   Layers,
   Node,
   UIOpacity,
   UITransform,
 } from 'cc';
 import { ArtBg } from './ArtLayer';
+import { BattleBg } from './BattleBg';
 import { battleAudioMark } from './AudioBus';
 import type { BattleAudioMark } from './AudioBus';
 import { AudioHost } from './AudioHost';
@@ -96,6 +98,33 @@ function rgba(hex: string, alpha = 255): Color {
   return new Color((n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff, alpha);
 }
 
+/**
+ * 兵种名 → 圆圈里的那个字。
+ *
+ * 用的是原作兵种表 `data.troops.names` 的 13 个名字（朴刀/长枪/大刀/弓箭/链锤/飞刀/
+ * 武斗/蛮族/铁缒/藤甲/黄巾/弩兵/女兵）。默认取名字里最能代表兵器的那个字：
+ * 弓兵用「弓」而不是「箭」、铁缒归「锤」、黄巾取「黄」。查不到就退第一个字。
+ */
+const TROOP_CHAR: Record<string, string> = {
+  朴刀: '刀',
+  长枪: '枪',
+  大刀: '刀',
+  弓箭: '弓',
+  链锤: '锤',
+  飞刀: '飞',
+  武斗: '武',
+  蛮族: '蛮',
+  铁缒: '锤',
+  藤甲: '藤',
+  黄巾: '黄',
+  弩兵: '弩',
+  女兵: '女',
+};
+
+function troopCharOf(name: string): string {
+  return TROOP_CHAR[name] ?? (name ? name.slice(0, 1) : '兵');
+}
+
 /** core 把主将塞进 units 时用的是 `as Unit & {isGeneral:true}`，类型上 Unit 只有 false。 */
 function isGeneral(u: World['units'][number]): boolean {
   return (u as unknown as { isGeneral?: boolean }).isGeneral === true;
@@ -160,8 +189,16 @@ export class BattleRoot extends Component {
   private artHud: ArtBg | null = null;
   /** 全图战场的静态底图（地形/网格/前线），只画一次；单位与标记每帧重画 */
   private gMap: Graphics | null = null;
+  /** 原作战场背景（地形平铺 + 远景带）：全图版当静态底图压暗铺在 gMap 之下 */
+  private bg: BattleBg | null = null;
   /** 主将标记（三国志13 式：圆头像 + 红血量环 + 绿技力环） */
   private markers: GeneralMarkers | null = null;
+  /** 士兵字牌层：每人一个「兵种字 + 圆圈」，字用 Label（Graphics 画不了汉字） */
+  private soldierLayer: Node | null = null;
+  private soldierLabelsA: Label[] = [];
+  private soldierLabelsB: Label[] = [];
+  /** 本局双方兵种字（大刀→刀、黄巾→黄…），boot() 里按 world.sides[].troop 查 data.troops.names */
+  private troopChar: { A: string; B: string } = { A: '兵', B: '兵' };
   /** 本局主将的军师技生效说明（HUD 用）；空串 = 没用军师技 */
   private wiseNote = '';
 
@@ -230,6 +267,8 @@ export class BattleRoot extends Component {
     this.audio = null;
     this.weatherLayer?.dispose();
     this.weatherLayer = null;
+    this.bg?.dispose();
+    this.bg = null;
     this.tint?.dispose();
     this.tint = null;
   }
@@ -414,9 +453,21 @@ export class BattleRoot extends Component {
         this.wiseNote = this.wiseNote || autoWise.map((w) => w.name).join('、');
       }
       this.world = world;
+      // 士兵字牌：本局双方各只有一种兵，字取兵种名（大刀→刀 / 黄巾→黄），每帧复用同一池
+      const troopNames = data.troops.names;
+      this.troopChar = {
+        A: troopCharOf(troopNames[world.sides.A.troop] ?? ''),
+        B: troopCharOf(troopNames[world.sides.B.troop] ?? ''),
+      };
+      // 跨局复用同一场景时，池里的字要跟着兵种换（开局双方各一种兵）
+      for (const l of this.soldierLabelsA) l.string = this.troopChar.A;
+      for (const l of this.soldierLabelsB) l.string = this.troopChar.B;
       this.settlement = null;
       this.accumulator = 0;
       this.camX = camera(world);
+      // 背景：全图不再跟镜头，用开局的 camX 定一次视差即可（地形换图时重设）
+      this.bg?.setTerrain(world.terrain);
+      this.bg?.setCamX(this.camX);
       // 操作层重建：技能格按新 world 的 data 重算，选中/提示/飘字全部清零
       this.input.bind(world);
       this.floaters.length = 0;
@@ -610,6 +661,9 @@ export class BattleRoot extends Component {
 
   private buildUi(): void {
     this.buildArt();
+    // 原作战场背景（地形/远景）压暗铺最底下；全图版不再跟镜头，camX 开局定一次
+    this.bg = new BattleBg(this.node, 0);
+    this.bg.node.addComponent(UIOpacity).opacity = 255;
     // 全图战场底（地形渐变 + 71 行网格 + 前线 + 后场色带）：静态画一次，
     // 压在 gBase 之下、背景图之上；单位/标记每帧重画。
     this.gMap = this.makeGraphics('BattleMap');
@@ -620,6 +674,12 @@ export class BattleRoot extends Component {
     this.gBase = this.makeGraphics('BattleBase');
     this.gA = this.makeGraphics('UnitsA');
     this.gB = this.makeGraphics('UnitsB');
+    // 士兵字牌层：圆由 gA/gB 画，汉字只能用 Label（200 个池化节点，按存活数显示）
+    this.soldierLayer = new Node('SoldierGlyphs');
+    this.soldierLayer.layer = Layers.Enum.UI_2D;
+    this.soldierLayer.parent = this.node;
+    this.soldierLayer.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
+    this.soldierLayer.setPosition(0, 0, 0);
     // 主将标记：圆头像 + 红/绿双环（见 GeneralMarkers.ts），压在士兵点之上
     this.markers = new GeneralMarkers(this.node);
     this.gFx = this.makeGraphics('Fx');
@@ -800,20 +860,21 @@ export class BattleRoot extends Component {
     // 纵向渐变：上（敌阵）偏红 → 中（无人区）中性 → 下（我阵）偏蓝
     const BANDS = 24;
     const bandH = FIELD_H / BANDS;
-    const top = new Color(43, 28, 24, 255);
-    const mid = new Color(27, 31, 30, 255);
-    const bot = new Color(17, 26, 38, 255);
+    // 半透明：下面还压着原作战场背景（地形/远景），留 ~40% 透出来做质感
+    const top = new Color(43, 28, 24, 150);
+    const mid = new Color(27, 31, 30, 150);
+    const bot = new Color(17, 26, 38, 150);
     const mix = (a: Color, b: Color, t: number): Color =>
       new Color(
         Math.round(a.r + (b.r - a.r) * t),
         Math.round(a.g + (b.g - a.g) * t),
         Math.round(a.b + (b.b - a.b) * t),
-        255,
+        Math.round(a.a + (b.a - a.a) * t),
       );
     for (let i = 0; i < BANDS; i += 1) {
       const t = i / (BANDS - 1);
       g.fillColor = t < 0.5 ? mix(top, mid, t * 2) : mix(mid, bot, (t - 0.5) * 2);
-      g.rect(-HALF_W, HALF_H - FIELD_TOP - bandH * (i + 1) - 0.5, DESIGN_W, bandH + 1);
+      g.rect(-HALF_W, HALF_H - FIELD_TOP - bandH * (i + 1), DESIGN_W, bandH);
       g.fill();
     }
 
@@ -1226,14 +1287,15 @@ export class BattleRoot extends Component {
     ga.clear();
     gb.clear();
 
-    const dot = (u: World['units'][number]): number => (isGeneral(u) ? 4.6 : 2.2);
     const visible = (u: World['units'][number]): boolean => {
       if (!u.alive) return false;
       const y = project(u.x, u.y, 0).y;
       return y >= FIELD_TOP && y <= FIELD_BOTTOM;
     };
+    /** 士兵圆半径：字形 9px 要塞得下，圆环才看得见（行距 11.94px，略压邻行是有意的） */
+    const SOLDIER_R = 7.2;
 
-    // 只有主将需要暗底：小兵点本来就压在深色地图上，再垫一圈会让 4px 的点看起来像像素块
+    // 主将暗底：主将那颗点还要压金边，垫深一点才立得起来
     ga.fillColor = new Color(6, 8, 12, 190);
     gb.fillColor = new Color(6, 8, 12, 190);
     for (const u of world.units) {
@@ -1244,18 +1306,40 @@ export class BattleRoot extends Component {
     ga.fill();
     gb.fill();
 
-    // 阵营色点
-    ga.fillColor = rgba(COLORS.ours, 245);
-    gb.fillColor = rgba(COLORS.enemy, 245);
+    // 士兵：暗底圆（字要压在上面，纯描边在花背景上读不出来）
+    ga.fillColor = new Color(8, 11, 17, 210);
+    gb.fillColor = new Color(8, 11, 17, 210);
     for (const u of world.units) {
-      if (!visible(u)) continue;
+      if (!visible(u) || isGeneral(u)) continue;
       const p = project(u.x, u.y, 0);
-      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, dot(u));
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, SOLDIER_R);
     }
     ga.fill();
     gb.fill();
 
-    // 主将金边：一眼区分「将」与「兵」
+    // 士兵圆圈：阵营色描边（红/蓝一眼分敌我）
+    ga.strokeColor = rgba(COLORS.ours, 240);
+    gb.strokeColor = rgba(COLORS.enemy, 240);
+    ga.lineWidth = 1.5;
+    gb.lineWidth = 1.5;
+    for (const u of world.units) {
+      if (!visible(u) || isGeneral(u)) continue;
+      const p = project(u.x, u.y, 0);
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, SOLDIER_R);
+    }
+    ga.stroke();
+    gb.stroke();
+
+    // 主将色点 + 金边：和士兵的「字圈」区分开
+    ga.fillColor = rgba(COLORS.ours, 245);
+    gb.fillColor = rgba(COLORS.enemy, 245);
+    for (const u of world.units) {
+      if (!visible(u) || !isGeneral(u)) continue;
+      const p = project(u.x, u.y, 0);
+      this.dotPath(u.side === 'A' ? ga : gb, p.x - HALF_W, HALF_H - p.y, 4.6);
+    }
+    ga.fill();
+    gb.fill();
     ga.strokeColor = rgba(COLORS.gold, 220);
     gb.strokeColor = rgba(COLORS.gold, 220);
     ga.lineWidth = 1.2;
@@ -1269,7 +1353,58 @@ export class BattleRoot extends Component {
     ga.stroke();
     gb.stroke();
 
+    this.syncSoldierLabels(world);
     this.markers?.draw(world);
+  }
+
+  /**
+   * 士兵字牌：每个活着的小兵一个「兵种字」Label，池化复用。
+   *
+   * 100+100 个 Label 在手机上不算轻，所以：字串只在建池时写一次（一局双方各一字），
+   * 每帧只改位置与显隐；死掉的兵直接隐藏，不留空节点在场上。
+   */
+  private syncSoldierLabels(world: World): void {
+    if (!this.soldierLayer) return;
+    let ia = 0;
+    let ib = 0;
+    for (const u of world.units) {
+      if (!u.alive || isGeneral(u)) continue;
+      const p = project(u.x, u.y, 0);
+      if (p.y < FIELD_TOP || p.y > FIELD_BOTTOM) continue;
+      const label = u.side === 'A' ? this.soldierLabel('A', ia++) : this.soldierLabel('B', ib++);
+      label.node.setPosition(p.x - HALF_W, HALF_H - p.y, 0);
+      label.node.active = true;
+    }
+    const hide = (pool: Label[], from: number): void => {
+      for (let i = from; i < pool.length; i += 1) pool[i].node.active = false;
+    };
+    hide(this.soldierLabelsA, ia);
+    hide(this.soldierLabelsB, ib);
+  }
+
+  /** 懒建字牌（一局最多 100 个/方）。`LabelOutline` 保证 9px 汉字压在土黄底上也清楚。 */
+  private soldierLabel(side: 'A' | 'B', index: number): Label {
+    const pool = side === 'A' ? this.soldierLabelsA : this.soldierLabelsB;
+    while (pool.length <= index) {
+      const node = new Node(`Glyph${side}${pool.length}`);
+      node.layer = Layers.Enum.UI_2D;
+      node.parent = this.soldierLayer;
+      node.setPosition(0, 0, 0);
+      node.addComponent(UITransform).setContentSize(16, 16);
+      const label = node.addComponent(Label);
+      label.fontSize = 9;
+      label.lineHeight = 9;
+      label.color = new Color(248, 250, 255, 245);
+      label.horizontalAlign = Label.HorizontalAlign.CENTER;
+      label.verticalAlign = Label.VerticalAlign.CENTER;
+      label.overflow = Label.Overflow.NONE;
+      const outline = node.addComponent(LabelOutline);
+      outline.color = new Color(0, 0, 0, 220);
+      outline.width = 1;
+      label.string = this.troopChar[side];
+      pool.push(label);
+    }
+    return pool[index];
   }
 
   /**

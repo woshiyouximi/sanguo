@@ -143,10 +143,22 @@ export class BattleBg {
       }
     }
 
-    // 三条视差带：都贴在战场带顶部
-    this.bgBand = bandNode(this.node, 'BandBg');
-    this.mgBand = bandNode(this.node, 'BandMg');
-    this.fgBand = bandNode(this.node, 'BandFg');
+    // 三条视差带：都贴在战场带顶部。
+    // R218：带子比 750 宽（759/915/1040），老版靠镜头边缘遮掉；全图版不裁会溢出到战场带外面，
+    // 所以加一层和 FloorClip 一样的矩形遮罩，只露战场带内的部分。
+    const bandClip = new Node('BandClip');
+    bandClip.layer = Layers.Enum.UI_2D;
+    bandClip.parent = this.node;
+    const bandTransform = bandClip.addComponent(UITransform);
+    bandTransform.setAnchorPoint(0.5, 0.5);
+    bandTransform.setContentSize(HALF_W * 2, FIELD_H);
+    bandClip.setPosition(0, 0, 0);
+    const bandMask = bandClip.addComponent(Mask);
+    bandMask.type = Mask.Type.GRAPHICS_RECT;
+
+    this.bgBand = bandNode(bandClip, 'BandBg');
+    this.mgBand = bandNode(bandClip, 'BandMg');
+    this.fgBand = bandNode(bandClip, 'BandFg');
     for (const band of [this.bgBand, this.mgBand, this.fgBand]) {
       band.node.setPosition(0, FIELD_H / 2 - (BAND_H * BAND_SCALE) / 2, 0);
     }
