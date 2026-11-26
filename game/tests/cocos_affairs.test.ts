@@ -9,7 +9,7 @@
  * 背景：work/affairs_audit/REPORT.md 查出 Cocos 內政與 web 真源（city.html + city_model.js）
  * 有 4 個 P0 與 2 個 P1 偏差。本檔逐條釘死修後行為：
  *   P0-1 搜索命中寶物/兵符 → 真的寫進背包（localStorage['sanguo_items_v1']，與 web bagAdd 同鍵同格式）
- *   P0-2 scenIdx 不再恆 0：《討伐董卓》(scenIdx=1) 平原 = 關羽、劉備、張角、張飛、簡雍
+ *   P0-2 scenIdx 不再恆 0：《討伐董卓》(scenIdx=1) 平原 = 關羽、劉備、張飛、簡雍（不含張角，R224）
  *   P0-3 prepFromMoney（F13）：100 金 = 1 預備兵，換月結算走它；?loose=1 才走舊 10% 白補
  *   P0-4 逐將年令（F2）+ 隨軍過濾（F3）+ 正月門（非正月只讀）
  *   P1-1 開發用玩家選的執行將（舊碼永遠用太守），與 web 同公式同數字
@@ -93,7 +93,7 @@ test('P0-1 搜索命中寶物/兵符 → bagAddRaw 寫出 sanguo_items_v1 同鍵
 /* ============================================================================
  * P0-2 scenIdx 貫通：roster / wildPool 按劇本取（舊碼恆 0）
  * ========================================================================== */
-test('P0-2 scenIdx=1（討伐董卓）平原 = 關羽、劉備、張角、張飛、簡雍；scenIdx=0 不是', () => {
+test('P0-2 scenIdx=1（討伐董卓）平原 = 關羽、劉備、張飛、簡雍；scenIdx=0 不是', () => {
   const rosterAt = (scenIdx) => {
     const save = fresh(scenIdx);
     save.owned = ['平原'];
@@ -108,10 +108,11 @@ test('P0-2 scenIdx=1（討伐董卓）平原 = 關羽、劉備、張角、張飛
   assert.ok(r0.includes('裴元紹'), `scenIdx=0 應含 裴元紹（實得 ${r0.join('、')}）`);
 
   const r1 = rosterAt(1);
-  for (const want of ['關羽', '劉備', '張角', '張飛', '簡雍']) {
+  for (const want of ['關羽', '劉備', '張飛', '簡雍']) {
     assert.ok(r1.includes(want), `scenIdx=1 應含 ${want}（實得 ${r1.join('、')}）`);
   }
-  for (const reject of ['廖化', '裴元紹']) {
+  // R224：張角 city_by_times[1] 留空＝189 劇本他不在任何城，不能再靠靜態 CITY 復活
+  for (const reject of ['廖化', '裴元紹', '張角']) {
     assert.ok(!r1.includes(reject), `scenIdx=1 不應含 ${reject}（實得 ${r1.join('、')}）`);
   }
 

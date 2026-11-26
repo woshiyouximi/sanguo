@@ -478,15 +478,23 @@ export function hallImageOf(cityDef) {
 /** 該劇本裡這名將在哪座城（city_by_times 優先，缺了退回靜態 CITY） */
 export function cityOf(general, scenIdx = 0) {
   const list = general?.city_by_times;
-  const v = Array.isArray(list) ? list[scenIdx] : '';
-  return typeof v === 'string' && v ? v : String(general?.CITY || '');
+  // R224：有這一項就以它為準（空字串＝這劇本不在任何城），只有缺項才回落靜態 CITY。
+  // 之前寫成「空字串當缺資料 → 回落 CITY」，189 劇本（張角 184 年才在平原）會被復活。
+  if (Array.isArray(list) && scenIdx < list.length) {
+    const v = list[scenIdx];
+    return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+  }
+  return String(general?.CITY || '').trim();
 }
 
 /** 該劇本裡這名將的狀態：未 / 登 / 野（「野」= 在野，可被搜索招到） */
 export function statusOf(general, scenIdx = 0) {
   const list = general?.status_by_times;
-  const v = Array.isArray(list) ? list[scenIdx] : '';
-  return typeof v === 'string' && v ? v : String(general?.Status || '');
+  if (Array.isArray(list) && scenIdx < list.length) {
+    const v = list[scenIdx];
+    return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+  }
+  return String(general?.Status || '').trim();
 }
 
 export function generalOf(generals, name) {

@@ -60,7 +60,7 @@ const sorted = (list) => list.slice().sort();
 
 /* ============================================================================
  * ① 劇本 1（討伐董卓）平原：物品頁武將池 = 內政頁同一批人（關羽/劉備/張飛/簡雍，
- *    ＋因 `city_by_times[1]` 留空而按 `cityOf()` 口徑回退靜態 `CITY` 的張角），
+ *    ＋（R224 起不再包含）因 `city_by_times[1]` 留空而按 `cityOf()` 回退靜態 `CITY` 的張角），
  *    不再是劇本 0 平原那批（廖化/裴元紹/管輅/蔣義渠/杜遠）
  * ========================================================================== */
 test('劇本1平原：武將池含關羽/劉備，不含廖化/裴元紹（物品頁武將卡口徑）', () => {
@@ -79,8 +79,9 @@ test('劇本1平原：武將池含關羽/劉備，不含廖化/裴元紹（物�
 
   // 與內政頁顯示「武將 N/10」的清單同一個集合（CityModel.rosterOf 是內政頁的真源）
   const domestic = nameSet(M.rosterOf(save, PLANE, { generals: GENS, scenIdx: SCEN_SANGUO }));
-  assert.equal(domestic.length, 5, `劇本1平原常駐將應 5 人，實際 ${JSON.stringify(domestic)}`);
-  assert.ok(domestic.includes('張角'), '口徑對拍：city_by_times[1] 空 → cityOf() 回退靜態 CITY=平原（既有 P0-2 行為）');
+  assert.equal(domestic.length, 4, `劇本1平原常駐將應 4 人，實際 ${JSON.stringify(domestic)}`);
+  // R224：city_by_times[1] 空 = 189 劇本張角不在任何城，不再回退靜態 CITY 把他塞回平原
+  assert.ok(!domestic.includes('張角'), `張角不該在劇本1平原：${JSON.stringify(domestic)}`);
   assert.deepEqual(sorted(pool.names), sorted(domestic), '物品頁武將池必須與內政頁武將清單同一批人');
 });
 
@@ -116,7 +117,8 @@ test('GeneralBookPanel 口徑：劇本1平原守將表不是劇本0名單，張�
   const byCity = O.officersByCity(save, SCEN[SCEN_SANGUO].cities, ctx);
 
   const planeNames = sorted(nameSet(byCity[PLANE]));
-  assert.deepEqual(planeNames, sorted(['關羽', '劉備', '張角', '張飛', '簡雍']));
+  assert.deepEqual(planeNames, sorted(['關羽', '劉備', '張飛', '簡雍']));
+  assert.ok(!planeNames.includes('張角'), '張角不該在劇本1平原名冊');
   for (const wrong of ['廖化', '裴元紹', '管輅', '蔣義渠', '杜遠']) {
     assert.ok(!planeNames.includes(wrong), `名冊的平原不應有劇本0守將「${wrong}」`);
   }
@@ -124,8 +126,8 @@ test('GeneralBookPanel 口徑：劇本1平原守將表不是劇本0名單，張�
   // GeneralBook.mergeRow 的所屬城：守將表反查優先，查不到才退回 city_by_times[scenIdx]
   assert.equal(M.cityOf(GENS.find((g) => g.NAME === '關羽'), SCEN_SANGUO), PLANE);
   assert.equal(M.cityOf(GENS.find((g) => g.NAME === '廖化'), SCEN_SANGUO), '濮陽');
-  // 這條是資料口徑不是 bug：`city_by_times[1]` 留空 → cityOf() 回退靜態 CITY（既有 P0-2 行為）
-  assert.equal(M.cityOf(GENS.find((g) => g.NAME === '張角'), SCEN_SANGUO), PLANE);
+  // R224：`city_by_times[1]` 留空 = 這劇本不在任何城（舊碼回退靜態 CITY=平原，是 189 劇本復活死人的根因）
+  assert.equal(M.cityOf(GENS.find((g) => g.NAME === '張角'), SCEN_SANGUO), '');
   // 但張角在劇本 1 的狀態是「未」、不是平原太守/君主 → 名冊城/勢力欄與物品頁默認選將都不看他
   assert.equal(M.statusOf(GENS.find((g) => g.NAME === '張角'), SCEN_SANGUO), '未');
   assert.equal(O.cityMajorNameOf(save, PLANE, ctx), '劉備');
@@ -149,14 +151,14 @@ test('舊檔播種：seedCityOfficers 寫回 roster 與 cities.officers，之後
   assert.equal(result.owned, 1);
   assert.ok(result.seeded >= 50, `敵城應按劇本表播種（實際 ${result.seeded} 座）`);
 
-  assert.deepEqual(sorted(save.roster[PLANE]), sorted(['關羽', '劉備', '張角', '張飛', '簡雍']));
-  assert.equal(save.cities[PLANE].officers.length, 5);
+  assert.deepEqual(sorted(save.roster[PLANE]), sorted(['關羽', '劉備', '張飛', '簡雍']));
+  assert.equal(save.cities[PLANE].officers.length, 4);
   assert.equal(save.cities[PLANE].owner, '劉備');
   assert.equal(save.cities[PLANE].major, '劉備');
 
   // 存檔有 roster 之後：scenIdx 換成 0（黃巾之亂）也不再改這座城的名單
   const asScen0 = O.officerNamesOfCity(save, PLANE, { ...ctx, scenIdx: 0 });
-  assert.deepEqual(sorted(asScen0), sorted(['關羽', '劉備', '張角', '張飛', '簡雍']));
+  assert.deepEqual(sorted(asScen0), sorted(['關羽', '劉備', '張飛', '簡雍']));
 });
 
 /* ============================================================================
@@ -207,7 +209,7 @@ test('占領城名單空：顯示空城，而不是劇本表原守將（張角/�
   assert.deepEqual(O.officerNamesOfCity(save, PLANE, caoCtx), [], '曹操剛打下平原、還沒任命 → 空名單');
   assert.deepEqual(
     sorted(O.officerNamesOfCity(save, PLANE, ctxOf(SCEN_SANGUO, '劉備'))),
-    sorted(['關羽', '劉備', '張角', '張飛', '簡雍']),
+    sorted(['關羽', '劉備', '張飛', '簡雍']),
   );
 });
 
@@ -239,7 +241,7 @@ test('舊檔無人事紀錄：回落劇本表且按 scenIdx 取（劇本0 ≠ �
   const legacy = { owned: [PLANE], cities: {}, roster: {} };
 
   const scen1 = O.officerNamesOfCity(legacy, PLANE, ctxOf(SCEN_SANGUO, '劉備'));
-  assert.deepEqual(sorted(scen1), sorted(['關羽', '劉備', '張角', '張飛', '簡雍']));
+  assert.deepEqual(sorted(scen1), sorted(['關羽', '劉備', '張飛', '簡雍']));
 
   const scen0 = O.officerNamesOfCity(legacy, PLANE, ctxOf(0, '張角'));
   for (const name of ['張角', '廖化', '裴元紹']) assert.ok(scen0.includes(name), `劇本0平原應有 ${name}`);

@@ -273,16 +273,23 @@ function generalIndexOf(ctx: OfficersCtx): Map<string, Rec> {
 export function cityOfGeneral(general: unknown, scenIdx = 0): string {
   const row = isRec(general) ? general : null;
   const list = row?.city_by_times;
-  const v = Array.isArray(list) ? list[scenIdx] : '';
-  return typeof v === 'string' && v ? v : str(row?.CITY).trim();
+  // R224：有這一項就以它為準（空字串＝這劇本不在任何城），只有缺項才回落靜態 CITY。
+  if (Array.isArray(list) && scenIdx < list.length) {
+    const v = list[scenIdx];
+    return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+  }
+  return str(row?.CITY).trim();
 }
 
 /** 該劇本裡這名將的狀態：未 / 登 / 野 = `CityModel.statusOf` */
 export function statusOfGeneral(general: unknown, scenIdx = 0): string {
   const row = isRec(general) ? general : null;
   const list = row?.status_by_times;
-  const v = Array.isArray(list) ? list[scenIdx] : '';
-  return typeof v === 'string' && v ? v : str(row?.Status).trim();
+  if (Array.isArray(list) && scenIdx < list.length) {
+    const v = list[scenIdx];
+    return typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+  }
+  return str(row?.Status).trim();
 }
 
 /** 劇本的城市列（`scenarios[scenIdx].cities` 裡對應這座城的那一條） */

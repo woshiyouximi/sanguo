@@ -528,6 +528,26 @@ interface SkinSlot {
   rect: Rect;
 }
 
+/**
+ * R224：`全部解鎖`（補滿背包）是 **web 調試台** 的設施（`game/web/items.html:199` 標了「調試」）。
+ * 依 `project/215_双端口径与调试开关.md`「Cocos = 正式版」，原生包（`sys.isNative`）與 `?rel=1`
+ * 發佈形態都不該出現；只在 web-mobile 預覽 / headless 驗證裡保留。
+ */
+function devToolsOn(): boolean {
+  try {
+    const g = globalThis as unknown as {
+      cc?: { sys?: { isNative?: boolean } };
+      location?: { search?: string };
+    };
+    if (g.cc && g.cc.sys && g.cc.sys.isNative) return false;
+    const search = String(g.location?.search ?? '');
+    if (/[?&]rel=1(?:&|$)/.test(search)) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 const SKIN_SLOTS: readonly SkinSlot[] = [
   { name: 'SkinGenFrame', key: 'frame_panel', rect: LAYOUT.gen },
   { name: 'SkinListFrame', key: 'frame_panel', rect: LAYOUT.list },
@@ -603,6 +623,9 @@ export class ItemsPanel extends Component {
   private labelDetNote: Label | null = null;
   private labelActMain: Label | null = null;
   private labelActSub: Label | null = null;
+  /** R224：調試設施是否可見（原生包＝false，見 `devToolsOn()`）。 */
+  private devTools = true;
+
   private labelUnlockMain: Label | null = null;
   private labelUnlockSub: Label | null = null;
   private labelBack: Label | null = null;
@@ -786,8 +809,12 @@ export class ItemsPanel extends Component {
 
     this.labelActMain = this.makeLabel('ItemsActMain', '裝 備', this.actMainRect(), 21, COLORS.goldLight, 'center');
     this.labelActSub = this.makeLabel('ItemsActSub', '', this.actSubRect(), 12, COLORS.textDim, 'center');
+    this.devTools = devToolsOn();
     this.labelUnlockMain = this.makeLabel('ItemsUnlockMain', '全部解鎖', this.unlockMainRect(), 15, COLORS.text, 'center');
+    // R224：正式版藏掉「全部解鎖 / 補滿背包」（web 調試台設施），底板與命中一起收。
+    this.labelUnlockMain.node.active = this.devTools;
     this.labelUnlockSub = this.makeLabel('ItemsUnlockSub', '補滿背包', this.unlockSubRect(), 11, COLORS.textFaint, 'center');
+    this.labelUnlockSub.node.active = this.devTools;
     this.labelBack = this.makeLabel('ItemsBack', '返 回', LAYOUT.backBtn, 15, COLORS.textDim, 'center');
     this.labelHint = this.makeLabel('ItemsHint', '', LAYOUT.hint, 11, COLORS.textFaint, 'center', Label.Overflow.CLAMP);
     this.labelHint.lineHeight = 17;
@@ -828,6 +855,8 @@ export class ItemsPanel extends Component {
       placeDesign(node, slot.rect.x, slot.rect.y, slot.rect.w, slot.rect.h);
       this.skinNodes.set(slot.name, node);
     }
+    const unlockPlate = this.skinNodes.get('SkinUnlockPlate');
+    if (unlockPlate) unlockPlate.active = this.devTools;
 
     // 選中行高亮：只有四角有裝飾（中心 alpha 0），疊在行底上不會糊掉行文字
     const sel = makeNineSlice(layer, 'plate_sel', LAYOUT.row.w, LAYOUT.row.h);
@@ -1818,7 +1847,9 @@ export class ItemsPanel extends Component {
     if (!slot || seq === null) return '';
     const clean = normalizeEquips(this.equipsOf(name));
     if (clean[slot] === seq) return `${String(item.Name ?? '—')} 已裝備於「${SLOT_NAMES[slot]}」槽`;
-    if (!this.bag.has(seq)) return '背包裡沒有這件（按「全部解鎖」可補滿）';
+    if (!this.bag.has(seq)) return this.devTools
+      ? '背包裡沒有這件（按「全部解鎖」可補滿）'
+      : '背包裡沒有這件';
     const base = runtimeGeneral(this.currentGeneral());
     const before = applyEquip(base, clean);
     const after = applyEquip(base, equipItem(clean, seq));
@@ -1860,7 +1891,7 @@ export class ItemsPanel extends Component {
         '加成＝武將基礎＋四槽；兵符與陣法書是使用品，不佔槽、不加屬性。\n點武將切換；點左列選物品；點槽位看已裝備。';
     }
     this.addHit(LAYOUT.actBtn, () => this.toggleEquip());
-    this.addHit(LAYOUT.unlockBtn, () => this.unlockAll());
+    if (this.devTools) this.addHit(LAYOUT.unlockBtn, () => this.unlockAll());
     this.addHit(LAYOUT.backBtn, () => this.close());
   }
 
