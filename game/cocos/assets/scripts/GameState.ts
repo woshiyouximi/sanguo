@@ -19,6 +19,13 @@ import type { General } from './types';
 export const SAVE_KEY = 'sanguo_campaign_v1';
 
 /**
+ * [F4] 單月推進調試開關（對照 web `campaign.html` 的 `?adv=1`）：
+ * `sys.localStorage.setItem('sanguo_adv_single', '1')` 之後，「內 政 終 了」一次只走一個月，
+ * 其餘情況走「跑完一年」。放在 localStorage 而不是命令行，是因為原生包沒有 URL 參數。
+ */
+export const ADV_SINGLE_KEY = 'sanguo_adv_single';
+
+/**
  * 城內武將（`cities[城].officers` 的一項）。
  *
  * [OFFICER_OBJ] 三種歷史形狀都認（清洗見 `cityOfficersOf()`）：
@@ -101,7 +108,13 @@ export interface CampaignSave {
   streak: number;
   bestStreak: number;
   month: number;
+  /** 舊版單一錢包。**[F16] 遷移後恆為 0**，國庫 = Σ 每城 `money`（見 `nationalGold()`）。 */
   gold: number;
+  /**
+   * [F16] 「錢已遷移到每城 money」的標記（web `save.goldMigrated`，`city_model.js:786-894`）。
+   * 舊檔沒有這個鍵 ⇒ 讀檔時做一次性遷移：`gold` → 首座我方城的 `money`，然後 `gold = 0`。
+   */
+  goldMigrated?: boolean;
   seeded: boolean;
   /**
    * 开局选择的指纹（`剧本序号:君主名`，由 `RunSetup` 生成）。
@@ -139,6 +152,8 @@ export interface CampaignCity {
   POPULATION?: number;
   DEFENSE?: number;
   MONEY?: number;
+  /** 關城 `RATE===0`（原作 FLAGS==2 的 12 座）；`isGateCity()` 用它判年稅/開發 */
+  RATE?: number;
   pos_xy: [number, number];
 }
 
@@ -467,6 +482,7 @@ function normalize(raw: unknown): CampaignSave {
     bestStreak: Math.max(0, Math.floor(numberOr(obj.bestStreak, 0))),
     month: Math.max(1, Math.floor(numberOr(obj.month, 1))),
     gold: Math.max(0, Math.floor(numberOr(obj.gold, 1200))),
+    goldMigrated: obj.goldMigrated === true,
     seeded: obj.seeded === true,
     runKey: typeof obj.runKey === 'string' ? obj.runKey : undefined,
     cities,
@@ -512,7 +528,98 @@ export function loadSave(): CampaignSave {
   } catch {
     cached = normalize(null);
   }
+  // [F16] 舊檔「單一錢包」→「每城 money」的一次性遷移。
+  // 放在讀檔這一層：CampaignRoot / CityPanel / 存檔槽任何入口讀到的都是遷移後口徑，
+  // 不會出現「頂欄讀錢包、城內頁讀城錢」兩個數（web 已改，見 `city_model.js:786-894`）。
+  migrateGoldInPlace(cached);
   return cached;
+}
+
+/**
+ * [F16] 錢包 → 每城 money 的一次性遷移（就地改）。
+ *
+ * web 真源 `city_model.js:migrateGold()`：`goldMigrated === true` 直接回 `{moved:0}`；
+ * 否則取 `owned` 裡第一座有定義的城，把錢包併進它的 `money`，然後 `save.gold = 0`、
+ * `save.goldMigrated = true`（無論有沒有搬成功都打標記，避免下次重複搬）。
+ * Cocos 的舊檔每城本來就有一個 `money`（開局照劇本 `MONEY` 給的），所以這裡是**加法**：
+ * 錢包是一筆額外的現金，併進主城後總額不變。
+ */
+function migrateGoldInPlace(save: CampaignSave): { moved: number; to: string } {
+  if (!save || save.goldMigrated === true) return { moved: 0, to: '' };
+  const wallet = Math.max(0, Math.floor(Number(save.gold) || 0));
+  let to = '';
+  for (const name of save.owned) {
+    if (save.cities[name]) {
+      to = name;
+      break;
+    }
+  }
+  let moved = 0;
+  if (to && wallet > 0) {
+    const st = save.cities[to];
+    if (st) {
+      st.money = Math.max(0, Math.floor(Number(st.money) || 0)) + wallet;
+      moved = wallet;
+    }
+  }
+  save.gold = 0;
+  save.goldMigrated = true;
+  return { moved, to };
+}
+
+/** [F16] 對外的一次性遷移（冪等：第二次回 `{moved:0,to:''}`；讀檔時已自動跑過） */
+export function migrateGold(): { moved: number; to: string } {
+  const save = loadSave();
+  const moved = migrateGoldInPlace(save);
+  if (moved.moved > 0) persistSave();
+  return moved;
+}
+
+/** [F16] 本城金（遷移後唯一可花的口袋） */
+export function cityMoney(name: string): number {
+  const save = loadSave();
+  const st = save.cities[name];
+  return st ? Math.max(0, Math.floor(Number(st.money) || 0)) : 0;
+}
+
+/** [F16] 國庫 = Σ 我方每城 money（web `CM.nationalGold()`）；未遷移時退回舊錢包 */
+export function nationalGold(): number {
+  const save = loadSave();
+  if (!save.goldMigrated) return Math.max(0, Math.floor(Number(save.gold) || 0));
+  let total = 0;
+  for (const name of save.owned) total += cityMoney(name);
+  return total;
+}
+
+/** [F16] 從本城扣錢；不夠回 false 且不動任何欄位（web `spendCityMoney`） */
+export function spendCityMoney(name: string, cost: number): boolean {
+  const save = loadSave();
+  const need = Math.max(0, Math.floor(Number(cost) || 0));
+  if (need <= 0) return true;
+  if (!save.goldMigrated) {
+    if (save.gold < need) return false;
+    save.gold -= need;
+    persistSave();
+    return true;
+  }
+  const st = save.cities[name];
+  if (!st) return false;
+  const have = Math.max(0, Math.floor(Number(st.money) || 0));
+  if (have < need) return false;
+  st.money = have - need;
+  persistSave();
+  return true;
+}
+
+/** [F16] 把錢加進本城（退款用） */
+export function addCityMoney(name: string, amount: number): void {
+  const save = loadSave();
+  const gain = Math.trunc(Number(amount) || 0);
+  if (gain === 0) return;
+  const st = save.cities[name];
+  if (!st) return;
+  st.money = Math.max(0, Math.floor(Number(st.money) || 0)) + gain;
+  persistSave();
 }
 
 export function persistSave(): void {
@@ -589,7 +696,7 @@ export function isOwned(name: string): boolean {
  * 本地重写一份而不是 import，是为了避免 `GameState ↔ CityModel` 的循环依赖：
  * `CityModel` 已经在多处 import `GameState` 的存档读写。两处判定口径必须一起改。
  */
-function isGateCity(city: { RATE?: number; POPULATION?: number } | null | undefined): boolean {
+export function isGateCity(city: { RATE?: number; POPULATION?: number } | null | undefined): boolean {
   if (!city) return false;
   return Number(city.RATE) === 0 || Number(city.POPULATION) === 0;
 }
@@ -682,6 +789,38 @@ export function nearestOwnedTo(target: string, paths: CampaignPath[]): string | 
 }
 
 /**
+ * [F4] 「內 政 終 了」要跑幾個月才到次年正月。
+ *
+ * web 真源：`web/campaign.html:2517-2533 endMonth()` → `advanceMonth(12)`，
+ * 註釋（2504-2516）寫的是「結束內政＝進大地圖跑時間」；`advanceMonth(n)` 的循環體
+ * （5389-5558）逐月 `save.month += 1` → 年稅 → AI 行軍 → 事件。
+ *
+ * 原作月份是 1..12 循環（`Saves.isYearStart(m) = (m-1)%12===0`），所以：
+ *   · 正月（1 月）按下去 = 跑滿一整年 → 12 個月，落回次年正月；
+ *   · 其它月份（單月調試或中途） = 補到次年正月，`12 - (m-1)%12` 個月。
+ * 純函數，方便 `node --test` 直接驗（`game/tests/cocos_p1_port.test.ts`）。
+ */
+export function monthsToNextJanuary(month: number): number {
+  const n = Math.floor(Number(month));
+  const m = Number.isFinite(n) && n > 0 ? n : 1;
+  return 12 - ((m - 1) % 12);
+}
+
+/** [F4] 單月調試開關是否打開（見 `ADV_SINGLE_KEY`）。 */
+export function advSingleMonth(): boolean {
+  try {
+    return sys.localStorage.getItem(ADV_SINGLE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** [F4] 「內 政 終 了」實際要跑的月數：正常 = `monthsToNextJanuary()`，調試 = 1。 */
+export function advanceSteps(month: number): number {
+  return advSingleMonth() ? 1 : monthsToNextJanuary(month);
+}
+
+/**
  * 月推进：换月 + 年度税（与 web `advanceMonth` 同口径，见 `project\31` §一之補13）。
  *
  * 原作金钱只有**一个**产出口：`0x423824` 的年度税 `pop×75/10000 + 2250`（每城、跳过关城），
@@ -705,10 +844,13 @@ export function advanceMonth(cities: CampaignCity[]): number {
       income += tax;
     }
   }
-  save.gold += income;
+  // [F16] 舊碼這裡有一行 `save.gold += income;`（單一錢包）。web 已刪（`campaign.html:5424-5426`），
+  // 年稅上面已經逐城加進 `state.money`，國庫 = Σ 每城 money，所以這裡不再動 `gold`。
   // 守军自然回补：与 web `advanceMonth` 同一口径 —— 上限 = min(人口/2500 + 110, 600)，
   // 每月按上限的 2% 缓慢补（600 上限 → 每月 +12），不分敌我、补到上限为止。
   // 旧码是「敌方 +6、硬夹 600」，与 web 不一致（project\31 §一之補13）。
+  // 註：web 的 F14 已把「守軍每月白補 2%」整段刪掉（原作換月不補守軍），Cocos 這行還留著，
+  // 屬本任務六項之外的已知差異，REPORT.md 有記。
   for (const city of cities) {
     const state = save.cities[city.NAME];
     if (!state) continue;
@@ -724,9 +866,11 @@ export function advanceMonth(cities: CampaignCity[]): number {
 
 export function recruit(name: string): { ok: boolean; message: string } {
   const save = loadSave();
-  if (save.gold < 500) return { ok: false, message: '國庫不足：徵兵要 500 金。' };
   const state = cityRuntime(name);
-  save.gold -= 500;
+  // [F16] 錢只看本城：徵兵從這座城的 money 扣，國庫只是各城之和（web `spendCityMoney` 同口徑）。
+  const own = Math.max(0, Math.floor(Number(state.money) || 0));
+  if (own < 500) return { ok: false, message: `${name}：金不足（徵兵要 500 金，本城 ${own}）。` };
+  state.money = own - 500;
   state.troops = Math.min(600, state.troops + 40);
   persistSave();
   return { ok: true, message: `${name}：兵 +40（${state.troops}）` };
@@ -734,9 +878,11 @@ export function recruit(name: string): { ok: boolean; message: string } {
 
 export function develop(name: string): { ok: boolean; message: string } {
   const save = loadSave();
-  if (save.gold < 400) return { ok: false, message: '國庫不足：開發要 400 金。' };
   const state = cityRuntime(name);
-  save.gold -= 400;
+  // [F16] 同上：開發扣本城 money，不動 `save.gold`。
+  const own = Math.max(0, Math.floor(Number(state.money) || 0));
+  if (own < 400) return { ok: false, message: `${name}：金不足（開發要 400 金，本城 ${own}）。` };
+  state.money = own - 400;
   state.pop += 3000;
   persistSave();
   return { ok: true, message: `${name}：民 +3000（${state.pop}）` };

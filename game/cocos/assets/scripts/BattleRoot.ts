@@ -21,16 +21,13 @@ import {
   Label,
   Layers,
   Node,
-  Sprite,
-  SpriteFrame,
   UIOpacity,
   UITransform,
 } from 'cc';
-import { ArtBg, loadUnitAtlas } from './ArtLayer';
+import { ArtBg } from './ArtLayer';
 import { battleAudioMark } from './AudioBus';
 import type { BattleAudioMark } from './AudioBus';
 import { AudioHost } from './AudioHost';
-import { BattleBg } from './BattleBg';
 import { BattleHud } from './BattleHud';
 import { BattleWeather, ScreenTint } from './BattleWeather';
 import { camera, createWorld, settle, step, QI_MAX, TICK_HZ } from './core/battle';
@@ -43,12 +40,10 @@ import type { World } from './core/battle';
 import { WEATHER_NAME } from './core/weather';
 import type { Weather } from './core/weather';
 import { loadGameData } from './DataLoader';
-import { GeneralArt } from './GeneralArt';
+import { GeneralMarkers } from './GeneralMarkers';
 import { consumeBattleLaunch, loadSave, persistSave, recordBattleResult } from './GameState';
 import type { BattleLaunch } from './GameState';
 import { queuePostBattle } from './SurrenderModel';
-import { hasForceSchema, pickUnitFrames } from './UnitFrames';
-import type { UnitsGroups } from './UnitFrames';
 import {
   DESIGN_H,
   DESIGN_W,
@@ -60,7 +55,8 @@ import {
   GRID_H,
   GRID_W,
   LANE_PX,
-  ROW_PX,
+  MAP_ROW_PX,
+  MAP_TOP,
   HUD_QI_A,
   HUD_QI_B,
   project,
@@ -68,7 +64,7 @@ import {
 import { COLORS, FONT_FAMILY } from './view/theme';
 import { BattleInput, skillRadius, skillSlotRects, uiToScreen, worldToScreen } from './BattleInput';
 import type { BattleEffect, FloatTone } from './BattleInput';
-import { actionGaugeOf, buildCmdUi, generalUnitOf } from './BattleCmdUi';
+import { buildCmdUi } from './BattleCmdUi';
 import type { CmdBg, CmdText } from './BattleCmdUi';
 import { applyTextRole } from './TextRole';
 import { makeNineSlice, makePanel, placeDesign } from './UiSkin';
@@ -146,7 +142,6 @@ export class BattleRoot extends Component {
   private gBase: Graphics | null = null;
   private gA: Graphics | null = null;
   private gB: Graphics | null = null;
-  private gGeneral: Graphics | null = null;
   private gFx: Graphics | null = null;
 
   private labelA: Label | null = null;
@@ -163,31 +158,17 @@ export class BattleRoot extends Component {
 
   /** HUD 顶栏底图（bg/hud_bar）；缺图时 HUD 只用 Graphics 深色底板 */
   private artHud: ArtBg | null = null;
-  /** 单位帧图集（anim/atlas_00 + anim/atlas）；null = 没图或加载失败 → 继续画方块 */
-  private unitFrames: { back: SpriteFrame[]; front: SpriteFrame[] } | null = null;
-  /** 兵种图集（anim/units_00 + anim/units）里的弓/弩拉弓帧；兵种 3/11 时替换 atlas 帧 */
-  private archerFrames: { back: SpriteFrame[]; front: SpriteFrame[] } | null = null;
-  /**
-   * 原作 FORCE 士兵图集（`anim/units` 的 `groups.<兵種>`）：13 兵種 × 2 陣營。
-   * 有它時 A 側用 `back`（M 藍軍）、B 側用 `front`（N 紅軍），直接換幀而不是染紅；
-   * 沒有（舊 AI 圖集）就退回 `unitFrames`/`archerFrames` 的 walk_back / walk_front。
-   */
-  private forceAtlas: { groups: UnitsGroups; frames: Map<string, SpriteFrame> } | null = null;
-  /** 按 `side:troop` 緩存選好的 SpriteFrame 數組（每局只算一次，換兵種才重算） */
-  private forceCache = new Map<string, { walk: SpriteFrame[]; attack: SpriteFrame[]; hold: number }>();
+  /** 全图战场的静态底图（地形/网格/前线），只画一次；单位与标记每帧重画 */
+  private gMap: Graphics | null = null;
+  /** 主将标记（三国志13 式：圆头像 + 红血量环 + 绿技力环） */
+  private markers: GeneralMarkers | null = null;
   /** 本局主将的军师技生效说明（HUD 用）；空串 = 没用军师技 */
   private wiseNote = '';
-  private unitLayer: Node | null = null;
-  private unitPool: { node: Node; sprite: Sprite; box: UITransform }[] = [];
-  /** 主将三层图（anim/general：马→身体→武器）；没图时保持 gGeneral 的金色菱形 */
-  private generalArt: GeneralArt | null = null;
 
   /** 音效总线宿主：AudioSource 池 + 战斗音效编排 + BGM/底噪（见 AudioHost.ts） */
   private audio: AudioHost | null = null;
   /** 战斗音效的上一帧快照；`battleAudioEvents()` 会就地把它的字段推到当前 tick */
   private audioMark: BattleAudioMark | null = null;
-  /** 战场背景（res/bg/orig：地面平铺 + 三条视差带）；ready 之后顶掉 gBase 的渐变底 */
-  private bg: BattleBg | null = null;
   private weatherLayer: BattleWeather | null = null;
   private tint: ScreenTint | null = null;
 
@@ -228,8 +209,6 @@ export class BattleRoot extends Component {
   private cmdOrder = '';
   /** 被新指令台取代的 BattleHud 老控件：refresh 每帧会把它们重新激活，所以要每帧再关一次 */
   private legacyHidden: Node[] = [];
-  /** 主将行动条（战场上的 46 帧量程细条，画在主将脚下；口径见 BattleCmdUi.actionGaugeOf） */
-  private gGauge: Graphics | null = null;
   /** 控制台实色带：铺在单位层之上、label/HUD/指令台之下（web 的「控制台最后画」口径） */
   private gChrome: Graphics | null = null;
 
@@ -249,8 +228,6 @@ export class BattleRoot extends Component {
     this.audio?.uninstall();
     this.audio?.dispose();
     this.audio = null;
-    this.bg?.dispose();
-    this.bg = null;
     this.weatherLayer?.dispose();
     this.weatherLayer = null;
     this.tint?.dispose();
@@ -312,11 +289,8 @@ export class BattleRoot extends Component {
       this.input.setSettled(true);
     }
 
-    const target = camera(this.world);
-    this.camX += (target - this.camX) * Math.min(1, dt * 5);
-    // 背景只吃镜头位移：地面相位 + 三条带的视差都在 BattleBg 内部算
-    this.bg?.setCamX(this.camX);
-
+    // 全图战场没有镜头：camX 只作为开场叫阵的「我方视角中心」保留，
+    // 不再每帧追 camera(world)（整幅 71 行都在屏内，镜头无意义）。
     // 瞄准相但还没有落点（刚点下技能格）：先把光圈摆到战场中央，
     // 之后 TOUCH_MOVE 再跟手；否则玩家点完技能格看不到任何范围提示。
     if (this.input.selectedSlot && this.input.aim === null) {
@@ -448,13 +422,7 @@ export class BattleRoot extends Component {
       this.floaters.length = 0;
       this.lastMessage = '';
       this.messageTick = world.tick;
-      // 主将三层图：要等 world.data（generals.TYPE）才能算造型，所以放在 createWorld 之后
-      this.generalArt?.load(world, () => {
-        if (this.world) this.redraw();
-      });
       // 表现层只读 world 的 terrain/weather，不参与任何战斗判定
-      this.bg?.setTerrain(world.terrain);
-      this.bg?.setCamX(this.camX);
       this.weatherLayer?.setWeather(world.weather as Weather);
       this.audioMark = battleAudioMark(world);
       this.audio?.playTerrainBgm(world.terrain);
@@ -514,8 +482,6 @@ export class BattleRoot extends Component {
     });
     if (seq.length === 0) return false;
     this.tauntSeq = seq;
-    this.camX = this.generalX(seq[0].side);
-    this.bg?.setCamX(this.camX);
     this.showTauntLine();
     return true;
   }
@@ -540,9 +506,7 @@ export class BattleRoot extends Component {
     this.tauntT = 0;
     this.tauntI += 1;
     if (this.tauntI < seq.length) {
-      // 下一句：鏡頭硬切到說話方（原作「誰喊話切到誰」）
-      this.camX = this.generalX(seq[this.tauntI].side);
-      this.bg?.setCamX(this.camX);
+      // 下一句：全图下不需要切镜头，只换台词框（谁喊话由名字/高亮区分）
       this.showTauntLine();
       return true;
     }
@@ -550,14 +514,12 @@ export class BattleRoot extends Component {
     return false;
   }
 
-  /** 播完：收台詞框、鏡頭回我方主將（= camera() 的錨點），把 tick 累加器清零。 */
+  /** 播完：收台詞框，把 tick 累加器清零。全图下镜头不动。 */
   private endTaunt(): void {
     this.tauntSeq = null;
     this.tauntI = 0;
     this.tauntT = 0;
     this.hud?.hideTaunt();
-    if (this.world) this.camX = camera(this.world);
-    this.bg?.setCamX(this.camX);
     this.accumulator = 0;
     this.redraw();
   }
@@ -648,32 +610,29 @@ export class BattleRoot extends Component {
 
   private buildUi(): void {
     this.buildArt();
-    // 战场背景在 gBase 之下：它负责「战场那 900px」的真实底图，
-    // gBase 在它之上画网格/兵力条，顶栏与控制台用不透明色盖住越界的地面图。
-    this.bg = new BattleBg(this.node, 0);
+    // 全图战场底（地形渐变 + 71 行网格 + 前线 + 后场色带）：静态画一次，
+    // 压在 gBase 之下、背景图之上；单位/标记每帧重画。
+    this.gMap = this.makeGraphics('BattleMap');
+    this.paintMap();
     // 音频宿主只挂节点、不渲染，放哪一层都行；排在背景之后便于阅读
     this.audio = new AudioHost(this.node);
     this.audio.install();
     this.gBase = this.makeGraphics('BattleBase');
     this.gA = this.makeGraphics('UnitsA');
     this.gB = this.makeGraphics('UnitsB');
-    this.gGeneral = this.makeGraphics('Generals');
+    // 主将标记：圆头像 + 红/绿双环（见 GeneralMarkers.ts），压在士兵点之上
+    this.markers = new GeneralMarkers(this.node);
     this.gFx = this.makeGraphics('Fx');
-    // 主将行动条（46 帧量程）：跟着主将在战场里走，必须压在单位之上、HUD 之下
-    this.gGauge = this.makeGraphics('GeneralGauge');
-
-    // 单位精灵层：在方块层之上、Label 之下；图集没加载成功就一直空着
-    this.unitLayer = new Node('UnitSprites');
-    this.unitLayer.layer = Layers.Enum.UI_2D;
-    this.unitLayer.parent = this.node;
-    this.unitLayer.setPosition(0, 0, 0);
-    this.unitLayer.addComponent(UITransform).setContentSize(DESIGN_W, DESIGN_H);
-
-    // 主将三层图：在士兵精灵之上、天气/文字之下；图到之前整组隐藏
-    this.generalArt = new GeneralArt(this.node);
 
     // 天气在单位之上（雨雪要落在人身上），但只画在战场带里；初始晴天，boot() 里按地形+月份改
     this.weatherLayer = new BattleWeather(this.node, 0);
+    // 全图视野下雪点/雨点和 2px 的小兵点会抢注意力：天气整体压到 47% 不透明度
+    this.weatherLayer.node.addComponent(UIOpacity).opacity = 120;
+
+    // 战场角标：全图没有镜头，靠这两处文字告诉玩家哪边是敌方后场
+    this.makeLabel('敵 陣', 12, 112, 80, 11, COLORS.enemy, 'left');
+    this.makeLabel('我 陣', 12, 982, 80, 11, COLORS.ours, 'left');
+    this.makeLabel('前 線', 12, 544, 80, 10, COLORS.goldDim, 'left');
 
     // 控制台/顶栏实色带：位置卡在「单位/天气之后、状态字/HUD/指令台之前」，
     // 让走到底边的士兵被控制台盖住、站在最上沿的士兵被顶栏盖住
@@ -745,61 +704,6 @@ export class BattleRoot extends Component {
     opacity.opacity = 150; // 压淡，字还是要能读
     hud.load('bg/hud_bar');
     this.artHud = hud;
-    void this.loadUnitArt();
-  }
-
-  /** 帧图集：51 帧（attack_front / walk_back / walk_front，各 17 帧，80×104）。失败就保持方块。 */
-  private async loadUnitArt(): Promise<void> {
-    loadUnitAtlas('anim/atlas_00', 'anim/atlas', (frames, page) => {
-      if (!frames || !page) return; // 已经在 ArtLayer 里 warn 过
-      const pick = (prefix: string): SpriteFrame[] => {
-        const list: SpriteFrame[] = [];
-        for (let i = 0; i < 17; i += 1) {
-          const frame = frames.get(`${prefix}_f${String(i).padStart(3, '0')}`);
-          if (frame) list.push(frame);
-        }
-        return list;
-      };
-      // 我方 A 背视（走 back），敌方 B 正对镜头（走 front）——与 web battleView 同源
-      const back = pick('walk_back');
-      const front = pick('walk_front');
-      if (back.length === 0 || front.length === 0) {
-        console.warn('[BattleRoot] 圖集缺少 walk_back/walk_front，單位保持方塊');
-        return;
-      }
-      this.unitFrames = { back, front };
-      if (this.world) this.redraw();
-    });
-    // 兵種圖集（`bundles/res/anim/units*`）。兩代格式：
-    //  - 原作 FORCE 版（`groups.<兵種>.back/front`，13 兵種 × 2 陣營）→ 走 forceAtlas，
-    //    我方 A 取 `back`（M 藍軍）、敵方 B 取 `front`（N 紅軍），**換幀不染色**；
-    //  - 舊 AI 版（只有 `archer_back_f000..016`）→ 退回弓/弩拉弓幀的老路。
-    loadUnitAtlas('anim/units_00', 'anim/units', (frames, page, groups) => {
-      if (!frames || !page) return;
-      if (hasForceSchema(groups)) {
-        this.forceAtlas = { groups: groups as UnitsGroups, frames };
-        this.forceCache.clear();
-        console.log('[BattleRoot] 兵種圖集為原作 FORCE 版：按陣營取背視/正視幀（M 藍軍 / N 紅軍）');
-        if (this.world) this.redraw();
-        return;
-      }
-      const pick = (prefix: string): SpriteFrame[] => {
-        const list: SpriteFrame[] = [];
-        for (let i = 0; i < 17; i += 1) {
-          const frame = frames.get(`${prefix}_f${String(i).padStart(3, '0')}`);
-          if (frame) list.push(frame);
-        }
-        return list;
-      };
-      const back = pick('archer_back');
-      const front = pick('archer_front');
-      if (back.length === 0 || front.length === 0) {
-        console.warn('[BattleRoot] units 圖集缺少 archer_back/archer_front，弓兵仍用 walk 幀');
-        return;
-      }
-      this.archerFrames = { back, front };
-      if (this.world) this.redraw();
-    });
   }
 
   private makeGraphics(name: string): Graphics {
@@ -868,34 +772,96 @@ export class BattleRoot extends Component {
     const g = this.gBase;
     if (!g) return;
     g.clear();
-    // 背景层（BattleBg）ready 之后，战场那 900px 交给 res/bg/orig 的真实底图，
-    // gBase 只保留顶栏/控制台底色与网格；没图（首帧、缺资源）就退回原来的纯色渐变。
-    const bgReady = this.bg?.ready === true;
-    if (!bgReady) this.fillScreenRect(g, 0, 0, DESIGN_W, DESIGN_H, COLORS.bg);
+    // 战场那 900px 由 gMap 的静态全图底承担；gBase 只铺顶栏/控制台两条不透明带。
     // 有 hud_bar 底图时半透明，让顶栏纹理透出来；没图就纯色（和以前一致）
     this.fillScreenRect(g, 0, 0, DESIGN_W, 100, COLORS.bgDeep, this.artHud?.state === 'ready' ? 186 : 255);
     this.fillScreenRect(g, 0, 999, DESIGN_W, 335, COLORS.bgDeep);
-    // 战场地面：自上而下的暖灰渐变。原来是一整块 #11161D，而图集里的将士是深蓝黑袍，
-    // 压在同色纯底上几乎看不见；提亮地面后轮廓才出来（不改任何战斗数据，只改底色）。
-    const BANDS = 6;
-    const bandH = FIELD_H / BANDS;
-    for (let i = 0; i < BANDS && !bgReady; i += 1) {
-      const t = i / (BANDS - 1);
-      g.fillColor = new Color(
-        Math.round(40 - 26 * t),
-        Math.round(46 - 28 * t),
-        Math.round(54 - 32 * t),
-        255,
-      );
-      g.rect(-HALF_W, HALF_H - FIELD_TOP - bandH * (i + 1) - 0.5, DESIGN_W, bandH + 1);
-      g.fill();
-    }
 
     // HUD 三条资源条的深色底板：两条兵力条（y=56）+ 主将 HP 条（y=76）都落在这块上
     this.fillRoundScreenRect(g, 8, 22, 734, 74, 10, '#05070A', 200);
     g.strokeColor = rgba(COLORS.gold, 46);
     g.lineWidth = 1;
     g.roundRect(8 - HALF_W, HALF_H - 22 - 74, 734, 74, 10);
+    g.stroke();
+  }
+
+  /**
+   * 全图战场底（静态，只在 buildUi 里画一次）。
+   *
+   * 三国志13 的战场是一整块可见地形；这里没有 3D 地形，用「敌方暗红 / 中央中性 /
+   * 我方暗蓝」三段渐变 + 细网格 + 一条金色前线，把 71×14 的方格战场读成一整幅图。
+   * 网格刻意压得很淡（alpha 20~54）：全图一屏 71 行，画重了会盖过小兵点。
+   */
+  private paintMap(): void {
+    const g = this.gMap;
+    if (!g) return;
+    g.clear();
+
+    const BANDS = 24;
+    const bandH = FIELD_H / BANDS;
+    const top = new Color(43, 28, 24, 255);
+    const mid = new Color(27, 31, 30, 255);
+    const bot = new Color(17, 26, 38, 255);
+    const mix = (a: Color, b: Color, t: number): Color =>
+      new Color(
+        Math.round(a.r + (b.r - a.r) * t),
+        Math.round(a.g + (b.g - a.g) * t),
+        Math.round(a.b + (b.b - a.b) * t),
+        255,
+      );
+    for (let i = 0; i < BANDS; i += 1) {
+      const t = i / (BANDS - 1);
+      g.fillColor = t < 0.5 ? mix(top, mid, t * 2) : mix(mid, bot, (t - 0.5) * 2);
+      g.rect(-HALF_W, HALF_H - FIELD_TOP - bandH * (i + 1) - 0.5, DESIGN_W, bandH + 1);
+      g.fill();
+    }
+
+    // 双方后场色带（各 8 行）：给「哪边是家」一个不用读字的提示
+    const zoneH = 8 * MAP_ROW_PX;
+    this.fillScreenRect(g, 0, FIELD_TOP, DESIGN_W, zoneH, COLORS.enemy, 15);
+    this.fillScreenRect(g, 0, FIELD_BOTTOM - zoneH, DESIGN_W, zoneH, COLORS.ours, 17);
+
+    // 车道线（14 条车道、13 条内线）
+    g.strokeColor = rgba(COLORS.line, 58);
+    g.lineWidth = 1;
+    for (let gy = 1; gy < GRID_H; gy += 1) {
+      const sx = gy * LANE_PX - HALF_W;
+      g.moveTo(sx, HALF_H - FIELD_BOTTOM);
+      g.lineTo(sx, HALF_H - FIELD_TOP);
+    }
+    g.stroke();
+
+    // 行线：每 5 行一条稍亮的，其余更淡
+    g.strokeColor = rgba(COLORS.line, 20);
+    for (let gx = 1; gx < GRID_W; gx += 1) {
+      if (gx % 5 === 0) continue;
+      const sy = MAP_TOP + gx * MAP_ROW_PX;
+      g.moveTo(-HALF_W, HALF_H - sy);
+      g.lineTo(HALF_W, HALF_H - sy);
+    }
+    g.stroke();
+    g.strokeColor = rgba(COLORS.line, 56);
+    for (let gx = 5; gx < GRID_W; gx += 5) {
+      const sy = MAP_TOP + gx * MAP_ROW_PX;
+      g.moveTo(-HALF_W, HALF_H - sy);
+      g.lineTo(HALF_W, HALF_H - sy);
+    }
+    g.stroke();
+
+    // 前线（worldX=35.5，两军中线）：金色虚线，断 6 空 6
+    const frontY = MAP_TOP + 36 * MAP_ROW_PX;
+    g.strokeColor = rgba(COLORS.gold, 120);
+    g.lineWidth = 1;
+    for (let x = -HALF_W; x < HALF_W; x += 14) {
+      g.moveTo(x, HALF_H - frontY);
+      g.lineTo(Math.min(HALF_W, x + 7), HALF_H - frontY);
+    }
+    g.stroke();
+
+    // 战场边框：把「带」的上下沿收住，避免小兵点飘在渐变里
+    g.strokeColor = rgba(COLORS.gold, 54);
+    g.lineWidth = 1;
+    g.rect(-HALF_W + 0.5, HALF_H - FIELD_BOTTOM + 0.5, DESIGN_W - 1, FIELD_H - 1);
     g.stroke();
   }
 
@@ -921,25 +887,6 @@ export class BattleRoot extends Component {
     if (!world || !gBase || !gChrome) return;
 
     this.redrawBase();
-
-    // 战场网格：横线按可见 worldX 区间画，竖线固定 15 条
-    gBase.strokeColor = rgba(COLORS.line, 150);
-    gBase.lineWidth = 1;
-    const half = FIELD_H / 2 / ROW_PX;
-    const from = Math.max(0, Math.floor(this.camX - half));
-    const to = Math.min(GRID_W - 1, Math.ceil(this.camX + half));
-    for (let gx = from; gx <= to; gx += 1) {
-      const sy = project(gx, 0, this.camX).y - ROW_PX / 2;
-      if (sy < FIELD_TOP || sy > FIELD_BOTTOM) continue;
-      gBase.moveTo(-HALF_W, HALF_H - sy);
-      gBase.lineTo(HALF_W, HALF_H - sy);
-    }
-    for (let gy = 0; gy <= GRID_H; gy += 1) {
-      const sx = gy * LANE_PX - HALF_W;
-      gBase.moveTo(sx, HALF_H - FIELD_BOTTOM);
-      gBase.lineTo(sx, HALF_H - FIELD_TOP);
-    }
-    gBase.stroke();
 
     // HUD 兵力条（Label 显示数字，条用 Graphics 补）。
     // 注意：这几条画在「顶栏 chrome 带」之上（`paintChromeBand` 之后），否则会被实带盖掉 ——
@@ -1032,7 +979,7 @@ export class BattleRoot extends Component {
     g.fill();
     const radius = skillRadius(slot.kind);
     const rx = radius * LANE_PX;
-    const ry = radius * ROW_PX;
+    const ry = radius * MAP_ROW_PX;
     g.strokeColor = rgba(COLORS.gold, 200);
     g.lineWidth = 2;
     g.ellipse(p.sx - HALF_W, HALF_H - p.sy, rx, ry);
@@ -1192,7 +1139,6 @@ export class BattleRoot extends Component {
       this.cmdOrder = sig;
       for (let i = 0; i < order.length; i += 1) this.cmdNodes.get(order[i]!)?.node.setSiblingIndex(i);
     }
-    this.drawGeneralGauge(world);
   }
 
   private buildCmdItem(item: CmdBg | CmdText): void {
@@ -1251,29 +1197,6 @@ export class BattleRoot extends Component {
   }
 
   /**
-   * 主将行动条：web `battleView.ts:1309-1316` 的 50×3 细条 + 一条刻度线。
-   *
-   * 量程用 `actionGaugeOf()`（主将 46 帧，`mark` = 40/46），所以刻度线永远偏右 ——
-   * 玩家能看出「主将这一轮被拉慢了」。主将阵亡/结算后整条清掉。
-   */
-  private drawGeneralGauge(world: World): void {
-    const g = this.gGauge;
-    if (!g) return;
-    g.clear();
-    if (this.settlement) return;
-    const gu = generalUnitOf(world, 'A');
-    if (!gu || !gu.alive) return;
-    const gauge = actionGaugeOf(gu);
-    const p = worldToScreen(this.camX, gu.x, gu.y);
-    const x = p.sx - 25;
-    const y = p.sy - 10;
-    this.fillScreenRect(g, x, y, 50, 3, COLORS.line, 220);
-    if (gauge.ratio > 0) this.fillScreenRect(g, x, y, 50 * gauge.ratio, 3, COLORS.gold);
-    // 40/46 那道刻度：web 用 1px 白线，这里给 1×5 的短柱，缩小时也看得见
-    this.fillScreenRect(g, x + 50 * gauge.mark, y - 1, 1, 5, COLORS.white, 200);
-  }
-
-  /**
    * chrome 实色带：顶栏 0..104 + 控制台 999..1334。
    *
    * web 的绘制顺序是「战场 → 士兵 → 特效 → 顶栏/控制台」，所以单位既走不到控制台上面、
@@ -1305,190 +1228,67 @@ export class BattleRoot extends Component {
     if (filled > 0) this.fillScreenRect(g, x, y, w * filled, h, color);
   }
 
+  /**
+   * 士兵 = 小点，主将 = 稍大的点 + 金边（R215 全图口径）。
+   *
+   * 整幅 71 行压进 900px 后一格只有 11.9px，再画 52px 的小人会把邻格全糊住；
+   * 这里只保留「位置 + 阵营」两个信息：A 蓝点、B 红点，半径 2.2px，
+   * 下面垫一层 3.1px 的暗底，保证在暖灰/暗红地形上也能读出来。
+   * 主将的逻辑点半径 4.6px、外圈金边 6.2px，比小兵大一圈但仍落在真实格点上；
+   * 认人的脸由 `GeneralMarkers` 挂在旁边的 63px 圆牌负责（点与 UI 分离）。
+   * **没有任何动作帧**：攻击/受击/移动/死亡都只改变点的位置与有无。
+   */
   private drawUnits(world: World): void {
     const ga = this.gA;
     const gb = this.gB;
-    const gg = this.gGeneral;
-    if (!ga || !gb || !gg) return;
+    if (!ga || !gb) return;
     ga.clear();
     gb.clear();
-    gg.clear();
 
-    // 有帧图集就用 Sprite 画单位（脚底锚点 + 走路帧）；没图/加载失败继续画原来的矢量方块
-    if (this.unitFrames || this.forceAtlas) {
-      this.drawUnitSprites(world);
-      this.generalArt?.draw(world, this.camX);
-      return;
-    }
+    const dot = (u: World['units'][number]): number => (isGeneral(u) ? 4.6 : 2.2);
+    const visible = (u: World['units'][number]): boolean => {
+      if (!u.alive) return false;
+      const y = project(u.x, u.y, 0).y;
+      return y >= FIELD_TOP && y <= FIELD_BOTTOM;
+    };
 
-    // 同一颜色的所有块只 fill 一次，减少 Graphics 的 draw call
+    // 暗底（主将垫得更宽，金边才有对比）
+    ga.fillColor = new Color(6, 8, 12, 170);
+    gb.fillColor = new Color(6, 8, 12, 170);
     for (const u of world.units) {
-      if (!u.alive) continue;
-      const p = project(u.x, u.y, this.camX);
-      if (p.y < FIELD_TOP - 40 || p.y > FIELD_BOTTOM + 40) continue;
-      const g = u.side === 'A' ? ga : gb;
-      const cx = p.x - HALF_W;
-      const cy = HALF_H - p.y;
-      const general = isGeneral(u);
-      const w = general ? 30 : 18;
-      const h = general ? 38 : 26;
-      g.rect(cx - w / 2, cy - h / 2, w, h);
-      // 朝向缺口：A 朝上（本地 +y），B 朝下（本地 -y）
-      const dir = u.side === 'A' ? 1 : -1;
-      g.moveTo(cx - w * 0.28, cy + (dir * h) / 2);
-      g.lineTo(cx + w * 0.28, cy + (dir * h) / 2);
-      g.lineTo(cx, cy + (dir * h) / 2 + dir * (h * 0.34));
-      g.close();
-      if (general && !this.generalArt?.hasArt()) {
-        gg.moveTo(cx, cy + 10);
-        gg.lineTo(cx + 7, cy);
-        gg.lineTo(cx, cy - 10);
-        gg.lineTo(cx - 7, cy);
-        gg.close();
-      }
+      if (!visible(u)) continue;
+      const p = project(u.x, u.y, 0);
+      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, isGeneral(u) ? 6.4 : 3.1);
     }
-
-    ga.fillColor = rgba(COLORS.ours, 235);
     ga.fill();
-    gb.fillColor = rgba(COLORS.enemy, 235);
     gb.fill();
-    gg.fillColor = rgba(COLORS.gold, 245);
-    gg.fill();
-    // 图集没到时才需要菱形；到了就由 GeneralArt 画三层
-    this.generalArt?.draw(world, this.camX);
-  }
 
-  /** 从对象池取第 index 个单位精灵（首次用到才建节点，上限就是同屏存活数）。 */
-  private spriteAt(index: number): { node: Node; sprite: Sprite; box: UITransform } {
-    const cached = this.unitPool[index];
-    if (cached) return cached;
-    const node = new Node(`Unit_${index}`);
-    node.layer = Layers.Enum.UI_2D;
-    node.parent = this.unitLayer ?? this.node;
-    node.setPosition(0, 0, 0);
-    const box = node.addComponent(UITransform);
-    box.setAnchorPoint(0.5, 0.5);
-    box.setContentSize(32, 42);
-    const sprite = node.addComponent(Sprite);
-    sprite.type = Sprite.Type.SIMPLE;
-    sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    sprite.enabled = false;
-    node.active = false;
-    const slot = { node, sprite, box };
-    this.unitPool[index] = slot;
-    return slot;
-  }
-
-  /**
-   * 用 `anim/atlas_00` 的 walk 幀画单位（80×104 单帧，按脚底对齐）。
-   * 只读 World 的 x/y/side，不碰任何战斗数据；帧序按 tick 取模，60Hz 下 6 tick 一帧。
-   *
-   * 帧集优先级（与 web `battleView.drawSoldier` 同序）：
-   *   FORCE 兵種圖集（A=`back` M 藍軍 / B=`front` N 紅軍）→ 舊 units 弓/弩幀 → atlas walk 幀。
-   * **不叠任何 tint**：紅軍是圖集裡另一套調色盤的像素（project/63 §6.3）。
-   */
-  private drawUnitSprites(world: World): void {
-    const art = this.unitFrames;
-    if (!art && !this.forceAtlas) return;
-    // 兵種 3（弓箭）/ 11（弩兵）用 units 圖集的拉弓幀，其餘兵種仍用 atlas 的 walk 幀
-    const isArcher = (troop: number): boolean => troop === 3 || troop === 11;
-    /** 某一側這一局該用哪組幀：先 FORCE 兵種組，再退回老兩套 */
-    const setOf = (side: 'A' | 'B'): { walk: SpriteFrame[]; hold: number; force: boolean } | null => {
-      const troop = world.sides[side].troop;
-      const force = this.forceSet(side, troop);
-      // force=true 表示這組幀來自 FORCE 兵種圖集（每幀自帶該兵種畫布高），落屏要按 1:1
-      if (force && force.walk.length > 0) return { walk: force.walk, hold: force.hold, force: true };
-      const legacy = this.archerFrames && isArcher(troop) ? this.archerFrames : art;
-      if (!legacy) return null;
-      return { walk: side === 'A' ? legacy.back : legacy.front, hold: 3, force: false };
-    };
-    const setA = setOf('A');
-    const setB = setOf('B');
-    let used = 0;
-    // 落地阴影：画在方块层（gA/gB，正好在精灵层之下），把小人「钉」在地面上。
-    // 同色路径先累积成一批再 fill()，避免每个单位一次 draw call。
-    const shadowA = this.gA;
-    const shadowB = this.gB;
-    if (shadowA) shadowA.fillColor = new Color(4, 6, 10, 120);
-    if (shadowB) shadowB.fillColor = new Color(4, 6, 10, 120);
+    // 阵营色点
+    ga.fillColor = rgba(COLORS.ours, 245);
+    gb.fillColor = rgba(COLORS.enemy, 245);
     for (const u of world.units) {
-      if (!u.alive) continue;
-      const g = u.side === 'A' ? shadowA : shadowB;
-      if (!g) continue;
-      const p = project(u.x, u.y, this.camX);
-      if (p.y < FIELD_TOP - 40 || p.y > FIELD_BOTTOM + 40) continue;
-      const r = isGeneral(u) ? 16 : 12;
-      // 主将的贴边钳制已移除（GeneralArt 改为「脚底出带即不画」），阴影直接落在真实脚底上；
-      // 这里与 GeneralArt 的 ±40 判据同口径，人物与影子必然同进同出。
-      const sx = p.x;
-      const sy = p.y + 8;
-      g.ellipse(sx - HALF_W, HALF_H - sy, r, r * 0.42);
+      if (!visible(u)) continue;
+      const p = project(u.x, u.y, 0);
+      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, dot(u));
     }
-    shadowA?.fill();
-    shadowB?.fill();
-    for (const u of world.units) {
-      if (!u.alive) continue;
-      // 主将有图集时由 GeneralArt 画三层，这里别再叠一个 72px 的 walk 帧
-      if (isGeneral(u) && this.generalArt?.hasArt()) continue;
-      const p = project(u.x, u.y, this.camX);
-      if (p.y < FIELD_TOP - 40 || p.y > FIELD_BOTTOM + 40) continue;
-      const set = u.side === 'A' ? setA : setB;
-      if (!set || set.walk.length === 0) continue;
-      const frames = set.walk;
-      const phase = Math.floor(world.tick / Math.max(1, set.hold));
-      // 敵方錯開相位，兩軍不會像同步體操（同 web：+8）
-      const index = u.side === 'A' ? phase % frames.length : (phase + 8) % frames.length;
-      const frame = frames[index] ?? frames[0];
-      const slot = this.spriteAt(used);
-      used += 1;
-      const general = isGeneral(u);
-      // 落屏高度（設計像素）：
-      //   FORCE 兵種圖集 → 按幀畫布高 1:1（鏈錘 94 / 朴刀 74 / 弩 70 …），螢幕上還原本來的高矮，
-      //     與 web `battleView.ts` 的「幀畫布寬 1:1」同一口徑（project/189）；
-      //   老 atlas.json（80×104 單幀）/ 主將 → 舊口徑 52 / 72。
-      // 曾經一律壓成 52：所有兵種同高，兵種間的高矮差被抹平，很難看出「這是哪個兵」。
-      const h = general ? 72 : (set.force ? Math.max(1, Math.round(frame.rect.height)) : 52);
-      // 兩套圖集單幀尺寸不同（atlas 80×104 / units 弓兵另有一檔），按幀自己的長寬比算寬度
-      const ratio = frame.rect.height > 0 ? frame.rect.width / frame.rect.height : 80 / 104;
-      const w = Math.round(h * ratio);
-      const size = slot.box.contentSize;
-      if (size.width !== w || size.height !== h) slot.box.setContentSize(w, h);
-      // 脚底锚点：地块中心再往下 8px 当作脚，精灵中心抬 h/2
-      slot.node.setPosition(p.x - HALF_W, HALF_H - (p.y + 8) + h / 2, 0);
-      if (slot.sprite.spriteFrame !== frame) slot.sprite.spriteFrame = frame;
-      if (!slot.sprite.enabled) slot.sprite.enabled = true;
-      if (!slot.node.active) slot.node.active = true;
-    }
-    for (let i = used; i < this.unitPool.length; i += 1) {
-      const slot = this.unitPool[i];
-      if (slot.node.active) slot.node.active = false;
-    }
-  }
+    ga.fill();
+    gb.fill();
 
-  /**
-   * 取「某側某兵種」的 FORCE 幀數組（按 `side:troop` 緩存）。
-   * 沒有 FORCE 圖集 / 兵種沒有組 → null，調用方退老兩套。
-   */
-  private forceSet(side: 'A' | 'B', troop: number): { walk: SpriteFrame[]; attack: SpriteFrame[]; hold: number } | null {
-    const force = this.forceAtlas;
-    if (!force) return null;
-    const key = `${side}:${troop}`;
-    const cached = this.forceCache.get(key);
-    if (cached) return cached;
-    const picked = pickUnitFrames(force.groups, troop, side, (name) => force.frames.has(name));
-    if (!picked) return null;
-    const map = (names: string[]): SpriteFrame[] => {
-      const out: SpriteFrame[] = [];
-      for (const name of names) {
-        const frame = force.frames.get(name);
-        if (frame) out.push(frame);
-      }
-      return out;
-    };
-    const set = { walk: map(picked.walk), attack: map(picked.attack), hold: picked.hold };
-    if (set.walk.length === 0) return null;
-    this.forceCache.set(key, set);
-    return set;
+    // 主将金边：一眼区分「将」与「兵」
+    ga.strokeColor = rgba(COLORS.gold, 220);
+    gb.strokeColor = rgba(COLORS.gold, 220);
+    ga.lineWidth = 1.2;
+    gb.lineWidth = 1.2;
+    for (const u of world.units) {
+      if (!u.alive || !isGeneral(u)) continue;
+      const p = project(u.x, u.y, 0);
+      if (p.y < FIELD_TOP || p.y > FIELD_BOTTOM) continue;
+      (u.side === 'A' ? ga : gb).circle(p.x - HALF_W, HALF_H - p.y, 6.2);
+    }
+    ga.stroke();
+    gb.stroke();
+
+    this.markers?.draw(world);
   }
 
   private drawFx(world: World): void {
@@ -1498,10 +1298,12 @@ export class BattleRoot extends Component {
     for (const fx of world.fx) {
       // core 的 heal fx 把 x 填成了 HP，不是世界坐标；Cocos 壳先不画 heal 圈
       if (fx.kind === 'heal') continue;
-      const p = project(fx.x, fx.y, this.camX);
+      const p = project(fx.x, fx.y, 0);
       if (p.y < FIELD_TOP - 60 || p.y > FIELD_BOTTOM + 60) continue;
-      const r = Math.max(10, fx.r * LANE_PX);
-      g.circle(p.x - HALF_W, HALF_H - p.y, r);
+      // 全图投影下纵向被压到 1/6，半径圈也必须是椭圆，否则一颗火球会盖掉 5 行
+      const rx = Math.max(10, fx.r * LANE_PX);
+      const ry = Math.max(6, fx.r * MAP_ROW_PX);
+      g.ellipse(p.x - HALF_W, HALF_H - p.y, rx, ry);
     }
     g.strokeColor = rgba(COLORS.gold, 140);
     g.lineWidth = 2;

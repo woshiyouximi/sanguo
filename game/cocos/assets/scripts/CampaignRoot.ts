@@ -1897,14 +1897,16 @@ export class CampaignRoot extends Component {
 
   private actions(): Action[] {
     if (!this.save || !this.selected) {
-      return [{ kind: 'advance', title: '推進一月', caption: '稅收 +0', primary: false, enabled: true }];
+      return [{ kind: 'advance', title: '內 政 終 了', caption: '結束內政 · 跑完一年', primary: false, enabled: true }];
     }
     const own = this.save.owned.includes(this.selected);
     if (own) {
+      // [F4] 「內 政 終 了」＝ 跑完一年（web `campaign.html:2517 endMonth()` → `advanceMonth(12)`）。
+      // 舊標題「推進一月」是本次要修掉的 bug：原生包按了只走 1 個月，玩家才回報「還是按月推進」。
       const advance: Action = {
         kind: 'advance',
-        title: '推進一月',
-        caption: `稅收 +${this.income()}`,
+        title: '內 政 終 了',
+        caption: `結束內政 · 稅入 +${this.income()}`,
         primary: false,
         enabled: true,
       };
@@ -1920,8 +1922,8 @@ export class CampaignRoot extends Component {
             primary: true,
             enabled: true,
           },
-          { kind: 'recruit', title: '徵 兵', caption: '金 500 → 兵 +40', primary: false, enabled: this.save.gold >= 500 },
-          { kind: 'develop', title: '開 發', caption: '金 400 → 民 +3000', primary: false, enabled: this.save.gold >= 400 },
+          { kind: 'recruit', title: '徵 兵', caption: '本城金 500 → 兵 +40', primary: false, enabled: GameState.cityMoney(this.selected) >= 500 },
+          { kind: 'develop', title: '開 發', caption: '本城金 400 → 民 +3000', primary: false, enabled: GameState.cityMoney(this.selected) >= 400 },
           advance,
         ];
       }
@@ -1930,8 +1932,8 @@ export class CampaignRoot extends Component {
       if (incoming.length > 0) {
         const first = incoming[0];
         return [
-          { kind: 'recruit', title: '徵 兵', caption: '金 500 → 兵 +40', primary: false, enabled: this.save.gold >= 500 },
-          { kind: 'develop', title: '開 發', caption: '金 400 → 民 +3000', primary: false, enabled: this.save.gold >= 400 },
+          { kind: 'recruit', title: '徵 兵', caption: '本城金 500 → 兵 +40', primary: false, enabled: GameState.cityMoney(this.selected) >= 500 },
+          { kind: 'develop', title: '開 發', caption: '本城金 400 → 民 +3000', primary: false, enabled: GameState.cityMoney(this.selected) >= 400 },
           {
             kind: 'defend',
             title: '行 軍 中',
@@ -1964,7 +1966,7 @@ export class CampaignRoot extends Component {
           primary: true,
           enabled: true,
         },
-        { kind: 'advance', title: '推進一月', caption: `稅收 +${this.income()}`, primary: false, enabled: true },
+        { kind: 'advance', title: '內 政 終 了', caption: `結束內政 · 稅入 +${this.income()}`, primary: false, enabled: true },
       ];
     }
     const onRoadMine = GameState.armiesTo(this.selected, 'A').filter((army) => army.progress < 1);
@@ -1978,7 +1980,7 @@ export class CampaignRoot extends Component {
           primary: false,
           enabled: false,
         },
-        { kind: 'advance', title: '推進一月', caption: `稅收 +${this.income()}`, primary: false, enabled: true },
+        { kind: 'advance', title: '內 政 終 了', caption: `結束內政 · 稅入 +${this.income()}`, primary: false, enabled: true },
       ];
     }
     return [
@@ -1993,7 +1995,7 @@ export class CampaignRoot extends Component {
         primary: true,
         enabled: near,
       },
-      { kind: 'advance', title: '推進一月', caption: `稅收 +${this.income()}`, primary: false, enabled: true },
+      { kind: 'advance', title: '內 政 終 了', caption: `結束內政 · 稅入 +${this.income()}`, primary: false, enabled: true },
     ];
   }
 
@@ -2008,12 +2010,23 @@ export class CampaignRoot extends Component {
     }
   }
 
+  /**
+   * 年稅預覽（正月結算）。
+   *
+   * web 真源：`campaign.html:5437-5448` `advanceMonth()` 內的年稅：
+   *   `const tax = CM.annualTax(st.pop); st.money = Saves.num(st.money) + tax; income += tax;`
+   * 舊碼 `floor(pop/5000)*4` 是自己編的口徑，跟 web/原作都不一樣，這裡改成同一條公式
+   * （關卡不算城，`GameState.isGateCity` 跳過）。
+   */
   private income(): number {
     if (!this.save) return 0;
     let total = 0;
     for (const name of this.save.owned) {
       const state = this.save.cities[name];
-      if (state) total += Math.floor(state.pop / 5000) * 4;
+      if (!state) continue;
+      const def = this.cities.find((city) => city.NAME === name);
+      if (def && GameState.isGateCity(def)) continue;
+      total += Math.floor(state.pop * 75 / 10000) + 2250;
     }
     return total;
   }
@@ -2051,7 +2064,7 @@ export class CampaignRoot extends Component {
         // 面板已把 gold / 城況 / 內政欄位寫回存檔；這裡只重新讀一次並刷新大地圖
         this.save = GameState.loadSave();
         this.cityPanel?.hide();
-        this.hintText = `${cityName}：內政已更新（金 ${this.save.gold}）。`;
+        this.hintText = `${cityName}：內政已更新（國庫 ${GameState.nationalGold()} 金）。`;
         this.refresh();
       },
       onDeploy: (target: string) => {
@@ -2064,63 +2077,74 @@ export class CampaignRoot extends Component {
     });
   }
 
+  /**
+   * [F4] 內 政 終 了 = 推進一年（用戶實測抱怨的那一項）。
+   *
+   * web 真源：`web/campaign.html:2517-2533 endMonth()`：
+   *   ① 正月才有內政窗口（`Saves.monthOfYear(save.month) !== 1` → 拒）；
+   *   ② 本月已收束（`CM.monthLocked(save, UNLIMITED)`）→ 拒；
+   *   ③ `CM.markMonthActed()` + 兩行日誌（「內 政 終 了」「大 地 圖：結束內政 → 跑完一年」）；
+   *   ④ `advanceMonth(12)` —— 逐月循環 12 次（5389-5558），月份事件按月結算。
+   *
+   * Cocos 這一版**推進方式逐字一致**：一次跑 N 個月，逐月 `advanceMonth`（年稅/補兵）→
+   * `advanceArmiesMonth()`（我軍行軍/抵達）→ `runMapAi()`（AI 月結算/出兵），最後落到次年正月。
+   * 不是「月份 +12 就完事」—— 月報、行軍、抵達城下都按 N 次逐月走。
+   * 月令改成「每項主令每月一次」（見 `CityPanel.runCommand`），所以不再有 web 的正月閘門。
+   * `GameState.advanceSteps()` 在 `sanguo_adv_single='1'` 時只走 1 個月（對照 web `?adv=1`）。
+   */
+  private endInterior(): void {
+    if (!this.save) return;
+    const from = this.save.month;
+    const steps = GameState.advanceSteps(from);
+    let income = 0;
+    let stillCount = 0;
+    const incoming = new Set<string>();
+    for (let i = 0; i < steps; i += 1) {
+      income += GameState.advanceMonth(this.cities);
+      // 順序與單月推進完全一致：先讓在途部隊走完這個月，再讓 AI 出兵（新部隊 progress=0），
+      // 否則本月新出的兵會立刻抵達，跑一年時玩家看不到「行軍中」這一步。
+      const moved = this.advanceArmiesMonth();
+      const ai = this.runMapAi();
+      if (!ai) this.spawnRaid();
+      this.save = GameState.loadSave();
+      this.recordAiBattleLog(ai);
+      if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
+      stillCount = moved.still.length;
+      for (const row of ai?.incoming ?? []) incoming.add(row.to);
+    }
+    const save = this.save;
+    const arrived = save.owned
+      .map((city) => GameState.arrivedAt(city, 'B').map((army) => ({ army, city })))
+      .reduce((acc, list) => acc.concat(list), [] as Array<{ army: Army; city: string }>);
+    const notes: string[] = [];
+    if (arrived.length > 0) {
+      notes.push(`敵軍已到 ${arrived[0].city} 城下：點該城 →「守 城 戰」。`);
+    } else if (stillCount > 0) {
+      notes.push(`行軍中 ${stillCount} 支。`);
+    }
+    if (incoming.size > 0) {
+      notes.push(`AI 出兵 ${incoming.size} 路，來犯：${Array.from(incoming).slice(0, 3).join('、')}。`);
+    }
+    // web 的兩行 pushLog（2517-2533）在 Cocos 落到戰報：同樣的句子、用出擊月份的戳。
+    this.pushBattleLog([
+      battleLogLine(from, '內 政 終 了：本年內政窗口收束（原作 0x427FE0 → 0x41BBF5）', 'year'),
+      battleLogLine(from, `大 地 圖：結束內政 → 跑完一年（${from} 月 → ${save.month} 月）`, 'year'),
+    ]);
+    this.hintText = this.clampHint(
+      `內 政 終 了：跑完 ${steps} 個月（${from} 月 → ${save.month} 月）· 稅入 +${income} 金。${notes.join('')}`,
+      160,
+    );
+    this.refresh();
+    this.checkMonarchDeath();
+  }
+
   private doAction(kind: ActionKind): void {
     if (!this.save) return;
     if (kind === 'advance') {
-      const income = GameState.advanceMonth(this.cities);
-      // 顺序很关键：先让已在路上的部队走完这一个月，再让 AI 出兵（新部队 progress=0），
-      // 否则本月新出的兵会立刻抵达，玩家永远看不到「行軍中」这一步。
-      const moved = this.advanceArmiesMonth();
-      // [AI] 大地圖 AI：一次推进所有 AI 势力（对齐 web campaign.html 的 runAiMonth）。
-      // AI 打 AI 就地结算并回写存档；AI 打玩家只产出来犯队列，转成 B 方在途部队。
-      // 放在 marchArmies(3) 之后：本回合新出的兵 progress=0，不会当月抵达城下。
-      const ai = this.runMapAi();
-      // 有大地圖 AI 时，旧的粗糙 AI（每回合最多 1 路、按 0.6 折算兵力）停用，避免两套 AI 各出一路。
-      const spawned = ai ? null : this.spawnRaid();
-      this.save = GameState.loadSave();
-      // 逐條戰報：AI 的出兵/易手/陣亡全部寫進環形緩衝，不只 hintText 的第一行
-      this.recordAiBattleLog(ai);
-      const arrived = this.save.owned
-        .map((city) => GameState.arrivedAt(city, 'B').map((army) => ({ army, city })))
-        .reduce((acc, list) => acc.concat(list), [] as Array<{ army: Army; city: string }>);
-      const notes = [`推進一月：稅收 +${income} 金。`];
-      if (moved.notes.length > 0) notes.push(...moved.notes);
-      if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
-      // [AI] 月報第一行固定是「AI 月 報：N 個勢力行動（…）」，直接放進提示條
-      // 但這行可以長到 13 個勢力全列（實測 876×1368 時會衝出設計寬度、壓在黑邊上），
-      // 提示條只留前 28 字，完整清單照樣進戰報（recordAiBattleLog）。
-      if (ai && ai.log.length > 0) {
-        const aiLine = String(ai.log[0] ?? '');
-        if (aiLine) notes.push(aiLine.length > 28 ? `${aiLine.slice(0, 28)}…` : aiLine);
-      }
-      if (ai && ai.incoming.length > 0) {
-        const names = ai.incoming.slice(0, 3).map((row) => row.to).join('、');
-        notes.push(`AI 出兵 ${ai.incoming.length} 路，來犯：${names}。`);
-      }
-      if (spawned) {
-        notes.push(`敵軍出動：${spawned.from} → ${spawned.to}（${spawned.troops} 兵）。`);
-        this.pushBattleLog([battleLogLine(this.save.month, `敵軍出動：${spawned.from} → ${spawned.to}（${spawned.troops} 兵）`, 'atk')]);
-      }
-      if (arrived.length > 0) {
-        notes.push(`敵軍已到 ${arrived[0].city} 城下：點該城 →「守 城 戰」。`);
-        const lines: BattleLogLine[] = [];
-        for (let i = 0; i < arrived.length; i += 1) {
-          const hit = arrived[i];
-          if (!hit) continue;
-          lines.push(battleLogLine(this.save.month, `敵軍抵達 ${hit.city} 城下（${hit.army.troops} 兵）`, 'atk'));
-        }
-        this.pushBattleLog(lines);
-      } else if (moved.still.length > 0) {
-        notes.push(`行軍中 ${moved.still.length} 支。`);
-      }
-      // 原作按下月推進會有一句「內政時間到了....」（`work/video_ui/A_map_monthprompt_t0183.png`）。
-      // 字串只在 SaveSlots.ADVANCE_NOTICE 有一份（對應 web `saves.js:1420`），這裡不另抄。
-      // 放最前面並蓋掉稅收等結算文字的第一眼位置，跟原作「按下去看到的就是這句」一致。
-      this.hintText = this.clampHint(`${ADVANCE_NOTICE}${notes.join('')}`);
-      this.refresh();
-      // 本月回城後再判一次君主是否陣亡（AI 打 AI 直接結算，玩家不可能在自己回合丟城；但玩家守城戰
-      // 走的是 Deploy 場景，回來是 start()）
-      this.checkMonarchDeath();
+      // [F4] 內政終了 = 推進一年（web `campaign.html:2517-2533 endMonth()` → `advanceMonth(12)`）。
+      // 舊碼這裡只走一個月（`GameState.advanceMonth` 一次），原生包因此「按月推進」，
+      // 用戶實測抱怨的就是這點。全年推進的逐月結算搬到 `endInterior()`。
+      this.endInterior();
       return;
     }
     if (!this.selected) return;
@@ -2434,7 +2458,8 @@ export class CampaignRoot extends Component {
       this.labelMonarch.string = `君主 ${monarch || '未選'}`;
       this.labelMonarch.color = rgba(monarch ? M.FORCE_GOLD : COLORS.textDim);
     }
-    this.labelStats.string = `·　勢力 ${force || '—'}　·　城 ${save.owned.length}　·　戰績 ${save.wins} 勝 ${save.losses} 敗`;
+    // [F16] 國庫 = Σ 每城 money（web `CM.nationalGold()`），頂欄顯示國庫而不是單一錢包。
+    this.labelStats.string = `·　勢力 ${force || '—'}　·　城 ${save.owned.length}　·　國庫 ${GameState.nationalGold()} 金　·　戰績 ${save.wins} 勝 ${save.losses} 敗`;
     if (this.labelSubtitle) {
       // 頁頭副標：全圖規模一眼可見（web 頁頭 `.hint` 的等價物）
       const total = this.cities.length;
@@ -3086,7 +3111,8 @@ export class CampaignRoot extends Component {
     const owned = this.save?.owned ?? [];
     this.armyMenu = ArmyMenu.show(this.node, {
       army,
-      gold: this.save?.gold ?? 0,
+      // [F16] 兵團面板顯示國庫（Σ 每城 money），不是舊的單一錢包。
+      gold: GameState.nationalGold(),
       months: armyMonths(this.scenarioLike(), army.pathIndex),
       isMine: (city: string) => owned.includes(city),
       levelOf: (name: string) => this.armyGeneralLevel(name),
@@ -3498,7 +3524,8 @@ export class CampaignRoot extends Component {
     view.month = save.month;
     view.owned = save.owned;
     view.cities = save.cities;
-    view.gold = save.gold;
+    // [F16] 君主視圖的 `gold` 也給國庫口徑（模型本身不讀它，只為與 web 存檔視圖同形）
+    view.gold = GameState.nationalGold();
     view.wins = save.wins;
     view.losses = save.losses;
     // 開局播種：web 在 `saves.newCampaign` 裡做（web/saves.js:1030-1046），

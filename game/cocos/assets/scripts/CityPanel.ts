@@ -174,9 +174,17 @@ const SEAM_Y = 562;
  */
 const SEAM_TINT: string[] = ['#351910', '#210F05', '#3D150C', '#46210F', '#3D1706'];
 
-/** 九條命令（8 條 `CMD_ORDER` + 自治 `CMD_EXTRA`） */
+/**
+ * 九條命令：主令 7（`CMD_ORDER`）+ 副令 2（`CMD_SECONDARY`，情報/移動不占月令）。
+ *
+ * [F7] web 真源 `city.html:754-759`：`[...M.CMD_ORDER, ...(M.CMD_EXTRA||[])]` 進 `#grid`、
+ * `M.CMD_SECONDARY` 進 `#subgrid`（`makeBtn(cmd,' sub')`）。Cocos 只有一組九宮，所以兩組
+ * 合併成 9 格 —— 7 + 2 正好填滿九宮。
+ * 舊碼是 `CMD_ORDER`(8 條：開發/徵兵/搜索/移動/任命/物品/情報/出征) + `CMD_EXTRA`(自治)，
+ * 把「移動/情報/物品」當主令，與 web 的 7 主令 + 2 副令口徑不符。
+ */
 function cmdList(): string[] {
-  return ([] as string[]).concat(M.CMD_ORDER, M.CMD_EXTRA);
+  return ([] as string[]).concat(M.CMD_ORDER, M.CMD_SECONDARY);
 }
 
 /* ======================================================================
@@ -779,7 +787,9 @@ export class CityPanel extends Component {
     }
 
     const save: M.CitySave = {
-      gold: M.num(gs.gold),
+      // [F16] `gs` 已經在 `loadSave()` 裡遷移過：錢包併進主城 money、`gold` 恆為 0。
+      gold: gs.goldMigrated === true ? 0 : M.num(gs.gold),
+      goldMigrated: gs.goldMigrated === true,
       month: M.intOr(gs.month, 1, 1),
       owned: Array.isArray(gs.owned) ? gs.owned.slice() : [],
       cities,
@@ -790,6 +800,8 @@ export class CityPanel extends Component {
       auto: isRecord(extras.auto) ? (extras.auto as Record<string, number>) : {},
       autoMonth: M.intOr(extras.autoMonth, 0, 0),
       lastActionMonth: M.intOr(extras.lastActionMonth, 0, 0),
+      // [F7] 逐令月配額：`{ 命令: 月序 }`，過月由 `ensureExtras` 清掉。
+      cmdOrders: isRecord(extras.cmdOrders) ? (extras.cmdOrders as Record<string, number>) : {},
       bag: this.bag.slice(),
     };
     M.ensureExtras(save);
@@ -802,7 +814,9 @@ export class CityPanel extends Component {
     if (!save) return;
 
     const gs = GameState.loadSave();
-    gs.gold = Math.max(0, Math.trunc(M.num(save.gold)));
+    // [F16] 錢已經在每城 `money` 裡（`rt.money` 下面逐城回寫），單一錢包歸零並打遷移標記。
+    gs.gold = 0;
+    gs.goldMigrated = true;
     gs.month = M.intOr(save.month, gs.month, 1);
     if (Array.isArray(save.owned)) gs.owned = save.owned.slice();
 
@@ -830,6 +844,8 @@ export class CityPanel extends Component {
       auto: save.auto,
       autoMonth: save.autoMonth,
       lastActionMonth: save.lastActionMonth,
+      // [F7] 逐令月配額要跨屏保存（大地圖跑完一年後，下個月自然失效）
+      cmdOrders: save.cmdOrders,
       bag: this.bag,
     };
     try {
@@ -948,10 +964,15 @@ export class CityPanel extends Component {
     // 九顆命令牌：既有外框 + 內層暖棕漸層 + 頂部高光 + 底部壓暗
     // —— web 的 `.cmd` 是「雙層框 + 內暗棕底 + 上亮下暗」，Cocos 原本只有單層框 + 純色底
     const cmds = cmdList();
-    const enabled = !this.locked;
+    const save = this.save;
+    const windowClosed = this.locked;
     for (let i = 0; i < this.cmdRects.length; i += 1) {
       const rect = this.cmdRects[i];
-      const primary = cmds[i] === '自治';
+      const cmd = cmds[i];
+      const primary = cmd === '自治';
+      // [F7] 逐令月配額：主令每項每月一次（用過即變灰），副令（情報/移動）不占、恆可用。
+      const used = !!save && !!cmd && !M.isSecondaryCmd(cmd) && M.cmdOrderUsed(save, cmd);
+      const enabled = !windowClosed && !used;
       const inner = { x: rect.x + 4, y: rect.y + 4, w: rect.w - 8, h: rect.h - 8 };
       const top = enabled ? (primary ? '#4A3520' : '#402D1C') : '#1A1F26';
       const bottom = enabled ? (primary ? '#241809' : '#1A1209') : '#0F1319';
@@ -1078,8 +1099,8 @@ export class CityPanel extends Component {
         return '調兵 · 調將';
       case '任命':
         return '太守 · 軍師';
-      case '物品':
-        return '裝備 · 背包';
+      case '武將資料':
+        return '數值 · 裝備';
       case '情報':
         return '本城 · 鄰城';
       case '出征':
@@ -1109,10 +1130,12 @@ export class CityPanel extends Component {
     genCount: number,
     major: string,
     capTotal: number,
+    usedOrders: number,
   ): string[] {
     const prepFull = st.prep >= prepCap ? '（已滿）' : '';
     return [
-      `◇ 本月令 ${this.locked ? '已用 · 回大地圖推進一月' : '可下 · 每月一條'}`,
+      // [F7] 主令每項每月一次（web `CMD_ORDER` 7 項），情報/移動是副令不占月令。
+      `◇ 月令 ${usedOrders}／${M.CMD_ORDER.length} 已下（情報/移動 不占）`,
       `◇ 城防 ${fmt(st.def)} · 預備兵 ${fmt(st.prep)}／${fmt(prepCap)}${prepFull}`,
       `◇ 開發 −金${fmt(M.DEV.COST)} · 搜索 −金${fmt(M.SEARCH.COST)}`,
       `◇ 兵 ${fmt(st.troops)}／${fmt(capTotal)} · 士氣 ${this.moraleOf(major)}／100`,
@@ -1134,6 +1157,10 @@ export class CityPanel extends Component {
     const wise = M.wiseOf(save, def) || '—';
     const eff = M.efficiencyOf(save, def, this.ctx);
     const prepCap = M.prepCapOf(st.pop);
+    // [F7] 本月已下達的主令條數（0–7）；副令（情報/移動）不計。
+    const usedOrders = M.ordersUsedCount(save);
+    // [F19] 武將數／上限（10）—— 超編只標紅、不裁切（web `officerCapState`）。
+    const officer = M.officerCapState(roster.length);
 
     this.setLabel(this.lblBack, '← 返回');
     this.setLabel(this.lblTitle, this.cityName || '（無城）');
@@ -1141,17 +1168,20 @@ export class CityPanel extends Component {
 
     const fields: Array<[string, string, string]> = [
       ['人口', fmt(st.pop), COLORS.text],
-      ['金', fmt(save.gold), COLORS.goldLight],
+      // [F16] 金 = 國庫（Σ 每城 money），不是 `save.gold`（遷移後恆為 0）。
+      ['金', fmt(GameState.nationalGold()), COLORS.goldLight],
       ['兵', `${fmt(st.troops)}／${fmt(caps.total)}`, COLORS.text],
       ['預備兵', `${fmt(st.prep)}／${fmt(prepCap)}`, st.prep >= prepCap ? COLORS.gold : COLORS.text],
       ['防務', fmt(st.def), COLORS.text],
       ['太守', major, COLORS.oursLight],
       ['軍師', wise, COLORS.oursLight],
       ['內政效率', `×${eff.toFixed(2)}`, COLORS.ok],
-      ['武將', `${roster.length}`, COLORS.text],
+      // [F19] 顯示 `13/10`（當前/上限），超編標紅；不裁切武將名單。
+      ['武將', `${officer.n} / ${officer.cap}`, officer.over ? COLORS.danger : COLORS.text],
       ['疲勞', `${this.tireOf(major)}/100`, this.tireOf(major) >= 60 ? COLORS.danger : COLORS.text],
       ['士氣', `${this.moraleOf(major)}/100`, this.moraleOf(major) < 30 ? COLORS.textFaint : COLORS.text],
-      ['月令', this.locked ? '已用' : '可下', this.locked ? COLORS.textFaint : COLORS.ok],
+      // [F7] 月令 = 主令已下條數／7（每項每月一次），不再是一月一條的單一 lock。
+      ['月令', `${usedOrders}／${M.CMD_ORDER.length}`, usedOrders >= M.CMD_ORDER.length ? COLORS.textFaint : COLORS.ok],
     ];
     for (let i = 0; i < fields.length && i < this.hudNames.length; i += 1) {
       const [name, value, color] = fields[i];
@@ -1167,17 +1197,20 @@ export class CityPanel extends Component {
       const meta = M.CMD_META[cmd];
       this.setLabel(this.cmdTags[i], meta?.tag ?? cmd);
       this.setLabel(this.cmdSubs[i], this.cmdSub(cmd, st, save));
+      // [F7] 變灰看的是「這條令本月用過沒有」，不是整頁一月一條。
+      const used = !M.isSecondaryCmd(cmd) && M.cmdOrderUsed(save, cmd);
+      const dull = this.locked || used;
       const tag = this.cmdTags[i];
-      if (tag) tag.color = rgba(this.locked ? COLORS.textFaint : COLORS.goldLight);
+      if (tag) tag.color = rgba(dull ? COLORS.textFaint : COLORS.goldLight);
       const sub = this.cmdSubs[i];
-      if (sub) sub.color = rgba(this.locked ? COLORS.textFaint : COLORS.textDim);
+      if (sub) sub.color = rgba(dull ? COLORS.textFaint : COLORS.textDim);
     }
 
     // 日誌（新的一條在最上面）。空位不再留白（w5-render）：用**本頁已在顯示的數據**
     // 算出的「提示」行填滿 —— web 基準是最長連續空白 130px，Cocos 原本 347px。
     // 這些行不是新玩法：全部取自資訊卡既有欄位與 CMD_META 既有常數（開發/搜索成本）。
     const logs = M.recentLog(save, LOG_ROWS);
-    const tips = this.tipsOf(st, prepCap, eff, roster.length, major, caps.total);
+    const tips = this.tipsOf(st, prepCap, eff, roster.length, major, caps.total, usedOrders);
     for (let i = 0; i < LOG_ROWS; i += 1) {
       const row = logs[i];
       const tipIndex = i - logs.length - (logs.length === 0 ? 1 : 0);
@@ -1195,12 +1228,17 @@ export class CityPanel extends Component {
     this.setLabel(this.lblLogState, `最近 ${LOG_ROWS} 條`);
     this.setLabel(
       this.lblHint,
-      this.locked ? `${M.LOCK_HINT} · 回大地圖推進一月` : '每月一條 · 推進一月再下達',
+      this.locked
+        ? `${M.LOCK_HINT} · 回大地圖「內政終了」跑完一年`
+        : `主令 ${usedOrders}／${M.CMD_ORDER.length} 已下 · 情報/移動 不占月令`,
     );
 
     // 朝堂紀要帶（w7-cocos-render2）：全部取自資訊卡已有的欄位，不引入新數據源
     this.setLabel(this.lblBandTitle, '朝 堂 紀 要');
-    this.setLabel(this.lblBandNote, `${this.locked ? '月令已用' : '月令可下'} · 金 ${fmt(save.gold)}`);
+    this.setLabel(
+      this.lblBandNote,
+      `${this.locked ? '內政已終了' : `月令 ${usedOrders}／${M.CMD_ORDER.length}`} · 國庫 ${fmt(GameState.nationalGold())}`,
+    );
     this.setLabel(this.lblBandText, `太守 ${major} · 軍師 ${wise} · 武將 ${roster.length} 員 · 內政效率 ×${eff.toFixed(2)}`);
     this.setLabel(
       this.lblBandTip,
@@ -1256,19 +1294,25 @@ export class CityPanel extends Component {
     M.logAdd(save, { m: save.month, city: this.cityName, cmd, kind: 'cmd', text });
   }
 
-  /** 吃月令（R8：一月一令）並存檔 */
-  private consume(): void {
+  /**
+   * 吃一條月令（[F7] 主令每項每月一次；副令情報/移動不占，由 `runCommand` 擋掉）。
+   *
+   * 舊碼是 `M.markMonthActed()`（一月一條，任一條命令就鎖整頁）—— 那是用戶抱怨的口徑；
+   * web 是 `CMD_ORDER` 7 項各每月一次（`city.html:754-759`），所以這裡改成逐令配額。
+   * 「內政窗口收束」（`monthLocked`）仍只由「出征／自治」觸發（web 同）。
+   */
+  private consume(cmd: string): void {
     const save = this.save;
     if (!save) return;
-    M.markMonthActed(save, false);
+    M.markCmdOrder(save, cmd);
     this.persist();
     this.refresh();
   }
 
-  /** 命令成功：關抽屜 + 吃月令 + 存檔 */
-  private acted(): void {
+  /** 命令成功：關抽屜 + 吃這條令的月配額 + 存檔 */
+  private acted(cmd: string): void {
     this.closeSheet();
-    this.consume();
+    this.consume(cmd);
   }
 
   private runCommand(index: number): void {
@@ -1277,8 +1321,17 @@ export class CityPanel extends Component {
     const cmd = cmdList()[index];
     if (!save || !def || !cmd) return;
 
-    if (M.monthLocked(save, false)) {
-      this.note(cmd, `${M.LOCK_HINT}：一個月只能下一條命令，回大地圖「推進一月」再下達。`);
+    // [F7] 逐令閘門：主令每項每月一次，副令（情報/移動）不占月令。
+    // 整頁仍受「內政窗口是否已收束」約束（出征／自治用掉窗口後要回大地圖跑完一年）。
+    const windowClosed = M.monthLocked(save, false);
+    const secondary = M.isSecondaryCmd(cmd);
+    if (windowClosed || (!secondary && M.cmdOrderUsed(save, cmd))) {
+      this.note(
+        cmd,
+        windowClosed
+          ? `${M.LOCK_HINT}（內政窗口已收束）—— 回大地圖「內政終了」跑完一年。`
+          : `${cmd}：本月已下過這條令（每項每月一次）。情報/移動是副令，不占月令。`,
+      );
       this.persist();
       this.refresh();
       return;
@@ -1303,7 +1356,7 @@ export class CityPanel extends Component {
       case '任命':
         this.cmdAppointSheet(null);
         return;
-      case '物品':
+      case '武將資料':
         this.cmdItems();
         return;
       case '情報':
@@ -1331,8 +1384,10 @@ export class CityPanel extends Component {
       this.refresh();
       return;
     }
-    this.note('開發', `人口增加 ${fmt(r.pop)} 人，防禦力增加 ${fmt(r.def)}。（金 -${fmt(r.cost)}）`);
-    this.acted();
+    // [F7] 開發成本 R85 起為 0（原作不花金），所以成功文案要分「不耗金 / 扣 N 金」兩種。
+    const cost = Math.max(0, Math.trunc(M.num(r.cost)));
+    this.note('開發', `人口增加 ${fmt(r.pop)} 人，防禦力增加 ${fmt(r.def)}。${cost > 0 ? `（金 -${fmt(cost)}）` : '（不耗金）'}`);
+    this.acted('開發');
   }
 
   private cmdEnlistSheet(): void {
@@ -1383,7 +1438,7 @@ export class CityPanel extends Component {
       '徵兵',
       `${label} +${fmt(r.n)}（預備兵 -${fmt(r.taken)}）。步 ${fmt(st?.inf)}／騎 ${fmt(st?.cav)}，共 ${fmt(st?.troops)}／${fmt(M.RECRUIT.CAP)}。`,
     );
-    this.acted();
+    this.acted('徵兵');
   }
 
   private cmdSearch(): void {
@@ -1397,8 +1452,8 @@ export class CityPanel extends Component {
       this.refresh();
       return;
     }
-    // 成功的日誌由 CityModel.search() 自己寫（含種子結果），這裡只吃月令
-    this.acted();
+    // 成功的日誌由 CityModel.search() 自己寫（含種子結果），這裡只吃「搜索」這條令
+    this.acted('搜索');
   }
 
   private cmdMoveSheet(): void {
@@ -1438,7 +1493,10 @@ export class CityPanel extends Component {
     if (M.num(r.troops) > 0) bits.push(`兵 ${fmt(r.troops)}`);
     if (r.general) bits.push(`將 ${r.general.NAME}`);
     this.note('移動', `→ ${to}：${bits.join('、') || '無'}。`);
-    this.acted();
+    // [F7] 移動是副令（`CMD_SECONDARY`），不占月令：成功後只存檔刷新，不吃配額。
+    this.closeSheet();
+    this.persist();
+    this.refresh();
   }
 
   private cmdAppointSheet(role: 'major' | 'wise' | null): void {
@@ -1476,11 +1534,10 @@ export class CityPanel extends Component {
     const major = M.majorOf(save, def) || '—';
     const wise = M.wiseOf(save, def) || '—';
     this.note('任命', `太守 ${major}、軍師 ${wise}。`);
-    if (r.ok) this.acted();
-    else {
-      this.persist();
-      this.refresh();
-    }
+    // [F7] 任命免費、也不是月令（web CMD_META：'免費'）—— 不吃配額。
+    this.closeSheet();
+    this.persist();
+    this.refresh();
   }
 
   private itemName(seq: number): string {
@@ -1539,7 +1596,9 @@ export class CityPanel extends Component {
     }
     if (!rows.length) rows.push({ text: '（沒有情資）', act: null });
     this.openSheet('情　報', rows);
-    this.consume();
+    // [F7] 情報是副令（`CMD_SECONDARY`），只讀、不占月令（舊碼這裡會 consume 一條）。
+    this.persist();
+    this.refresh();
   }
 
   private cmdDeploy(): void {
@@ -1567,6 +1626,13 @@ export class CityPanel extends Component {
       this.persist();
       this.refresh();
       return;
+    }
+    // [F7] 出征收束本月內政窗口（web `city.html:1217-1218`：`markMonthActed` 後跳 deployUrl）。
+    const save = this.save;
+    if (save) {
+      M.markCmdOrder(save, '出征');
+      M.markMonthActed(save, false);
+      this.persist();
     }
     // 交給 CampaignRoot 走既有 `doAction('march')`（敵情/出發城都在那裡定）
     onDeploy(target);
@@ -1600,12 +1666,19 @@ export class CityPanel extends Component {
     const r = M.runAutonomy(save, this.cities(), this.ctx, { from: '' });
     if (!r.ok) {
       this.note('自治', r.reason === 'none' ? M.AUTONOMY.NO_CITY : '沒有可以代行開發的城（金不足或已飽和）。');
-      this.consume();
+      // 失敗不吃月令（web openAuto 失敗只跳提示、不進 afterCommand）
+      this.persist();
+      this.refresh();
       return;
     }
     const detail = r.ran.map((x) => `${x.city}+${fmt(x.pop)}人`).join('、');
     this.note('自治', `${r.text}  ${detail}`);
-    this.acted();
+    // [F7] 自治是主令（占「自治」這一條的月配額），且照 web 收束本月內政窗口。
+    M.markCmdOrder(save, '自治');
+    M.markMonthActed(save, false);
+    this.closeSheet();
+    this.persist();
+    this.refresh();
   }
 
   /* --------------------------------------------------------------------

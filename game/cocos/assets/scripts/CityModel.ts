@@ -103,6 +103,17 @@ export interface CitySave {
   auto?: Record<string, number>;
   autoMonth?: number;
   lastActionMonth?: number;
+  /**
+   * [F16] 錢已遷移成「每城 money」的標記（web `city_model.js:786-894` 同名字段）。
+   * 舊檔 `gold` 是一次性錢包；遷移後 `gold` 歸零、國庫 = Σ 每城 money。
+   */
+  goldMigrated?: boolean;
+  /**
+   * [F7] 逐令月配額：`{ 命令: 月序 }`。主令每項每月一次；副令（情報／移動）不寫。
+   * 對照 web：原作 0x4A64BC 是「本月已下令」一面旗，Cocos 拆成逐令配額，
+   * 因為主令有 7 條、每條都該能各下一次（web 的 `acted` 是逐將年令，另一套東西）。
+   */
+  cmdOrders?: Record<string, number>;
   [key: string]: unknown;
 }
 
@@ -197,16 +208,40 @@ export interface CityCtx {
   level?: number;
   /** R17：搜索掉落的「執行動作武將」等級（測試/呼叫方明確指定） */
   searchLevel?: number;
+  /**
+   * [F10] 自治代行用：`quiet` 不寫日誌、`free` 不扣錢（也不做金閘）。
+   * 對照 web `runAutonomy()` 的叫法 `search(save, def, {...ctx, quiet:true})`
+   * （web 只傳 quiet；Cocos 把「免費」也顯式化，避免代行時把城裡的錢扣光）。
+   */
+  quiet?: boolean;
+  free?: boolean;
 }
 
 /* ======================================================================
  * §1 命令表 + 常量總表
  * ==================================================================== */
 
-export const CMD_ORDER = ['開發', '徵兵', '搜索', '移動', '任命', '物品', '情報', '出征'];
+/**
+ * 主令 7 條 —— **逐字照 web 真源**：`game/web/city_model.js:36-44` `CMD_ORDER`
+ * = 搜索 / 開發 / 徵兵 / 任命 / 武將資料 / 自治 / 出征（指南 L96-105 的順序）。
+ *
+ * [F7] 舊表是「八條九宮」：`['開發','徵兵','搜索','移動','任命','物品','情報','出征']`，
+ * 把 移動 / 情報 / 物品 當成主令 —— 與 web、原作都對不上。原作把 移動 / 情報
+ * 放在副令列（不佔月令），「物品」併進「武將資料」（數值／裝備／使用物品）。
+ */
+export const CMD_ORDER = ['搜索', '開發', '徵兵', '任命', '武將資料', '自治', '出征'];
 
-/** 原作有、但不在任務書「八條」裡的命令（R10 自治，04c §2.3 0x4278CE / 0x4278F5） */
-export const CMD_EXTRA = ['自治'];
+/**
+ * 副令 2 條（web `city_model.js:46-50` `CMD_SECONDARY`）：
+ * 情報（本城＋鄰城兵力，只讀）／移動（兵團層調兵調將）—— **不佔月令**。
+ */
+export const CMD_SECONDARY = ['情報', '移動'];
+
+/**
+ * 舊九宮「多出來的一條」清單。web 是 `[]`（`CMD_EXTRA = []`）；
+ * 保留這個匯出是為了讓兩邊驗收鉤子（`cmdOrder` / `cmdSecondary` / `cmdExtra`）同形。
+ */
+export const CMD_EXTRA: string[] = [];
 
 export interface CmdMeta {
   tag: string;
@@ -215,16 +250,36 @@ export interface CmdMeta {
 }
 
 export const CMD_META: Record<string, CmdMeta> = {
-  開發: { tag: '開　發', sub: '人口＋ 防禦＋', cost: '400 金' },
-  徵兵: { tag: '部隊徵兵', sub: '預備兵 → 步／騎', cost: '不花金' },
   搜索: { tag: '搜　索', sub: '人才／寶物／兵符', cost: '200 金' },
-  移動: { tag: '移動武將', sub: '調兵調將到鄰城', cost: '免費' },
+  開發: { tag: '開　發', sub: '人口＋ 防禦＋', cost: '不花金' },
+  徵兵: { tag: '徵　兵', sub: '預備兵 → 步／騎', cost: '不花金' },
   任命: { tag: '太守·軍師', sub: '改守將與軍師', cost: '免費' },
-  物品: { tag: '物　品', sub: '裝備／兵符一覽', cost: '—' },
-  情報: { tag: '情　報', sub: '本城＋鄰城兵力', cost: '—' },
-  出征: { tag: '出　征', sub: '攻打鄰接之城', cost: '—' },
+  武將資料: { tag: '武將資料', sub: '數值／裝備／使用物品', cost: '—' },
   自治: { tag: '自治施行', sub: '設定城按月代開發', cost: '各城 400 金' },
+  出征: { tag: '出　征', sub: '攻打鄰接之城', cost: '—' },
+  情報: { tag: '情　報', sub: '本城＋鄰城兵力（只讀）', cost: '—' },
+  移動: { tag: '移動武將', sub: '調兵調將到鄰城', cost: '免費' },
 };
+
+/**
+ * [F19] 城內武將上限 = 10（web 真源 `game/web/city_model.js:197-214`）。
+ * 依據 `work/ref_pdf/sanguo2_guide.txt` L92「武將數（如 13/10）當前/上限」；
+ * 原作自己的劇本資料就會超編（濮陽 15／洛陽 15／江夏 17）。
+ * 行為約定：**超編不裁切**，只把 `13/10` 標紅。
+ */
+export const CITY_OFFICER_CAP = 10;
+
+export interface OfficerCapState {
+  n: number;
+  cap: number;
+  over: boolean;
+}
+
+/** 武將數 → `13/10` 的兩個數（`over` 時 UI 標紅，載入時不裁人） */
+export function officerCapState(count: number | string | null | undefined): OfficerCapState {
+  const n = Math.max(0, Math.trunc(num(count)));
+  return { n, cap: CITY_OFFICER_CAP, over: n > CITY_OFFICER_CAP };
+}
 
 export const INCR_GRADES = ['依據', '推測', '新設計'];
 
@@ -731,6 +786,10 @@ export function ensureExtras<T extends CitySave>(save: T): T {
   }
   save.auto = auto;
   save.autoMonth = intOr(save.autoMonth, 0, 0);
+  // [F7] 逐令月配額：只留本月的紀錄（過月自然失效，不必額外清位）。
+  clearCmdOrders(save);
+  // [F16] 遷移標記：舊檔沒有這個鍵 ⇒ false（還在舊錢包口徑）。
+  save.goldMigrated = save.goldMigrated === true;
   return save;
 }
 
@@ -1101,7 +1160,8 @@ export function develop(save: CitySave, cityDef: CityDef | null | undefined, ctx
   // 與 web `city_model.js` 的 `develop()` 守衛同位置同語義 —— 少了這一條，兩端 parity（unit3）在
   // 「易京/開發」上會分岔：web 回 reason:'gate'、Cocos 卻真的把 pop 加上去（project/163 §5）。
   if (isGate(cityDef)) return { ok: false, reason: 'gate' };
-  if (DEV.COST > 0 && num(save.gold) < DEV.COST) return { ok: false, reason: 'gold', cost: DEV.COST };
+  // [F16] 錢只看本城：web 同位置是 `if (DEV.COST > 0 && cityMoneyOf(save, cityDef) < DEV.COST)`。
+  if (DEV.COST > 0 && cityMoneyOf(save, cityDef) < DEV.COST) return { ok: false, reason: 'gold', cost: DEV.COST };
   if (st.pop >= DEV.POP_CAP && st.def >= DEV.DEF_CAP) return { ok: false, reason: 'saturated', cap: DEV.POP_CAP };
 
   const exec = generalOf(ctx?.generals, majorOf(save, cityDef));
@@ -1118,7 +1178,8 @@ export function develop(save: CitySave, cityDef: CityDef | null | undefined, ctx
   // 0x427B9E 外殼：兩個增量都是 0 就靜默（什麼都沒發生、也不印字）
   if (pop <= 0 && def <= 0) return { ok: false, reason: 'nothing', eff };
 
-  if (DEV.COST > 0) save.gold = Math.max(0, num(save.gold) - DEV.COST);
+  // [F16] 扣款只扣本城 money（web 成功後 `spendCityMoney(save, cityDef, DEV.COST)`）。
+  if (DEV.COST > 0) spendCityMoney(save, cityDef, DEV.COST);
   st.pop += pop;
   st.def += def;
   return { ok: true, cost: DEV.COST, pop, def, eff };
@@ -1141,13 +1202,14 @@ export interface RecruitResult {
 export function recruit(save: CitySave, cityDef: CityDef | null | undefined, ctx?: CityCtx | null): RecruitResult {
   const st = ensureCityState(save, cityDef);
   if (!st) return { ok: false, reason: 'no-city' };
-  if (num(save.gold) < RECRUIT.COST) return { ok: false, reason: 'gold', cost: RECRUIT.COST };
+  // [F16] 錢只看本城（web `city_model.js` 徵兵走 `cityMoneyOf` / `spendCityMoney` 同一口徑）。
+  if (cityMoneyOf(save, cityDef) < RECRUIT.COST) return { ok: false, reason: 'gold', cost: RECRUIT.COST };
   const cap = RECRUIT.CAP;
   if (st.troops >= cap) return { ok: false, reason: 'full', cap };
 
   const eff = efficiencyOf(save, cityDef, ctx);
   const add = Math.min(cap - st.troops, Math.max(1, Math.round(RECRUIT.TROOPS * eff)));
-  save.gold = Math.max(0, num(save.gold) - RECRUIT.COST);
+  spendCityMoney(save, cityDef, RECRUIT.COST);
   st.inf += add;
   st.troops = st.inf + st.cav;
   return { ok: true, cost: RECRUIT.COST, troops: add, cap, eff };
@@ -1174,8 +1236,14 @@ export interface SearchResult {
  * 流程 = 原作 0x426D8C 的兩段式（R11）：先擲武將（STAGE1 的 50%），沒中才落物品輪盤（50%）。
  */
 export function search(save: CitySave, cityDef: CityDef | null | undefined, ctx?: CityCtx | null): SearchResult {
+  // [F10] 自治代行：quiet 不寫日誌、free 不收錢（也不做金閘）—— web `runAutonomy()` 的
+  // `search(save, def, {...ctx, quiet:true})` 同一個入口，代行只出人才日誌、不耗月令。
+  const quiet = ctx?.quiet === true;
+  const free = ctx?.free === true;
+  const cost = free ? 0 : SEARCH.COST;
   if (!cityDef || !cityDef.NAME) return { ok: false, reason: 'no-city' };
-  if (num(save.gold) < SEARCH.COST) return { ok: false, reason: 'gold', cost: SEARCH.COST };
+  // [F16] 錢只看本城（web `city_model.js` 搜索走 `cityMoneyOf`）。
+  if (!free && cityMoneyOf(save, cityDef) < SEARCH.COST) return { ok: false, reason: 'gold', cost: SEARCH.COST };
 
   const city = cityDef.NAME;
   const count = searchCount(save, city);
@@ -1196,7 +1264,7 @@ export function search(save: CitySave, cityDef: CityDef | null | undefined, ctx?
     const g = pool[Math.min(pool.length - 1, Math.floor(rng() * pool.length))];
     if (g) {
       addToRoster(save, city, g.NAME);
-      out = { ok: true, cost: SEARCH.COST, kind: 'talent', general: g, seed, text: `${g.NAME}將軍加入我方。` };
+      out = { ok: true, cost, kind: 'talent', general: g, seed, text: `${g.NAME}將軍加入我方。` };
     }
   }
   if (!out) {
@@ -1215,19 +1283,23 @@ export function search(save: CitySave, cityDef: CityDef | null | undefined, ctx?
       const it = pickWeightedItem(pools[kind as 'treasure' | 'talisman'], rng(), (row) => searchItemWeight(row, level));
       if (it) rememberFound(save, it.Sequence);
       out = it
-        ? { ok: true, cost: SEARCH.COST, kind, seq: num(it.Sequence), item: it, seed, text: `找到物品${it.Name}。` }
-        : { ok: true, cost: SEARCH.COST, kind: 'none', seed, text: '搜索一無所獲。' };
+        ? { ok: true, cost, kind, seq: num(it.Sequence), item: it, seed, text: `找到物品${it.Name}。` }
+        : { ok: true, cost, kind: 'none', seed, text: '搜索一無所獲。' };
     } else {
-      out = { ok: true, cost: SEARCH.COST, kind: 'none', seed, text: '搜索一無所獲。' };
+      out = { ok: true, cost, kind: 'none', seed, text: '搜索一無所獲。' };
     }
   }
   out.stage = stage;
-  save.gold = Math.max(0, num(save.gold) - SEARCH.COST);
+  if (!free) spendCityMoney(save, cityDef, SEARCH.COST);
   // 本函式自己記日誌：count = 本城歷史搜索次數，必須隨每次搜索遞增，否則種子固定、每次都是同一個結果。
   // 先自增再寫日誌：logAdd 會叫 ensureExtras，順序反過來老存檔遷移會把剛寫的這條也數進去（count+2）。
   bumpSearchSeq(save, city, count);
-  logAdd(save, { city, cmd: '搜索', kind: out.kind, text: out.text, m: save.month });
-  out.logged = true;
+  // [F10] quiet（自治代行）只出人才日誌：由 `runAutonomy()` 自己寫「自治搜索：X加入我方。」，
+  // 這裡不寫普通搜索日誌，否則一城一次搜索會在紀錄裡多出一條「搜索 …」。
+  if (!quiet) {
+    logAdd(save, { city, cmd: '搜索', kind: out.kind, text: out.text, m: save.month });
+    out.logged = true;
+  }
   return out;
 }
 
@@ -1553,7 +1625,7 @@ export function runAutonomy(
       reason: 'none',
       ran: [],
       skipped: [],
-      gold: num(save.gold),
+      gold: nationalGoldOf(save, cityDefs),
       cost: 0,
       text: AUTONOMY.NO_CITY,
     };
@@ -1563,12 +1635,27 @@ export function runAutonomy(
   const skipped: Array<{ city: string; reason: string }> = [];
   let cost = 0;
   for (const def of targets) {
+    // [F10] 自治代行「搜索」：只出人才日誌、不扣金、不耗月令。
+    // web 真源 `city_model.js` runAutonomy：對每座自治城先跑一次 quiet 搜索，
+    // 只有搜到人才（kind==='talent'）才寫一條「自治搜索：X加入我方。」。
+    // 這裡排在開發前；`free` ⇒ 不做金閘也不扣款，所以「金 0 也能代行」。
+    const found = search(save, def, Object.assign({}, ctx ?? {}, { quiet: true, free: true }));
+    if (!opts.quiet && found.ok && found.kind === 'talent' && found.general) {
+      logAdd(save, {
+        m: intOr(save.month, 1, 1),
+        city: def.NAME,
+        cmd: AUTONOMY.CMD,
+        kind: 'talent',
+        text: `自治搜索：${found.general.NAME}加入我方。`,
+      });
+    }
     // 原作外殼 0x427B9E 只在「人口與防禦增量都 0」時靜默；單邊 0 是正常結果。
     // 但代行是替玩家按一次按鈕，日誌寫「開墾 +0 人口」很怪 ⇒ 代行層重擲到兩邊都有進帳（上限 8 次）。
     // 重擲**不重複收費**：每次重擲前把上一次的開發金退回，最後只記一次 cost。[新設計] 只影響代行層。
     let r = develop(save, def, ctx);
     for (let k = 0; k < 8 && (r.ok ? (r.pop as number) <= 0 || (r.def as number) <= 0 : r.reason === 'nothing'); k += 1) {
-      if (r.ok && r.cost) save.gold = num(save.gold) + r.cost;
+      // [F16] 退款落回本城 money（web 同位置 `st.money += r.cost`）。
+      if (r.ok && r.cost) addCityMoney(save, def, r.cost as number);
       r = develop(save, def, ctx);
     }
     if (r.ok) {
@@ -1595,7 +1682,7 @@ export function runAutonomy(
     reason: ran.length ? undefined : skipped[0]?.reason || 'none',
     ran,
     skipped,
-    gold: num(save.gold),
+    gold: nationalGoldOf(save, cityDefs),
     cost,
     text,
   };
@@ -1878,6 +1965,196 @@ export function clearMonthLock<T extends CitySave | null | undefined>(save: T): 
 export const LOCK_HINT = '本月已行動';
 /** 除錯開關打開時顯示的話（寫明不是玩法） */
 export const UNLIMITED_HINT = '除錯：不限行動次數（?unlimited=1，不是玩法）';
+
+/* ======================================================================
+ * §12b [F7] 逐令月配額（主令 7 條各每月一次；副令 情報／移動 不佔）
+ *
+ * web 真源：`game/web/city.html:754-759` 把 `CMD_ORDER`（7 條）鋪進 #grid、
+ * `CMD_SECONDARY`（情報／移動）鋪進 #subgrid；`city.html:796-797` 下令後
+ * `M.markMonthActed(...)`，`city.html:548` 的 `readOnly()` 用 `monthLocked` 擋指令。
+ * web 另有「逐將年令」（`acted`，每將每年搜/開一次）—— 那套依賴 13 名武將清單的
+ * 選將抽屜，Cocos 這一版沒有移植，改用這裡的**逐令**配額（見 REPORT 的已知差異）。
+ * ==================================================================== */
+
+/** 這條是不是副令（情報／移動）：副令不佔月令、可重複下 */
+export function isSecondaryCmd(cmd: string): boolean {
+  return CMD_SECONDARY.indexOf(String(cmd)) >= 0;
+}
+
+/** 本月這條主令是否已下過（副令永遠 false） */
+export function cmdOrderUsed(save: CitySave | null | undefined, cmd: string): boolean {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return false;
+  if (isSecondaryCmd(cmd)) return false;
+  const rec = save.cmdOrders;
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return false;
+  const month = intOr(save.month, 1, 1);
+  const at = intOr(rec[String(cmd)], 0, 0);
+  return at > 0 && at === month;
+}
+
+/** 記一次主令；已記過回 false（副令不記、也回 false） */
+export function markCmdOrder(save: CitySave | null | undefined, cmd: string): boolean {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return false;
+  if (isSecondaryCmd(cmd)) return false;
+  if (cmdOrderUsed(save, cmd)) return false;
+  const rec =
+    save.cmdOrders && typeof save.cmdOrders === 'object' && !Array.isArray(save.cmdOrders)
+      ? save.cmdOrders
+      : (save.cmdOrders = {});
+  rec[String(cmd)] = intOr(save.month, 1, 1);
+  return true;
+}
+
+/** 本月已用幾條主令（HUD「月令 n / 7」的分子） */
+export function ordersUsedCount(save: CitySave | null | undefined): number {
+  let used = 0;
+  for (const cmd of CMD_ORDER) {
+    if (cmdOrderUsed(save, cmd)) used += 1;
+  }
+  return used;
+}
+
+/** 換月清位：只留本月的紀錄（`ensureExtras` 每次載入都會跑） */
+export function clearCmdOrders<T extends CitySave | null | undefined>(save: T): T {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return save;
+  const rec = save.cmdOrders;
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) {
+    save.cmdOrders = {};
+    return save;
+  }
+  const month = intOr(save.month, 1, 1);
+  const next: Record<string, number> = {};
+  for (const cmd of CMD_ORDER) {
+    if (intOr(rec[cmd], 0, 0) === month) next[cmd] = month;
+  }
+  save.cmdOrders = next;
+  return save;
+}
+
+/* ======================================================================
+ * §12c [F16] 國庫 = Σ 每城 money（web 真源 `city_model.js:786-894`）
+ *
+ * 舊碼是單一 `save.gold` 錢包：大地圖頂欄、城內頁、徵兵/開發/搜索都讀它，
+ * 於是「城里沒錢也能從國庫花」且同一屏出現兩個金數。web 已改成：
+ *   - 遷移前：`cityMoneyOf` = 舊錢包（相容舊檔）
+ *   - 遷移後：錢只認每城 `money`，`國庫 = Σ 每城 money`
+ *   - 舊檔一次性遷移：`gold` → 首座我方城的 money，`gold = 0`、`goldMigrated = true`
+ * ==================================================================== */
+
+/** 是否已遷移成「每城 money」口徑 */
+export function goldMigratedOf(save: CitySave | null | undefined): boolean {
+  return !!save && typeof save === 'object' && !Array.isArray(save) && save.goldMigrated === true;
+}
+
+/** 本城可花的錢：未遷移 → 舊錢包；已遷移 → 該城 money（web `cityMoneyOf`） */
+export function cityMoneyOf(save: CitySave | null | undefined, cityDef?: CityDef | null): number {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return 0;
+  if (!goldMigratedOf(save)) return Math.max(0, num(save.gold));
+  if (!cityDef || !cityDef.NAME) return Math.max(0, num(save.gold));
+  const st = save.cities ? save.cities[cityDef.NAME] : undefined;
+  if (st && Number.isFinite(Number(st.money))) return Math.max(0, num(st.money));
+  const made = ensureCityState(save, cityDef);
+  return made ? Math.max(0, num(made.money)) : 0;
+}
+
+/** 國庫：已遷移 → Σ 我方每城 money；未遷移 → 舊錢包（web `nationalGold`） */
+export function nationalGoldOf(save: CitySave | null | undefined, cityDefs?: CityDef[] | null): number {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return 0;
+  if (!goldMigratedOf(save)) return Math.max(0, num(save.gold));
+  const byName: Record<string, CityDef> = {};
+  for (const def of Array.isArray(cityDefs) ? cityDefs : []) {
+    if (def && def.NAME) byName[def.NAME] = def;
+  }
+  let total = 0;
+  for (const name of Array.isArray(save.owned) ? save.owned : []) {
+    const st = save.cities ? save.cities[name] : undefined;
+    if (st && Number.isFinite(Number(st.money))) {
+      total += Math.max(0, num(st.money));
+      continue;
+    }
+    const def = byName[name];
+    total += def ? Math.max(0, num(def.MONEY)) : 0;
+  }
+  return total;
+}
+
+/** 從本城扣錢；不夠回 false 且不動任何欄位（web `spendCityMoney`） */
+export function spendCityMoney(
+  save: CitySave | null | undefined,
+  cityDef: CityDef | null | undefined,
+  cost: number,
+): boolean {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return false;
+  const need = Math.max(0, Math.trunc(num(cost)));
+  if (need <= 0) return true;
+  if (!goldMigratedOf(save)) {
+    const wallet = Math.max(0, num(save.gold));
+    if (wallet < need) return false;
+    save.gold = wallet - need;
+    return true;
+  }
+  if (!cityDef || !cityDef.NAME) return false;
+  const st = ensureCityState(save, cityDef);
+  if (!st) return false;
+  const have = Math.max(0, num(st.money));
+  if (have < need) return false;
+  st.money = have - need;
+  return true;
+}
+
+/** 把錢加進本城（自治退款用；未遷移時仍落舊錢包） */
+export function addCityMoney(
+  save: CitySave | null | undefined,
+  cityDef: CityDef | null | undefined,
+  amount: number,
+): void {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return;
+  const gain = Math.trunc(num(amount));
+  if (gain === 0) return;
+  if (!goldMigratedOf(save) || !cityDef || !cityDef.NAME) {
+    save.gold = Math.max(0, num(save.gold)) + gain;
+    return;
+  }
+  const st = ensureCityState(save, cityDef);
+  if (st) st.money = Math.max(0, num(st.money)) + gain;
+}
+
+/** 一次性遷移：舊錢包 → 首座我方城的 money（web `migrateGold`；重複呼叫回 `{ moved: 0 }`） */
+export function migrateGold(
+  save: CitySave | null | undefined,
+  cityDefs?: CityDef[] | null,
+): { moved: number; to: string } {
+  if (!save || typeof save !== 'object' || Array.isArray(save)) return { moved: 0, to: '' };
+  if (save.goldMigrated === true) return { moved: 0, to: '' };
+  const wallet = Math.max(0, num(save.gold));
+  const byName: Record<string, CityDef> = {};
+  for (const def of Array.isArray(cityDefs) ? cityDefs : []) {
+    if (def && def.NAME) byName[def.NAME] = def;
+  }
+  const owned = Array.isArray(save.owned) ? save.owned : [];
+  let to = '';
+  for (const name of owned) {
+    if (byName[name]) {
+      to = name;
+      break;
+    }
+  }
+  let moved = 0;
+  if (to && wallet > 0) {
+    const def = byName[to];
+    const raw = save.cities ? save.cities[to] : undefined;
+    const hasMoney = !!raw && Number.isFinite(Number(raw.money));
+    const st = raw ?? ensureCityState(save, def);
+    // 只有「該城還沒有 finite money」時才把錢包併進去，否則城裡已有一個數，併了就變雙倍。
+    if (st && !hasMoney) {
+      st.money = Math.max(0, num(st.money)) + wallet;
+      moved = wallet;
+    }
+  }
+  save.gold = 0;
+  save.goldMigrated = true;
+  return { moved, to };
+}
 
 /* ======================================================================
  * 對拍錨點（勿删）

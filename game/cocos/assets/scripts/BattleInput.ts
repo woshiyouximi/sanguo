@@ -17,18 +17,16 @@
 import {
   DESIGN_H,
   FIELD,
-  FIELD_CENTER_Y,
   GRID_H,
   GRID_W,
-  LANE_PX,
   MESSAGE_BOX,
-  ROW_PX,
   SKILL_SLOT_GAP,
   SKILL_SLOT_W,
   SKILL_SLOT_X0,
   contains,
   project as projectCell,
   skillSlotRect,
+  worldAt,
 } from './view/layout';
 import type { Rect } from './view/layout';
 import {
@@ -350,11 +348,14 @@ export function skillRadius(kind: 'heal' | 'strike' | 'aoe' | null): number {
  * 坐标：屏幕（750×1334 设计坐标）↔ 战场世界坐标
  * ------------------------------------------------------------------ */
 
-/** 触摸点 → 世界坐标（`layout.screenToCell` 的反向，**不做战场带门禁**） */
-export function screenToWorld(camX: number, tx: number, ty: number): { worldX: number; worldY: number } {
-  const worldY = (tx - LANE_PX / 2) / LANE_PX;
-  const worldX = camX + (ty - FIELD_CENTER_Y) / ROW_PX;
-  return { worldX, worldY };
+/**
+ * 触摸点 → 世界坐标（`layout.worldAt` 的反向，**不做战场带门禁**）。
+ *
+ * R215 全图投影后不再有镜头：`camX` 只为兼容旧调用点保留，算式与 `view/layout.worldAt`
+ * 必须同一份（71 行整幅映射）。
+ */
+export function screenToWorld(_camX: number, tx: number, ty: number): { worldX: number; worldY: number } {
+  return worldAt(tx, ty);
 }
 
 /**
