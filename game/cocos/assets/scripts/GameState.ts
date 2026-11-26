@@ -14,7 +14,9 @@ import type { BattleRecord } from './core/battle';
 import { GENERAL_RECORD_MAX } from './core/roster';
 import type { ReinforceConfig } from './core/strategy';
 import { clearRunScoped } from './core/run_scoped';
-import type { General } from './types';
+import { advanceOneMonth } from './core/advance_month';
+import type { MonthContext, MonthCivicTick, MonthReport, MonthSaveLike } from './core/advance_month';
+import type { GameData, General } from './types';
 
 export const SAVE_KEY = 'sanguo_campaign_v1';
 
@@ -821,47 +823,81 @@ export function advanceSteps(month: number): number {
 }
 
 /**
- * 月推进：换月 + 年度税（与 web `advanceMonth` 同口径，见 `project\31` §一之補13）。
+ * [F-03 / F-14] 月推進內政橋：Cocos 的城內政狀態（`prep` / `auto` / `autoMonth` / `roster`）不在這份
+ * 戰役存檔裏，而在 `CityPanel.CITY_EXTRAS_KEY='sanguo_city_v1'` 那個獨立鍵（F-09「存檔容器分裂」）；
+ * `GameState.advanceMonth()` 又必須是同步函數（`CampaignRoot.endInterior()` 逐月調）。
  *
- * 原作金钱只有**一个**产出口：`0x423824` 的年度税 `pop×75/10000 + 2250`（每城、跳过关城），
- * 在正月的年度结算里发一次；没有月度收入、没有月度复利、没有俸禄（web 侧 `project\108` 已收口）。
- * 人口也没有「每月 +1%」这种自然增长（04c §7-4 未定位），只由「開發」与两处衰减事件改动。
- * 早先这里写的是「月度 `pop/5000*4` + `money*1.01+20` + `pop*1.01`」，三项都是自订近似，已全部移除。
+ * 所以月流水走 core 單源 `core/advance_month.ts`：`data` 給年稅關城判定 / 月末補學用，
+ * `civic` 由 `CityPanel` 打開時註冊（mergeSave → `M.autonomyTick` → persist）。
+ * **沒註冊也不報錯**：core 會降級成「只推月/年結算，自治代行跳過」，並在
+ * `MonthReport.civic.mode === 'skipped'` 裏明說，不靜默。
  */
-export function advanceMonth(cities: CampaignCity[]): number {
+export interface CityMonthBridge {
+  /** 武將/物品數據（`CampaignRoot.this.data`）：月末補學要 generals.json 的 SKILL/WISESKILL。 */
+  data?: GameData | null;
+  /** 自治代行回調（CityPanel 註冊）：每月搜索/開發代行 + 金→預備兵。 */
+  civic?: MonthCivicTick | null;
+  /** 在職武將（缺省時 core 從 `save.cities[*].officers` 取）。 */
+  officersByCity?: Record<string, readonly string[]> | null;
+}
+
+let cityMonthBridge: CityMonthBridge | null = null;
+const monthReportLog: MonthReport[] = [];
+
+/** 註冊/更新內政橋（`CityPanel.open()` 調；傳 null 取消）。 */
+export function setCityMonthBridge(bridge: CityMonthBridge | null): void {
+  cityMonthBridge = bridge;
+}
+
+/** 取消內政橋（換局/退出內政頁時可調；不調也不影響存檔）。 */
+export function clearCityMonthBridge(): void {
+  cityMonthBridge = null;
+}
+
+/** 是否已掛上內政橋（`MonthReport.civic.mode` 的最終依據仍是 core 的實際結果）。 */
+export function hasCityMonthBridge(): boolean {
+  return !!cityMonthBridge;
+}
+
+/** 最近 12 個月的推進報告（戰報/對帳用；只留最近 12 條）。 */
+export function lastMonthReports(): MonthReport[] {
+  return monthReportLog.slice();
+}
+
+/** 最近一個月的推進報告（沒有則 null）。 */
+export function lastMonthReport(): MonthReport | null {
+  return monthReportLog.length ? monthReportLog[monthReportLog.length - 1] : null;
+}
+
+/**
+ * 月推进：换月 + 年度税 + 年度结算（正月）+ 自治代行 + 疲劳/士气/补学。
+ *
+ * **单源**：全部逻辑在 `core/advance_month.ts`（F-03/F-04/F-14），本函数只负责
+ * ① 从存档拿 `save`、② 把 `cities` / bridge 拼成 `MonthContext`、③ `persistSave()` 并回傳稅入。
+ * 与 web `campaign.html advanceMonth()` 调用的是同一个 `advanceOneMonth()`。
+ *
+ * 不再做的事：`GameState.ts:854-862` 那段「所有城每月白補守軍 2%」已刪（web 側 F14 已刪，
+ * 原作換月不補守軍；兵只有徵兵 / 出征帶回 / AI 補兵三個來源）。
+ *
+ * @param cities 劇本全城定義（年稅判關城、population 上限用）
+ * @param opts   `{ data }`：`CampaignRoot` 把 `this.data` 傳進來；不傳時退到 bridge 的 data
+ * @returns 本月稅入（正月才有，其餘月份 0），與舊返回值同義
+ */
+export function advanceMonth(cities: CampaignCity[], opts: { data?: GameData | null } = {}): number {
   const save = loadSave();
-  save.month += 1;
-  let income = 0;
-  const yearStart = (save.month - 1) % 12 === 0;   // 与 Saves.isYearStart 同义：进入正月
-  if (yearStart) {
-    for (const name of save.owned) {
-      const state = save.cities[name];
-      if (!state) continue;
-      const def = cities.find((c) => c.NAME === name);
-      if (def && isGateCity(def)) continue;        // 关城不缴年税（0x405499）
-      const tax = Math.floor(state.pop * 75 / 10000) + 2250;
-      state.money = Math.floor(state.money) + tax;
-      income += tax;
-    }
-  }
-  // [F16] 舊碼這裡有一行 `save.gold += income;`（單一錢包）。web 已刪（`campaign.html:5424-5426`），
-  // 年稅上面已經逐城加進 `state.money`，國庫 = Σ 每城 money，所以這裡不再動 `gold`。
-  // 守军自然回补：与 web `advanceMonth` 同一口径 —— 上限 = min(人口/2500 + 110, 600)，
-  // 每月按上限的 2% 缓慢补（600 上限 → 每月 +12），不分敌我、补到上限为止。
-  // 旧码是「敌方 +6、硬夹 600」，与 web 不一致（project\31 §一之補13）。
-  // 註：web 的 F14 已把「守軍每月白補 2%」整段刪掉（原作換月不補守軍），Cocos 這行還留著，
-  // 屬本任務六項之外的已知差異，REPORT.md 有記。
-  for (const city of cities) {
-    const state = save.cities[city.NAME];
-    if (!state) continue;
-    const cap = Math.min(600, Math.floor((Number(state.pop) || 0) / 2500) + 110);
-    const cur = Math.floor(Number(state.troops) || 0);
-    if (cur >= cap) continue;
-    const step = Math.max(1, Math.ceil(cap * 0.02));
-    state.troops = Math.min(cap, cur + step);
-  }
+  const bridge = cityMonthBridge;
+  const ctx: MonthContext = {
+    cityDefs: cities,
+    data: opts.data ?? bridge?.data ?? null,
+    civic: bridge?.civic ?? null,
+    officersByCity: bridge?.officersByCity ?? null,
+    ts: Date.now(),
+  };
+  const report = advanceOneMonth(save as unknown as MonthSaveLike, ctx);
+  monthReportLog.push(report);
+  if (monthReportLog.length > 12) monthReportLog.shift();
   persistSave();
-  return income;
+  return report.income;
 }
 
 export function recruit(name: string): { ok: boolean; message: string } {

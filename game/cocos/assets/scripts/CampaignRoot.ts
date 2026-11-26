@@ -2157,7 +2157,7 @@ export class CampaignRoot extends Component {
     let stillCount = 0;
     const incoming = new Set<string>();
     for (let i = 0; i < steps; i += 1) {
-      income += GameState.advanceMonth(this.cities);
+      income += GameState.advanceMonth(this.cities, { data: this.data });
       // 順序與單月推進完全一致：先讓在途部隊走完這個月，再讓 AI 出兵（新部隊 progress=0），
       // 否則本月新出的兵會立刻抵達，跑一年時玩家看不到「行軍中」這一步。
       const moved = this.advanceArmiesMonth();

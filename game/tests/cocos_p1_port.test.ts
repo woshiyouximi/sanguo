@@ -126,7 +126,7 @@ test('[F4] Cocos CampaignRoot：doAction("advance") 走 endInterior()，逐月�
   assert.ok(end.length > 300, 'CampaignRoot.ts 缺 endInterior()');
   assert.match(end, /const steps = GameState\.advanceSteps\(from\);/);
   assert.match(end, /for \(let i = 0; i < steps; i \+= 1\) \{/);
-  const a = end.indexOf('GameState.advanceMonth(this.cities)');
+  const a = end.indexOf('GameState.advanceMonth(this.cities');
   const b = end.indexOf('this.advanceArmiesMonth()');
   const c = end.indexOf('this.runMapAi()');
   assert.ok(a > 0 && b > a && c > b, 'endInterior() 的逐月順序必須是 advanceMonth → advanceArmiesMonth → runMapAi');

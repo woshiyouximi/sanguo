@@ -533,6 +533,9 @@ import { levelOf } from '../dist/core/levels.js';
 import * as DQ from '../dist/core/deploy_queue.js';
 // 武將等級/學習（R68）：月末補學走 core/unlock.ts 的 monthlyLearnCheck（純邏輯，無 DOM）
 import { createLearnState, monthlyLearnCheck } from '../dist/core/unlock.js';
+// [F-03/F-14] 「一個月的推進」的 core 單源：換月/年結算/年稅/帳本/自治代行/疲勞/士氣/補學
+// 都在 src/core/advance_month.ts（Cocos 的 GameState.advanceMonth 也調同一個函數）。
+import { advanceOneMonth } from '../dist/core/advance_month.js';
 // R95 軍師（project/185）：「任命軍師」要真的挑得出一招，所以這裡用出征頁同一份 core 過濾
 // （listWisdomChoices 按 WISESKILL 學習等級 + 將等級，見 src/core/wises.ts:563），
 // 戰鬥側則把選中的 seq 寫成 ?wise= 交給 main.js:705 的 applyWise 戰前發動。
@@ -5393,40 +5396,41 @@ function advanceMonth(n) {
   const force = qs.get('forceatk') === '1';
   const marchMode = MARCH_ON && !fast;            // ?march=0 回退到「點城直接開戰」
   for (let i = 0; i < n; i++) {
-    save.month += 1;
-    // R8：換月＝月令狀態清零（原作每月流水線 0x41B69D 內 [0x4A64BC]=0）
-    CM.clearMonthLock(save);
-    // R7：進入正月 = 年進位（0x4238AF 消費 [0x4A64FC]）→ 年度結算。
-    // 排在本年稅收之前：上一年先結賬，本年歲入才不會被算進上一年。
-    if (Saves.isYearStart(save.month)) annualYearRollover();
-    // R15 金錢（原作已定位）：**沒有月度收入、沒有月度複利、沒有俸祿**。
-    // 唯一產出口是年度稅收 0x423824（由年度結算 0x423885 呼叫）：
-    //   city.money(+0x92) += (pop(+0x8A) * 75) / 10000 + 2250；跳過 0x405499(city) 為真的城。
-    // 唯一消耗口是 0x41AF58 的補兵（100 金 → 1 預備兵），不是「每月固定支出」。
-    // 舊碼的 `money*1.01+20` 與「武將數×3 俸祿」都是自訂，已刪（見 project\108 黃燈九行收口）。
-    const yearStart = Saves.isYearStart(save.month);
-    let income = 0;
-    for (const name of save.owned) {
-      const st = save.cities[name];
-      const def = ALL.find((c) => c.NAME === name);
-      if (yearStart && def && !CM.isGate(def)) {
-        const tax = CM.annualTax(st.pop);
-        st.money = Saves.num(st.money) + tax;
-        income += tax;
+    // [F-03/F-14] 一個月的推進收進 core 單源 `core/advance_month.ts`：換月 / 年進位+年度結算 /
+    // 年稅 / 帳本 / 自治代行（金→預備兵 + 搜索開發）/ 疲勞 / 士氣 / 補學，都在
+    // `advanceOneMonth()` 裡跑完；Cocos 的 `GameState.advanceMonth()` 調的是同一個函數，
+    // 頁面這一層只留 UI（戰報、段5 復核、marchMode、存讀檔）。
+    const officersByCity = {};
+    for (const cityName of save.owned) {
+      const list = garrisonIn(cityName)?.officers;
+      officersByCity[cityName] = Array.isArray(list)
+        ? list.map((x) => (typeof x === 'string' ? x : x && x.name)).filter((x) => typeof x === 'string' && x)
+        : [];
+    }
+    const report = advanceOneMonth(save, {
+      cityDefs: scenario.cities,
+      data: GDATA,
+      // 內政代行（R10）：與舊碼逐字同一支 `CM.autonomyTick`，換月 lazy tick（金→預備兵 + 自治城開發）。
+      civic: () => CM.autonomyTick(save, scenario.cities, { generals: GDATA.generals }),
+      officersByCity,
+      levelOf: (name) => generalLevelOf(name),
+      ts: Date.now(),
+    });
+    // 段5「勢力存亡復核」要讀 garrison/adj，屬頁面層只讀巡檢，core 做不到 ⇒ 留在頁面。
+    if (report.annual && report.annual.ok) {
+      const leftover = annualForceCheck();
+      if (leftover.length) {
+        pushLog(`年 度 復 核：${leftover.length} 個勢力已無城（R78 未收尾：${leftover.join('、')}）`, 'lost');
       }
-      // 人口自然增長：原作 .text 找不到「每城每月 +N%」這種公式（04c §7-4 明寫未定位），
-      // 原作的人口只會由「開發」與兩處衰減事件（0x40F607 / 0x40F727，觸發語義 [推測]）改變。
-      // 早先這裡有一行「每城人口 ×1.01」的自訂近似，六十個月會把人口吹到 1.8 倍，
-      // 連帶把年稅（pop×75/10000）與兵力上限一起偏離，故移除；衰減事件尚未實作，見 project\31 §一之補13。
-
     }
-    if (income) {
-      // [F16] 錢只認每城 `money(+0x92)`：上面那一圈已經把稅收加進「各城的」st.money，
-      // 國庫 = Σ 每城 money（`CM.nationalGold()`）。舊碼這裡還有一行 `save.gold += income`
-      // 把同一筆錢再加進單一錢包 → 同屏兩個數、兩套扣款口徑（差異清單 F16 行 125）。已刪。
-      pushLog(`歲 入：+${income} 金（正月 · ${save.owned.length} 城 · 每城 人口×75/10000 + 2250）`, 'info');
-    }
-    Saves.ledgerAdd(save, { income, months: 1 });
+    // 戰報：core 已按 web 舊序排好（年結算 → 歲入 → 自治 → 疲勞 → 士氣 → 補學）；
+    // R65 忠誠漂移那行要插在「士氣」與「補學」之間，所以補學那行（最後一行）留到漂移後補。
+    const tailLogs = report.learned.length ? report.logs.slice(-1) : [];
+    const headLogs = tailLogs.length ? report.logs.slice(0, -1) : report.logs;
+    for (const line of headLogs) pushLog(line, 'info');
+    // R15 金錢（原作已定位）：**沒有月度收入、沒有月度複利、沒有俸祿**；唯一產出口是年度稅收
+    // 0x423824（pop×75/10000+2250，跳過 0x405499(city) 為真的城），唯一消耗口是補兵（100 金 → 1 預備兵）。
+    // 年稅 / 歲入戰報 / `Saves.ledgerAdd` 已收進 core 月流水（`advance_month.ts`），與 Cocos 同一支。
 
     // [F14] 守軍「每月白補 2%」已刪。原作換月**不補守軍**：兵只有三個來源 ——
     //   城內「部隊徵兵」把預備兵換成兵（`city_model.enlist`）、出征帶回的倖存兵
@@ -5434,45 +5438,18 @@ function advanceMonth(n) {
     //   舊碼（每月按上限 2% 補到滿）會讓每座城每月憑空漲兵，
     //   與「100 金 → 1 預備兵 → 1 兵」的經濟鏈重複發兵（差異表 F14）。
 
-    // 內政代行（R10，`web/city_model.js` `autonomyTick`）：換月 lazy tick ——
-    //   · **錢變兵（F13）**：每城 `n = min(floor(金/100), 預備兵上限-現值)`，金 -n*100、預備兵 +n，
-    //     直到錢花光或兵滿（原作：城里每 100 金钱 = 1 预备兵，随时间自动转换）；
-    //   · 玩家在城內政頁標了「自治」的城各做一次開發（`save.auto`，`runAutonomy`）。
-    // AI 城不標自治（那會花玩家國庫），所以對敵方勢力只生效「錢變兵」這半；
-    // AI 的內政動作仍走 R73 的 ACT=1 補金 / ACT=6 cheat（原作 ACT 表 9 項裡沒有「開發」）。
-    // 與 R73/R74 不衝突：預備兵寫 `city.prep`，AI 出兵扣的是 `city.troops`（兩個池）。
-    const tick = CM.autonomyTick(save, scenario.cities, { generals: GDATA.generals });
-    if (tick && tick.auto && tick.auto.ok) pushLog(tick.auto.text, 'info');
+    // 內政代行（R10，`web/city_model.js` `autonomyTick`）：換月 lazy tick 已由上面 core 月流水
+    // 透過 `civic` 適配器跑完（金→預備兵 F13 + 自治城開發 `runAutonomy`），戰報行在 `report.logs`。
 
     // R15：原作沒有俸祿（全 EXE 對 city+0x92 的寫點只有：裝載初始化 6 處、補兵 0x41AFA3、
     // 無太守清零 0x41B056、除錯 +10 0x41B084、年稅 0x42386D）。舊碼「武將數×3 金/月」是自訂，已刪；
     // 金錢唯一入帳點是正月年度結算第五段（`0x423824`，見 project/133 §2），月度既不收也不發。
 
 
-    // 疲勞（原作 0x41B1BF）：每月先 -1（下限 0），再用減後的值判 ≥60 → 該城士氣 -1。
-    // 士氣欄位目前不在存檔結構裡（saves.js.cityState 只有 troops/pop/money），所以城沒有
-    // morale 時只記 skipped，不憑空造一個士氣；有 morale 的存檔（測試/未來的存檔）才真的扣。
-    const officersByCity = {};
-    for (const n of save.owned) {
-      const list = garrisonIn(n)?.officers;
-      officersByCity[n] = Array.isArray(list)
-        ? list.map((x) => (typeof x === 'string' ? x : x && x.name)).filter((x) => typeof x === 'string' && x)
-        : [];
-    }
-    const fatigue = tireMonthly(save, officersByCity);
-    // 士氣（武將級）：疲勞 ≥60 的武將 -1，低迷（<30）自然 +1。tireMonthly 仍只回舊欄位，
-    // 這裡另外算一份，避免去改疲勞測試鎖住的回傳形狀。
-    const morale = moraleMonthly(save, officersByCity);
-    if (fatigue.decayed > 0 || fatigue.high > 0) {
-      let tireLog = `疲 勞：${fatigue.decayed} 人 -1`;
-      if (fatigue.high > 0) {
-        tireLog += `；高疲勞 ${fatigue.high} 人 → 士氣 -${morale.loss}`;
-      }
-      pushLog(tireLog, 'info');
-    }
-    if (morale.recovered > 0) {
-      pushLog(`士 氣：低迷 ${morale.recovered} 人自然 +1`, 'info');
-    }
+    // 疲勞 / 士氣（原作 TIRE_CORE / MORALE_CORE）：core 月流水已用同一份公式算完（那兩段被
+    // tests 跨檔鎖死，不能在頁面再漂一次），這裡只取回報給下面的 R65 忠誠漂移用；戰報行在 report.logs。
+    const fatigue = report.fatigue;
+    const morale = report.morale;
 
     // R65 忠誠漂移（原作 0x41B42B / 0x41B49D）：士氣 <40 → 忠誠 −1，否則 <90 → +1。
     // 疲勞/士氣兩段已由上面的 TIRE_CORE / MORALE_CORE 做完（那兩段被 tests 跨檔鎖死，不能重複漂移），
@@ -5507,15 +5484,9 @@ function advanceMonth(n) {
       pushLog(MM.driftText(save), 'info');
     }
 
-    // R68 月末補學（`core/unlock.ts:436`）：等級已到的武將技/軍師技一次補齊，寫回 `save.learned`。
-    // 原作「升級補學」有地址、月末兜底是 [推測]；只記一行，避免每個武將一行把戰報刷爆。
-    const learned = monthlyLearn(save);
-    if (learned.length) {
-      const total = learned.reduce((a, x) => a + x.got.length, 0);
-      const first = learned[0];
-      const names = first.got.map((x) => x.name).join('、');
-      pushLog(`學 習：${learned.length} 名武將 補 ${total} 技（${first.name} 習 ${names}）`, 'info');
-    }
+    // R68 月末補學（`core/unlock.ts:436`）：core 月流水已補並寫回 `save.learned`，戰報那行按 web
+    // 舊序排在 R65 忠誠漂移之後，所以從 report.logs 尾端取出補推。
+    for (const line of tailLogs) pushLog(line, 'info');
 
     if (marchMode) {
       // 先讓已在路上的部隊走一個月；本月新出的兵從 0 起步，不參與本次推進

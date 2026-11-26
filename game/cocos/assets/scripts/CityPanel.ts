@@ -697,6 +697,26 @@ export class CityPanel extends Component {
     }
     this.persist();
     this.refresh();
+    // [F-03] 月流水收進 core：把「內政存檔合併器」註冊給 GameState，
+    // 讓 CampaignRoot 的每月推進（endInterior）也能跑自治代行 + 金→預備兵，
+    // 而不是只有玩家進內政頁時補跑一次。CityPanel 其餘邏輯不動。
+    GameState.setCityMonthBridge({
+      data: options.data,
+      civic: (): any => {
+        // GameState 已換月/徵稅；內政真源在 extras ⇒ 每次先重併，再跑 autonomyTick
+        // （內部以 autoMonth 做幂等 guard，重跑不會重複發錢），跑完立刻 persist 回寫兩份存檔。
+        this.save = this.mergeSave();
+        const tick = M.autonomyTick(this.save, this.cities(), this.ctx);
+        this.persist();
+        // CityModel.AutonomyResult → core MonthCivicOutcome（字段名不同：gained→n）
+        return {
+          month: tick.month,
+          refilled: Array.isArray(tick.refilled)
+            ? tick.refilled.map((r: { city: string; gained: number }) => ({ city: r.city, n: r.gained, cost: 0 }))
+            : 0,
+        };
+      },
+    });
     // [F12/F15] 大地圖按鈕進來時直接開對應抽屜（只開一次；runCommand 自己會做正月/收束閘門）
     const openCmd = options.openCmd;
     if (openCmd) {

@@ -34,6 +34,10 @@ const readJson = (rel) => JSON.parse(readText(rel));
 const CAMPAIGN = process.env.ROWS85_CAMPAIGN
   ? readFileSync(process.env.ROWS85_CAMPAIGN, 'utf8')
   : readText('../web/campaign.html');
+// [F-03/F-14] 「一個月的推進」已收進 core 單源 src/core/advance_month.ts（網頁 campaign.html
+// 的 advanceMonth 只留 UI 適配、Cocos GameState.advanceMonth 也調同一支）；R5/R15 的
+// 「換月 / 年稅」斷言改掃 core 那份實作 —— 兩端共用同一份公式才是這幾條的本意。
+const CORE_MONTH = readText('../src/core/advance_month.ts');
 
 const SCEN = readJson('../data/scenarios.json');
 const GENS = readJson('../data/generals.json');
@@ -210,11 +214,14 @@ test('R86/P0：view 只在檔頭宣告一次，且在 resizeCanvas / fit 之前'
 //       玩家側效果 = 一月一次行動，界面只顯示「年」。
 // ─────────────────────────────────────────────────────────────
 test('R5：換月是一月一步（原作沒有回合內多日），並帶年度進位', () => {
+  // [F-03/F-14] 換月 / 年進位已收進 core 單源：頁面 advanceMonth 逐月呼叫 advanceOneMonth()，
+  // 換月那三行在 src/core/advance_month.ts 內（Cocos GameState.advanceMonth 也走同一支）。
   const body = fnBody(CAMPAIGN, 'advanceMonth');
   assert.ok(body, 'campaign.html 必須有 advanceMonth');
-  assert.match(body, /save\.month \+= 1/, '一次推進 = 一個月');
-  assert.match(body, /CM\.clearMonthLock\(save\)/, '換月要清月令鎖（＝原作 [0x4A64BC]=0）');
-  assert.match(body, /Saves\.isYearStart\(save\.month\)/, '正月要觸發年度進位（＝原作 [0x4A64FC]=1）');
+  assert.match(body, /advanceOneMonth\(save,/, '月流水收進 core 單源（頁面只留 UI）');
+  assert.match(CORE_MONTH, /const month = Math\.max\(1, int\(state\.month\) \|\| 1\) \+ 1;/, '一次推進 = 一個月');
+  assert.match(CORE_MONTH, /state\.lastActionMonth = 0;/, '換月要清月令鎖（＝原作 [0x4A64BC]=0）');
+  assert.match(CORE_MONTH, /const yearStart = isYearStart\(month\);/, '正月要觸發年度進位（＝原作 [0x4A64FC]=1）');
   // 原作沒有「回合內日/小節」計數器，web 也不該冒出這種狀態
   assert.doesNotMatch(CAMPAIGN, /\bsave\.(day|hour|turnStep)\b/, '不應存在回合內日/時序狀態');
 });
@@ -464,10 +471,12 @@ test('R15：年度稅收公式 = (人口×75)/10000 + 2250', () => {
 });
 
 test('R15：換月不再發月稅、不再收俸祿（原作兩個寫點都不存在）', () => {
+  // [F-03/F-14] 年稅 / 帳本已收進 core 單源 src/core/advance_month.ts；頁面 advanceMonth 不再自算，
+  // 所以公式斷言改掃 core。舊的自訂公式（月度複利 / 俸祿 / 人口自然增長）兩邊都不許回來。
   const body = fnBody(CAMPAIGN, 'advanceMonth');
-  assert.match(body, /CM\.annualTax\(st\.pop\)/, '歲入要走 annualTax（純函式，可測）');
-  assert.match(body, /const yearStart = Saves\.isYearStart\(save\.month\)/, '稅收只在正月');
-  assert.match(body, /if \(yearStart && def && !CM\.isGate\(def\)\)/, '關卡不徵稅（原作跳過 0x405499 為真的城）');
+  assert.match(CORE_MONTH, /annualTax\(city\.pop\)/, '歲入要走 annualTax（純函式，可測）');
+  assert.match(CORE_MONTH, /const yearStart = isYearStart\(month\);/, '稅收只在正月');
+  assert.match(CORE_MONTH, /!isGateDef\(def\)/, '關卡不徵稅（原作跳過 0x405499 為真的城）');
   assert.doesNotMatch(body, /\* 1\.01\) \+ 20/, '月度複利 money*1.01+20 必須刪掉');
   assert.doesNotMatch(body, /officers \* 3/, '俸祿（武將數×3）必須刪掉：原作沒有任何俸祿寫點');
   assert.doesNotMatch(body, /Math\.floor\(st\.pop \/ 5000\) \* 4/, '舊的 Σ floor(pop/5000)*4 必須刪掉');
@@ -475,6 +484,7 @@ test('R15：換月不再發月稅、不再收俸祿（原作兩個寫點都不�
   // 人口只由「開發」與兩處衰減事件（0x40F607 / 0x40F727，觸發語義 [推測]）改變。
   // 早先的 `st.pop = Math.floor(st.pop * 1.01)` 是自訂近似（六十個月會吹到 1.8 倍），已於 R170 移除。
   assert.doesNotMatch(body, /st\.pop \* 1\.01/, '人口自然增長 1%/月 是自訂近似，必須刪掉（project\\31 §一之補13）');
+  assert.doesNotMatch(CORE_MONTH, /\* 1\.01\) \+ 20|officers \* 3|st\.pop \* 1\.01/, 'core 也不得帶回舊自訂公式');
 });
 
 // ─────────────────────────────────────────────────────────────
