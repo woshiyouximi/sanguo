@@ -1220,6 +1220,9 @@ interface EncounterLoadout {
   btroop: number;
   bform: number;
   bsoldiers: number;
+  /** 車輪戰名冊（出陣順序，第 0 位先發） */
+  rosterA: string[];
+  rosterB: string[];
 }
 
 /** `save.lastBattle` 的形狀（`core/roster.ts:readBattleOutcome()` 讀的權威勝負信號） */
@@ -1275,6 +1278,12 @@ function encounterLoadout(
   mineGen: EncounterGeneral,
   foeGen: EncounterGeneral,
 ): EncounterLoadout {
+  const rosterA = [mineGen.name || mine.general || '我軍主將', ...(mine.officers ?? [])]
+    .filter((name, i, all) => !!name && all.indexOf(name) === i)
+    .slice(0, 4);
+  const rosterB = [foeGen.name || foe.general || '來犯之將', ...(foe.officers ?? [])]
+    .filter((name, i, all) => !!name && all.indexOf(name) === i)
+    .slice(0, 4);
   return {
     gen: mineGen.name || mine.general || '我軍主將',
     genStr: mineGen.str,
@@ -1290,6 +1299,8 @@ function encounterLoadout(
     btroop: ENCOUNTER_BTROOP,
     bform: ENCOUNTER_BFORM,
     bsoldiers: encounterSoldiers(foe.troops),
+    rosterA,
+    rosterB,
   };
 }
 

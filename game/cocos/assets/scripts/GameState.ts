@@ -240,6 +240,30 @@ export interface BattleLoadout {
    * 缺省不配 = 没有援军，既有对局一位不变。
    */
   reinforce?: ReinforceConfig[];
+  /**
+   * 車輪戰名冊（R22x）：雙方出陣順序，第 0 位 = 本場先發。
+   *
+   * 原作戰前是**手動淘汰制**：打完一場回戰前面板，玩家點下一位再打。名冊缺省
+   * （單將對局）時行為與以前一位不變——一場定勝負。
+   */
+  rosterA?: string[];
+  rosterB?: string[];
+  /** 本場上場者在名冊里的下标；缺省 0 */
+  indexA?: number;
+  indexB?: number;
+  /**
+   * 連場繼承：勝方下一場帶走的殘餘（HP/技力/存活兵）。只在車輪戰內部流轉，
+   * 由 `BattleRoot` 結算時填；單場對局不看。
+   */
+  carryA?: DuelCarry | null;
+  carryB?: DuelCarry | null;
+}
+
+/** 車輪戰一方的殘餘狀態（勝者續戰時帶進下一場） */
+export interface DuelCarry {
+  hp: number;
+  mp: number;
+  soldiers: number;
 }
 
 export interface BattleLaunch extends BattleLoadout {

@@ -575,6 +575,8 @@ export class BattleHud {
   private settleReport!: Label;
   private settleNote!: Label;
   private settleAgainLabel!: Label;
+  /** 車輪戰：結算面板按鈕要不要改「續戰」；null = 一般再戰/回大地圖 */
+  private settleNextName: string | null = null;
   private settleAgainSub!: Label;
 
   constructor(parent: Node) {
@@ -1241,6 +1243,22 @@ export class BattleHud {
   }
 
   /**
+   * 車輪戰：告知結算面板「下一場換誰上」。
+   *
+   * 非 null 時按鈕改成「續 戰 · 下一位：X」，BattleRoot 點擊就走下一場；
+   * null 恢復一般「再戰 / 回大地圖」。
+   */
+  setSettleNext(name: string | null): void {
+    if (this.settleNextName === name) return;
+    this.settleNextName = name;
+    // 已結算時立刻改字；沒結算時 refresh 會在結算那一幀用新值
+    if (this.settleRoot.active) {
+      this.settleAgainLabel.string = name ? '續 戰' : '再 戰';
+      this.settleAgainSub.string = name ? `下一位：${name}` : '點擊畫面返回大地圖';
+    }
+  }
+
+  /**
    * 开场叫阵的台词框：战场最底部通栏（web `battleView.ts` 的 `TAUNT_BANNER`
    * x40 y790 w670 h138 同几何），左上角说话方名牌 + 右侧「叫陣」小字。
    * 只在叫阵期间显示，播完由 `hideTaunt()` 收掉——战斗控制台不受影响。
@@ -1307,6 +1325,9 @@ export class BattleHud {
     this.settleTitle.string = won ? '大 勝' : s.winner === 'B' ? '敗 走' : '平 手';
     this.settleTitle.color = hexColor(won ? COLORS.gold : s.winner === 'B' ? COLORS.enemy : COLORS.text);
     this.settleSub.string = `${s.modeName} · 用時 ${s.durationSec} 秒 · ${s.kills} 擊殺`;
+    if (this.settleNextName) {
+      this.settleSub.string = `續戰 · 用時 ${s.durationSec} 秒 · ${s.kills} 擊殺`;
+    }
 
     // 6 行和 web `drawSettle()` 一一对应：敵將等級 / 戰功 / 經驗 / 功勳 / 等級 / 戰績
     const rows: readonly (readonly [string, string, string])[] = [
@@ -1332,11 +1353,15 @@ export class BattleHud {
     // 法术击杀/连胜不在 6 行里（web 也没有），单独一行小字，别让这两个数从 HUD 上消失
     this.settleMeta.string = `法術擊殺 ${s.spellKills} · 連勝 ${s.record.streak}（最高 ${s.record.bestStreak}）`;
     // 战报短句原来在 `labelStatus` 那一行里，现在由面板承担（守城失败时它写「城池失守」）
-    this.settleReport.string = s.report;
+    this.settleReport.string = this.settleNextName ? '敵方尚有戰將，準備續戰' : s.report;
     this.settleReport.color = hexColor(won ? COLORS.gold : s.winner === 'B' ? COLORS.enemy : COLORS.textDim);
     this.settleNote.string = '本局結果只存在內存，不寫存檔（預覽版）';
-    this.settleAgainLabel.string = '再 戰';
-    this.settleAgainSub.string = launch?.from === 'campaign' ? '點擊畫面返回大地圖' : '點擊畫面重開';
+    this.settleAgainLabel.string = this.settleNextName ? '續 戰' : '再 戰';
+    this.settleAgainSub.string = this.settleNextName
+      ? `下一位：${this.settleNextName}`
+      : launch?.from === 'campaign'
+        ? '點擊畫面返回大地圖'
+        : '點擊畫面重開';
 
     this.paintSettlementArt(s, ratio);
   }

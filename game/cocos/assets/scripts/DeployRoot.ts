@@ -1855,6 +1855,14 @@ export class DeployRoot extends Component {
     const bint = intel?.int ?? Math.max(30, 140 - bstr);
     // 與出征屏顯示同一個出口（enemySoldiers），不再各自夾一次（舊的 Math.max(60,…) 已去掉）
     const bsoldiers = this.enemySoldiers();
+    // 車輪戰名冊：我方按編成屏的出陣順序；敵方主將 + 守將（去重，最多 4 位）
+    const rosterA = this.queue
+      .map((slot) => slot.general)
+      .filter((name): name is string => !!name);
+    if (rosterA.length === 0) rosterA.push(gen.NAME);
+    const rosterB = [intel?.name ?? '守備隊', ...(intel?.officers ?? []).map((o) => o.name)]
+      .filter((name, i, all) => !!name && all.indexOf(name) === i)
+      .slice(0, 4);
     const loadout: BattleLoadout = {
       gen: gen.NAME,
       genStr: gen.STR,
@@ -1871,6 +1879,10 @@ export class DeployRoot extends Component {
       bsoldiers,
       bstr,
       bint,
+      rosterA,
+      rosterB,
+      indexA: 0,
+      indexB: 0,
     };
     if (this.defenseArmyId) {
       loadout.defend = true;

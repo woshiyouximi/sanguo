@@ -44,7 +44,7 @@ import type { Weather } from './core/weather';
 import { loadGameData } from './DataLoader';
 import { GeneralMarkers } from './GeneralMarkers';
 import { consumeBattleLaunch, loadSave, persistSave, recordBattleResult } from './GameState';
-import type { BattleLaunch } from './GameState';
+import type { BattleLaunch, DuelCarry } from './GameState';
 import { queuePostBattle } from './SurrenderModel';
 import {
   DESIGN_H,
@@ -147,6 +147,14 @@ export class BattleRoot extends Component {
   private launch: BattleLaunch | null = null;
   private settlement: ReturnType<typeof settle> | null = null;
   private loading = false;
+  /** 車輪戰：本局已經打到第幾場（第 1 場才演叫陣） */
+  private boutNo = 0;
+  /** 車輪戰：結算時算好的下一場參數；非 null 時結算面板的按鈕走「續戰」而不是回大地圖 */
+  private nextBout: BattleLaunch | null = null;
+  /** 車輪戰：下一位上場的武將名（只給結算面板顯示） */
+  private nextName: string | null = null;
+  /** 車輪戰換將時查武將屬性用（boot 載入的同一份 data） */
+  private gameData: Awaited<ReturnType<typeof loadGameData>> | null = null;
   private accumulator = 0;
   private camX = 35;
 
@@ -316,23 +324,29 @@ export class BattleRoot extends Component {
     if (this.world.over && !this.settlement) {
       this.settlement = settle(this.world);
       this.accumulator = 0;
-      // 第 5 参把 core 算好的战绩传回去：`settle()` 已在 `world.record` 基线上调过
-      // `updateRecord()`（battle.ts:1636），存档直接采信，避免同一场记两次。
-      recordBattleResult(
-        this.launch?.city ?? null,
-        this.settlement.winner,
-        this.launch?.armyId ?? null,
-        this.launch?.defend === true,
-        this.settlement.record,
-      );
-      // 战后处置（招降/斩首/释放）：core 的 settle() 已经把候选放在 `settlement.post`，
-      // 这里必须落进存档，否则回到大地图时筹码池是空的、招降面板永远不弹
-      // （SurrenderPanel.showIfNeeded 见存档里没有候选就直接返回 null）。
-      // 两个 CampaignSave 声明（GameState.ts / types.ts）字段兼容但名义类型不同，
-      // 这里按结构互转（SurrenderModel 只读写 captured/executed 两个数组，见 boxOf）。
-      queuePostBattle(loadSave() as unknown as Parameters<typeof queuePostBattle>[0], this.settlement.post);
-      persistSave();
-      // 结算相：技能格/突擊/撤退不再有战斗语义，触摸只剩「点画面重开」
+      // 車輪戰：輸方名冊還有下一位 → 先不落最終戰果，等玩家在結算面板按「續戰」。
+      // 只有打到一方無人可派（或本來就是單將對局）才寫存檔/進戰後處置。
+      this.nextBout = this.buildNextBout(this.settlement.winner);
+      this.hud?.setSettleNext(this.nextBout ? this.nextName : null);
+      if (!this.nextBout) {
+        // 第 5 参把 core 算好的战绩传回去：`settle()` 已在 `world.record` 基线上调过
+        // `updateRecord()`（battle.ts:1636），存档直接采信，避免同一场记两次。
+        recordBattleResult(
+          this.launch?.city ?? null,
+          this.settlement.winner,
+          this.launch?.armyId ?? null,
+          this.launch?.defend === true,
+          this.settlement.record,
+        );
+        // 战后处置（招降/斩首/释放）：core 的 settle() 已经把候选放在 `settlement.post`，
+        // 这里必须落进存档，否则回到大地图时筹码池是空的、招降面板永远不弹
+        // （SurrenderPanel.showIfNeeded 见存档里没有候选就直接返回 null）。
+        // 两个 CampaignSave 声明（GameState.ts / types.ts）字段兼容但名义类型不同，
+        // 这里按结构互转（SurrenderModel 只读写 captured/executed 两个数组，见 boxOf）。
+        queuePostBattle(loadSave() as unknown as Parameters<typeof queuePostBattle>[0], this.settlement.post);
+        persistSave();
+      }
+      // 结算相：技能格/突擊/撤退不再有战斗语义，触摸只剩「續戰 / 回大地图」
       this.input.setSettled(true);
     }
 
@@ -381,6 +395,7 @@ export class BattleRoot extends Component {
     this.setStatus('載入 data/*.json …');
     try {
       const data = await loadGameData((done, total) => this.setStatus(`載入 ${done}/${total}`));
+      this.gameData = data;
       // 大地图/编成进来时带 BattleLaunch；直接打开 Battle 场景则用默认关羽 vs 张角。
       const launch = this.launch ?? consumeBattleLaunch();
       this.launch = launch;
@@ -468,6 +483,9 @@ export class BattleRoot extends Component {
         this.wiseNote = this.wiseNote || autoWise.map((w) => w.name).join('、');
       }
       this.world = world;
+      // 車輪戰：勝方把上一場的殘血/殘技力帶進這一場（兵數已由 launch.soldiers 帶入）
+      this.applyCarry(world, launch);
+      this.boutNo += 1;
       // 士兵字牌：本局双方各只有一种兵，字取兵种名（大刀→刀 / 黄巾→黄），每帧复用同一池
       const troopNames = data.troops.names;
       this.troopChar = {
@@ -478,6 +496,7 @@ export class BattleRoot extends Component {
       for (const l of this.soldierLabelsA) l.string = this.troopChar.A;
       for (const l of this.soldierLabelsB) l.string = this.troopChar.B;
       this.settlement = null;
+      this.hud?.setSettleNext(null);
       this.accumulator = 0;
       this.camX = camera(world);
       // 背景：全图不再跟镜头，用开局的 camX 定一次视差即可（地形换图时重设）
@@ -492,8 +511,9 @@ export class BattleRoot extends Component {
       this.weatherLayer?.setWeather(world.weather as Weather);
       this.audioMark = battleAudioMark(world);
       this.audio?.playTerrainBgm(world.terrain);
-      // 叫阵放在最后：它要读 createWorld 后的主将位置，并且会把 camX 直接钉到说话方
-      this.beginTaunt();
+      // 叫阵放在最后：它要读 createWorld 后的主将位置，并且会把 camX 直接钉到说话方。
+      // 車輪戰只有第 1 場演叫陣（後面幾場是回到戰前面板再選人，不再重演開場）。
+      if (this.boutNo === 1) this.beginTaunt();
       this.audio?.playBattleAmbience(world.terrain);
       // labelStatus 现在只有 360px 宽（控制台左上角），长句会被 SHRINK 压得看不清。
       // 战斗中这一行说"怎么打"，结算后由 redraw() 改成"点哪返回"。
@@ -506,6 +526,76 @@ export class BattleRoot extends Component {
     } finally {
       this.loading = false;
     }
+  }
+
+  /** 場上還活著的兵數（不含主將） */
+  private aliveSoldiers(side: 'A' | 'B'): number {
+    const w = this.world;
+    if (!w) return 0;
+    let n = 0;
+    for (const u of w.units) if (u.alive && !u.isGeneral && u.side === side) n += 1;
+    return n;
+  }
+
+  /** 車輪戰：把上一場勝方的殘血/殘技力蓋到新世界（兵數由 `launch.soldiers` 帶入） */
+  private applyCarry(world: World, launch: BattleLaunch | null): void {
+    if (!launch) return;
+    for (const side of ['A', 'B'] as const) {
+      const carry = side === 'A' ? launch.carryA : launch.carryB;
+      if (!carry) continue;
+      const gen = world.sides[side].general;
+      gen.hp = Math.max(1, Math.min(gen.maxHp, Math.round(carry.hp)));
+      gen.mp = Math.max(0, Math.min(gen.mpMax, Math.round(carry.mp)));
+    }
+  }
+
+  /**
+   * 車輪戰：算下一場的 launch。
+   *
+   * 原作戰前是手動淘汰制（打一場回面板、玩家點下一位），所以这里只负责「輸方還有誰」
+   * ——輸方名冊的下一位上場，勝方留在場上並帶走殘血/殘兵；平手或一方無人 → null（本戰結束）。
+   */
+  private buildNextBout(winner: 'A' | 'B' | 'draw'): BattleLaunch | null {
+    const l = this.launch;
+    const w = this.world;
+    if (!l || !w || winner === 'draw') return null;
+    const loser: 'A' | 'B' = winner === 'A' ? 'B' : 'A';
+    const roster = loser === 'A' ? l.rosterA : l.rosterB;
+    if (!roster || roster.length === 0) return null;
+    const idx = (loser === 'A' ? l.indexA ?? 0 : l.indexB ?? 0) + 1;
+    if (idx >= roster.length) return null;
+    const name = roster[idx];
+    this.nextName = name;
+    const table = this.gameData?.generals as unknown as
+      | { NAME?: string; STR?: number; INT?: number }[]
+      | undefined;
+    const row = table?.find((g) => g.NAME === name);
+    const carry: DuelCarry = {
+      hp: w.sides[winner].general.hp,
+      mp: w.sides[winner].general.mp,
+      soldiers: this.aliveSoldiers(winner),
+    };
+    const next: BattleLaunch = { ...l };
+    // 勝方殘兵帶進下一場（原作敗方下場、勝方留場，兵數不重置）
+    const carrySoldiers = Math.max(0, Math.floor(carry.soldiers));
+    if (loser === 'A') {
+      next.indexA = idx;
+      next.gen = name;
+      if (typeof row?.STR === 'number') next.genStr = row.STR;
+      if (typeof row?.INT === 'number') next.genInt = row.INT;
+      next.soldiers = l.soldiers;
+      next.carryB = carry;
+      next.bsoldiers = Math.max(0, Math.min(l.bsoldiers, carrySoldiers));
+    } else {
+      next.indexB = idx;
+      next.bgen = name;
+      if (typeof row?.STR === 'number') next.bstr = row.STR;
+      if (typeof row?.INT === 'number') next.bint = row.INT;
+      next.bsoldiers = l.bsoldiers;
+      next.carryA = carry;
+      next.soldiers = Math.max(0, Math.min(l.soldiers, carrySoldiers));
+    }
+    return next;
   }
 
   // -------------------------------------------------------------------------
@@ -637,6 +727,16 @@ export class BattleRoot extends Component {
     if (this.settlement) {
       const hit = this.input.hitTest(p.sx, p.sy, this.camX);
       if (!hit || hit.type !== 'restart') return;
+      // 車輪戰：名冊還有下一位 → 同一場景換將再開一場（不重載場景、不重演叫陣）
+      if (this.nextBout) {
+        this.launch = this.nextBout;
+        this.nextBout = null;
+        this.settlement = null;
+        this.input.setSettled(false);
+        this.loading = false;
+        void this.boot();
+        return;
+      }
       if (this.launch?.from === 'campaign') {
         // 三屏闭环：从大地图打进来的战斗，结算后回大地图；直接打开 Battle 场景才重开。
         director.loadScene('Campaign');
@@ -981,7 +1081,13 @@ export class BattleRoot extends Component {
     }
     if (this.settlement) {
       // 明细（勝負/擊殺/法術/用時/連勝）由结算面板逐行承担，这里只留一句下一步提示。
-      this.setStatus(this.launch?.from === 'campaign' ? '點擊返回大地圖' : '點擊畫面重開');
+      this.setStatus(
+        this.nextBout
+          ? '點擊畫面續戰'
+          : this.launch?.from === 'campaign'
+            ? '點擊返回大地圖'
+            : '點擊畫面重開',
+      );
     }
 
     // 指令台（6 颗 / 第二层 / chip / 主将数值）每帧按 world 重算：可用性以内核为准，UI 只显示
@@ -1469,3 +1575,4 @@ export class BattleRoot extends Component {
     g.stroke();
   }
 }
+
