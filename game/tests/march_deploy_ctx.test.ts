@@ -137,10 +137,14 @@ test('CampaignRoot march 分支：setDeployFrom(出發城 siege.from)、setDeplo
   // 敵情是**目標城**的守將（不是出發城），否則編成屏的敵方卡會變我方
   assert.match(branch, /const intel = this\.enemyIntelOf\(selected\);/, '敵情要從目標城算');
   // 兩個 setDeploy 必須在 loadScene 之前；takeDeploy* 都是「取一次即清」，順序顛倒會拿到 null
-  const load = branch.indexOf("director.loadScene('Deploy')");
+  // （march 分支現在有兩條進 Deploy 的路：無部隊的「先編成」+ 城下已有部隊的「攻城」，
+  //   所以取最後一個 loadScene，避免被前面那條擋住）
+  const load = branch.lastIndexOf("director.loadScene('Deploy')");
   assert.ok(load > 0, 'march 分支要進 Deploy 場景');
   assert.ok(branch.indexOf('setDeployFrom(siege.from)') < load, 'setDeployFrom 要在 loadScene 之前');
   assert.ok(branch.indexOf('setDeployTarget(selected)') < load, 'setDeployTarget 要在 loadScene 之前');
+  // 無部隊出征：先記下編成態（出發城/目標/路徑），再由編成屏派兵團
+  assert.match(branch, /GameState\.setDeployMarch\(\{ from, target: selected, pathIndex \}\);/, '無部隊出征要先進編成');
   // 攻城的 Deploy 語義是「我方進攻」：不能走 setDeployArmy（DeployRoot 會當守城戰）
   assert.match(branch, /GameState\.setDeployArmy\(null\);/);
 });

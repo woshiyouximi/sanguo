@@ -1834,6 +1834,20 @@ export class DeployRoot extends Component {
       this.refresh();
       return;
     }
+    // 兵團出征：編成屏只負責選將/排序/兵力，按「出征」才真的把兵團派出去
+    if (GameState.peekDeployMarch()) {
+      this.persistQueue();
+      const officers = this.queue
+        .map((slot) => slot.general)
+        .filter((name): name is string => !!name && name !== gen.NAME);
+      if (GameState.dispatchMarch(gen.NAME, officers, this.soldiers + this.cavalry)) {
+        director.loadScene('Campaign');
+      } else {
+        this.hintText = '兵不足：先回城徵兵再出征。';
+        this.refresh();
+      }
+      return;
+    }
     // 出戰前把出陣順序落盤（含主將槽的兵種/兵力），避免「調了順序但沒按確定」丟失
     this.persistQueue();
     const intel = this.intel;

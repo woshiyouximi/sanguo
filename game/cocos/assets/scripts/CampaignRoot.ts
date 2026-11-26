@@ -2631,7 +2631,50 @@ export class CampaignRoot extends Component {
       const arrivedMine = GameState.arrivedAt(selected, 'A');
       const siege = arrivedMine[0];
       if (!siege) {
-        this.dispatchArmyTo(selected);
+        // 打自己的城（增援）→ 不進編成，直接派過去的舊行為
+        if (this.save?.owned.includes(selected)) {
+          this.dispatchArmyTo(selected);
+          return;
+        }
+        // 打敵城/空城 → 先進編成屏選將、排順序，再由編成屏「出征」派兵團
+        const from = GameState.nearestOwnedTo(selected, this.paths);
+        if (!from) {
+          this.hintText = '找不到可以出發的我方城。';
+          this.refresh();
+          return;
+        }
+        const pathIndex = pathBetween(this.scenarioLike(), from, selected);
+        if (pathIndex === null) {
+          this.hintText = '沒有可走的路：只能打相鄰城。';
+          this.refresh();
+          return;
+        }
+        const leader = this.leaderOf(from);
+        const cap = Math.max(1, Math.round(M.troopCapOf(this.armyGeneralLevel(leader))));
+        if (this.troopsOf(from) < 1) {
+          this.hintText = `${from} 沒有兵可出征（主將帶兵上限 ${cap}），先徵兵再出征。`;
+          this.refresh();
+          return;
+        }
+        GameState.setDeployMarch({ from, target: selected, pathIndex });
+        GameState.setDeployFrom(from);
+        GameState.setDeployTarget(selected);
+        GameState.setDeployArmy(null);
+        const intel = this.enemyIntelOf(selected);
+        GameState.setDeployEnemy(
+          intel
+            ? {
+                name: intel.name,
+                str: intel.str,
+                int: intel.int,
+                troops: intel.troops,
+                defense: intel.defense,
+                fallback: intel.fallback,
+                owner: intel.owner ?? '',
+              }
+            : null,
+        );
+        director.loadScene('Deploy');
         return;
       }
       // 進攻不能走 setDeployArmy()：DeployRoot.ts:1594 會把 armyId 當「守城戰」語義（defend=true），

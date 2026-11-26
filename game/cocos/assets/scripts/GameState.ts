@@ -997,6 +997,67 @@ export function takeDeployFrom(): string | null {
 }
 
 /**
+ * 兵團出征的「編成」態（web campaign.html：出征 → 編成 → 出發）。
+ *
+ * 以前大地圖按出征是直接 `dispatchArmyTo()` 派兵，玩家沒機會選將/排順序；
+ * 現在改成先記下出發城/目標/路徑再進 Deploy 場景，由編成屏的 5 槽隊列派兵。
+ */
+export interface DeployMarch {
+  from: string;
+  target: string;
+  pathIndex: number;
+}
+
+let deployMarch: DeployMarch | null = null;
+
+export function setDeployMarch(m: DeployMarch | null): void {
+  deployMarch = m;
+}
+
+export function peekDeployMarch(): DeployMarch | null {
+  return deployMarch;
+}
+
+export function clearDeployMarch(): void {
+  deployMarch = null;
+}
+
+/**
+ * 編成屏按「出征」：用選好的隊列派一支兵團。
+ *
+ * `general` = 第 1 槽（主將），`officers` = 其餘槽（隨軍，最多 4 人）；
+ * `troops` = 本次帶走的兵，夾在出發城現有守軍內。成功回 true。
+ */
+export function dispatchMarch(general: string, officers: string[], troops: number): boolean {
+  const march = deployMarch;
+  if (!march) return false;
+  const save = loadSave();
+  const state = save.cities[march.from];
+  if (!state) return false;
+  const taken = Math.max(0, Math.min(Math.round(troops), Math.round(state.troops)));
+  if (taken < 1) return false;
+  const id = nextArmyId('A');
+  const army: CampaignArmy = {
+    id,
+    side: 'A',
+    from: march.from,
+    to: march.target,
+    pathIndex: march.pathIndex,
+    progress: 0,
+    troops: taken,
+    general: general || undefined,
+    officers: officers.filter((name) => !!name).slice(0, 4),
+    advisor: '',
+    stationed: false,
+  };
+  addArmy(army);
+  state.troops = Math.max(0, Math.round(state.troops - taken));
+  persistSave();
+  deployMarch = null;
+  return true;
+}
+
+/**
  * 讀裝備加成用的兩份 localStorage 資料（F-05）：
  *   - `sanguo_equip_items_v1`：物品表快照（`ItemsPanel.open()` 寫入的 `data/items` 列）；
  *   - `sanguo_items_v1`：物品存檔 `{equip:{名:{槽:Sequence}}, bag}`（裝備的權威來源）。
