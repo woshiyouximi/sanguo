@@ -207,3 +207,16 @@ test('R234b 放棄攻城改派返程兵團（不再立刻退款回城）', () =>
   assert.equal(fn2.includes('refundSiegeTroops'), false, '不得再立刻退款回城（會讓將馬上又能編去打別城）');
   assert.ok(fn2.includes('clearDeploySiege'), '仍要清快照（避免戰前準備殘留）');
 });
+
+test('R237 攻城戰前準備先鎖人（不得先套存檔隊列再鎖）', () => {
+  const at = DR.indexOf('this.generals = pool;');
+  assert.ok(at > 0, '找不到候选池赋值');
+  const siegeAt = DR.indexOf('if (this.siege) this.applySiegeRoster(byName);', at);
+  const storedAt = DR.indexOf('const stored =', at);
+  assert.ok(siegeAt > 0, '要在 start() 里调 applySiegeRoster');
+  assert.ok(storedAt > 0, '找不到 stored');
+  assert.ok(siegeAt < storedAt, 'applySiegeRoster 必须先于「存檔隊列」逻辑（否则中间抛错会留着城里的 5 个将）');
+  // 存檔隊列/自動預選在攻城模式要被跳过
+  assert.ok(DR.includes('if (!this.siege && stored && this.queue[0])'), 'stored 分支要加 !this.siege 守卫');
+  assert.ok(DR.includes('else if (!this.siege && pool[0]'), '自动预选也要加 !this.siege 守卫');
+});

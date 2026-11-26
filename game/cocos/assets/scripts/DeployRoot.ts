@@ -620,6 +620,11 @@ export class DeployRoot extends Component {
         .slice(0, 12);
       this.generals = pool;
       this.selectedGen = 0;
+      // [R237] 攻城戰前準備的鎖人要**先於**出陣隊列/存檔隊列套用：
+      // 舊碼把 `applySiegeRoster()` 放在整個隊列邏輯之後，一旦中間任何一步拋錯（catch 只寫提示），
+      // 就會留下「generals=出發城候選池 + queue=存檔隊列」的狀態 ⇒ 戰前準備屏顯示的不是抵達兵團，
+      // 而是城裡 5 個將（製作人截圖：攻城編成卻列 關羽/劉備/簡雍/張飛/管輅）。
+      if (this.siege) this.applySiegeRoster(byName);
       // R94：出陣隊列。存檔有 `deployQueue` 就照它（含順序/兵種）；舊檔沒有就按「當前候選 5 將」
       // 即時生成（queueOf 不寫檔）。誰坐第 1 槽＝誰是主將：
       //  · 存過隊列 → 用存檔的第 1 槽（玩家調過的順序不能被「候選第一人」頂回去）
@@ -627,7 +632,7 @@ export class DeployRoot extends Component {
       const stored = hasQueue(save as unknown as DeployQueueSave);
       // 沒存過隊列時只預選主將（原作是玩家自己勾選隨軍；不再自動塞滿 5 人）
       this.queue = queueOf(save as unknown as DeployQueueSave, pool.slice(0, 1).map((g) => g.NAME));
-      if (stored && this.queue[0]) {
+      if (!this.siege && stored && this.queue[0]) {
         const head = this.queue[0]!.general;
         const index = pool.findIndex((g) => g.NAME === head);
         if (index >= 0) this.selectedGen = index;
@@ -636,13 +641,13 @@ export class DeployRoot extends Component {
         // 存檔只記總數（`deployQueue` 第 1 槽 `troops`）：按該將等級的兩欄上限拆回步/騎，
         // 與 web `deploy.html` 的 `rerollCaps()` 同一個口徑（`core/levels.ts` 的 `troopColumnsOf()`）。
         this.totalToColumns(clamp(this.queue[0]!.troops, 1, 100));
-      } else if (pool[0] && this.queue[0]?.general !== pool[0].NAME) {
+      } else if (!this.siege && pool[0] && this.queue[0]?.general !== pool[0].NAME) {
         this.queue = setGeneral(this.queue, 0, pool[0].NAME);
       }
       this.loaded = true;
       // [R231] 攻城戰前準備：將在 applyGeneral 之前鎖定（主將=抵達兵團主將），
       // 兵在 applyGeneral 之後鎖定（等級上限夾完再蓋回快照兵數）。
-      if (this.siege) this.applySiegeRoster(byName);
+      if (this.siege) this.applySiegeRoster(byName); // 幂等：已在上面鎖過，這裡再確保一次
       this.applyGeneral();
       if (this.siege) this.applySiegeTroops();
       this.loadPortrait();
