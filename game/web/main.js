@@ -7,7 +7,7 @@
  * 这里只做"浏览器壳"：加载数据、驱动循环、把指针/键盘事件翻译成 core 调用。
  * 战斗规则一行都不在这里实现。
  */
-import { camera, cast, createWorld, defaultAim, fxTtlOf, QI_MAX, allRush, isRushing, requestRetreat, settle, step, TICK_HZ } from '../dist/core/battle.js';
+import { camera, cast, createWorld, defaultAim, fxTtlOf, QI_MAX, allRush, isRushing, parseCols, requestRetreat, settle, step, TICK_HZ } from '../dist/core/battle.js';
 // R115：原作乱数流（`0x450132`）。战斗的方向抽样（`0x43C2A5` 权重 `rand()%n`）、
 // 「先扫哪一侧」（`rand() & 1`）、AI 选令（`0x4687A0`）都改走这条流，同一 `?seed=` 可复现。
 import { sangoRng } from '../dist/core/sango_rng.js';
@@ -561,6 +561,9 @@ function readConfig() {
     bLevel: num('blevel', 0),
     bLoyal: num('bloyal', -1),
     bConstancy: num('bconstancy', -1),
+    // F26 武將站位：出征頁帶 `?cols=關羽:front,張飛:back`（緊湊式）。解析規則在 core 的
+    // `parseCols()`（中文冒號/空格/未知值→中列都容錯），這裡只負責把名字翻成主將的檔位。
+    cols: parseCols(q.get('cols')),
     aGeneral: generalFromQuery(),
   };
 }
@@ -672,6 +675,9 @@ const world = createWorld({
       // R37：出戰時派發的軍師技/策略 seq（core/strategy.ts 的 67 條原作條目）。
       // 出征頁選的 `?wise=` 既是「開戰前生效」（wises.ts）也是「戰中派發」（strategy.ts 的 seq）。
       strategy: cfg.wise || null,
+      // F26 武將站位（前/中/後列）：只影響主將的初始縱深 gx（±1 格），
+      // 中列 = 既有落位。出征頁沒帶 / 名字對不上 / 值不認識 ⇒ 一律中列（parseCols 已兜底）。
+      col: (cfg.aGeneral.name && cfg.cols[cfg.aGeneral.name]) || 'mid',
     },
     b: {
       troop: cfg.bTroop,

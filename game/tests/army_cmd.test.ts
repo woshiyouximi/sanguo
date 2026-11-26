@@ -862,6 +862,8 @@ test('R158 主将 cmd 3..7 无操作（0x43CF89 直接 ret）', () => {
   assert.deepEqual(adv.w1, STEP_W_STRAIGHT, '主将前進 = 直线 100/0');
   const back = cmdStepPlan(w, 'A', gen, 2)!;
   assert.deepEqual([back.sx, back.sy], [1, 0]);
+  assert.deepEqual(back.w1, STEP_W_STRAIGHT, '主将後退 = 直线 100/0（0x48E5C8），不是锥形（R83 修正 0043C7B5）');
+  assert.deepEqual(back.w2, STEP_W_STRAIGHT, '主将後退第二组仍是直线，不会挤友军');
 });
 
 // ---------------------------------------------------------------------------

@@ -123,6 +123,13 @@
   /* 後 2 列灰顯：不可調序（原作並無「預備槽」，此處只是本作的名冊順序） */
   .qrow.reserve .qn,.qrow.reserve .qnum{color:var(--ink-3)}
   .qrow.reserve .qi{opacity:.6}
+  /* F26 武將站位：原作是三檔（前/中/後列，指南 L152），不是自由拖放。這裡用一行三按鈕：
+     這一頁的 .body 是可滾動的，觸屏拖放會和滾動搶手勢。選中態沿用 .grid/.pick 的金框語言。 */
+  .qrow .qcol{flex:none;display:flex;gap:4px}
+  .qrow .qcol button{width:36px;height:40px;font:inherit;font-size:16px;color:var(--ink-2);
+    background:rgba(20,26,34,.78);border:1px solid rgba(216,179,106,.35);border-radius:6px;cursor:pointer}
+  .qrow .qcol button.on{color:var(--gold-2);background:rgba(44,33,14,.94);
+    box-shadow:inset 0 0 0 2px rgba(216,179,106,.55),inset 0 0 14px rgba(216,179,106,.22)}
   #qhint{font-size:14px}
   footer{flex:none;padding:8px 20px calc(10px + env(safe-area-inset-bottom));border-top:0;
     background:linear-gradient(180deg,rgba(10,13,17,.86),rgba(8,10,14,.95)),
@@ -530,6 +537,39 @@ if (QUEUE_STORED && queue[0]) {
   rerollCaps(GEN_LEVEL, queue[0].troops);
 }
 
+// ---------------------------------------------------------------- 武將站位（F26）
+// 原作戰前四件事的最後一件：指南 `work/ref_pdf/sanguo2_guide.txt` L152
+// 「武将站位 拖到前 / 中 / 后列，决定谁先挨打」；戰前面板的「定位」行見
+// `work/video_ui_b/crop_cmp_mid.png`（兩側各顯一檔，中間金匾是行標籤）⇒ 三檔。
+// **不是拖放**：.body 是可滾動的，觸屏拖放會和滾動搶手勢，所以用一行三按鈕。
+// `deploy_queue.ts` 的 saveQueue() 只序列化 {general,troop,troops}（那個檔不歸本輪改），
+// 所以每槽的 `col` 跟隊列一起活在記憶體裡，持久化另按「武將名」存一個獨立小鍵：
+// 名冊重排/換人都不會把站位搞亂，刷新也還在；存檔壞掉最多是這次回中列。
+const COL_KEY = 'sanguo_deploy_cols_v1';
+const COL_LABEL = { front: '前', mid: '中', back: '後' };
+const COL_ORDER = ['front', 'mid', 'back'];
+const COL_TIP = { front: '前列：先接敵', mid: '中列：預設', back: '後列：最後接敵' };
+function loadCols() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COL_KEY) || '{}');
+    const out = {};
+    for (const [name, col] of Object.entries(raw || {})) {
+      if (name && (col === 'front' || col === 'mid' || col === 'back')) out[name] = col;
+    }
+    return out;
+  } catch { return {}; }
+}
+const COL_BY_NAME = loadCols();
+function saveCols() {
+  try { localStorage.setItem(COL_KEY, JSON.stringify(COL_BY_NAME)); } catch { /* 私隱模式：只丟這次的站位 */ }
+}
+const colOf = (name) => COL_BY_NAME[name] || 'mid';
+/** 把「名字 → 站位」貼回隊列每一項（DQ 的展開會保住額外欄位，重建隊列時補一次就好） */
+function applyCols(q) {
+  return q.map((s) => ({ ...s, col: COL_BY_NAME[s.general] || s.col || 'mid' }));
+}
+queue = applyCols(queue);
+
 /** 第 1 槽＝主將：調序/換人後把頂部等級、兵種、兵力都對齊它，避免同一頁出現兩個「主將」。 */
 function syncFromQueue() {
   const head = queue[0];
@@ -729,17 +769,21 @@ function render() {
     queue = DQ.setTroop(queue, 0, TROOP_CHARS[troop] ?? '刀');
     queue = DQ.setTroops(queue, 0, soldiers + cavalry);
   }
+  queue = applyCols(queue);
   $('qlist').innerHTML = queue.map((slot, i) => {
     const onField = i < DQ.DEPLOY_FIELD_SLOTS;
     const up = onField && i > 0;
     const down = onField && i + 1 < DQ.DEPLOY_FIELD_SLOTS && i + 1 < queue.length;
     const cur = TROOP_BY_CHAR[slot.troop] !== undefined ? slot.troop : '刀';
+    const col = slot.col || 'mid';
     const opts = TROOP_CHARS.map((c) =>
       `<option value="${c}"${c === cur ? ' selected' : ''}>${TROOP_NAMES[TROOP_BY_CHAR[c]] ?? c}</option>`).join('');
     return `<div class="qrow${onField ? '' : ' reserve'}">`
       + `<span class="qi">${i + 1}</span>`
       + `<span class="qn">${slot.general}${i === 0 ? '<i>主將</i>' : ''}</span>`
       + `<select class="qtr" data-qtr="${i}" title="換兵種">${opts}</select>`
+      + `<span class="qcol">${COL_ORDER.map((c) =>
+        `<button data-qcol="${i}:${c}" class="${col === c ? 'on' : ''}" title="${COL_TIP[c]}">${COL_LABEL[c]}</button>`).join('')}</span>`
       + `<span class="qnum">${slot.troops} 兵</span>`
       + `<span class="qmv">`
       + `<button data-qmove="${i}:-1"${up ? '' : ' disabled'} title="上移">▲</button>`
@@ -748,9 +792,9 @@ function render() {
   }).join('');
   // 原作每側只上陣 1 名將領（project/168 §1），這裡的多列只是本作的名冊順序：
   // 不再對玩家宣稱「前 3 上陣 / 後 2 預備」，那只會誤導成原作有 3 將上場。
-  $('qhint').textContent = wise === 3
+  $('qhint').textContent = (wise === 3
     ? '後選出陣 · 開戰前可重排前 3 列'
-    : '原作只上陣 1 名主將 · 此處決定名冊順序';
+    : '原作只上陣 1 名主將 · 此處決定名冊順序') + ' · 前/中/後＝接敵序';
 
   // 相剋净加值：敌方取守军的兵种/阵形（原型里按固定 黃巾/雁形 代理）
   const enemyTroop = 10, enemyForm = 3;
@@ -843,6 +887,20 @@ document.addEventListener('change', (e) => {
   render();
 });
 
+// 武將站位（F26）：三檔按鈕，點一下就換。寫回隊列該項的 `col`，並按武將名另存一份
+// （`deploy_queue.ts` 的 saveQueue() 只留 general/troop/troops，這裡不跟它搶格式）。
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-qcol]');
+  if (!btn) return;
+  const [idxText, col] = String(btn.dataset.qcol || '').split(':');
+  const idx = Number(idxText);
+  if (!COL_LABEL[col] || !queue[idx]) return;
+  queue = queue.map((s, i) => (i === idx ? { ...s, col } : s));
+  COL_BY_NAME[queue[idx].general] = col;
+  saveCols();
+  render();
+});
+
 // 兵力滑桿：兩欄各自 0..自己的上限，拖到哪帶到哪（互不影響，原作兩欄獨立）
 $('numrange').addEventListener('input', (e) => {
   soldiers = Math.max(1, Math.min(SOLDIER_CAP, Math.round(Number(e.target.value) || 1)));
@@ -854,6 +912,17 @@ $('cavrange').addEventListener('input', (e) => {
 });
 
 $('back').addEventListener('click', () => { location.href = './campaign.html?sel=' + encodeURIComponent(target); });
+/**
+ * 出征 URL 的 `cols=`（F26）：`關羽:front,張飛:back` 的緊湊式。解析端是 core 的
+ * `parseCols()`（main.js 直接 import），同一套容錯（中文冒號/空格/未知值→中列）不在兩頁各抄一份。
+ * 名冊是空的就給空字串 —— main.js 的 parseCols('') 得到 {}，主將按中列開局。
+ */
+function deployColsParam() {
+  return queue
+    .filter((s) => s && s.general)
+    .map((s) => `${s.general}:${s.col || colOf(s.general)}`)
+    .join(',');
+}
 $('go').addEventListener('click', () => {
   // 出征前落一次盤：滑桿/換兵種可能還沒 persist 過，這一仗的隊列必須是畫面上這個順序
   persistQueue();
@@ -878,6 +947,9 @@ $('go').addEventListener('click', () => {
     home: HOME,
     marchpool: String(MARCH_MODE === 'army' ? ARMY_TROOPS : fielded),
     troop: String(troop), form: String(form),
+    // F26 武將站位：`cols=關羽:front,張飛:back`（緊湊式，main.js 的 parseCols() 認它）。
+    // 只帶名字+檔位，不帶槽序 —— 槽序由 a=/gen= 與 bgen= 各自決定，這裡不重複表達。
+    cols: deployColsParam(),
     // 上陣兵 = 步 + 騎（`unit+0x5C`，原作兩欄相加）：main.js 只讀 `soldiers` 當總數，
     // 所以這裡送的是兩欄之和；`cav` 另外記一份騎兵欄，供以後戰鬥頁接上（main.js 本輪禁改）。
     soldiers: String(soldiers + cavalry), cav: String(cavalry),

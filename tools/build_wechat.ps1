@@ -79,7 +79,14 @@ param(
   [string]$AudioBase = '',
   [switch]$SkipWeb,
   [switch]$KeepAudio,
-  [switch]$Open
+  [switch]$Open,
+
+  # 资源瘦身（-Mode upload 出包前的 png 瘦身）：默认关，加了才动构建产物
+  #   png 是包里唯一还能动的大块（音频不许删、已有 webp 已是有损），瘦身方式见 slim_png.py
+  [switch]$Slim,
+  [int]$SlimMinBytes = 10240,      # 小于这个体积的 png 不动（省几十字节不值得改 fmt）
+  [int]$SlimQuality = 92,          # webp 质量；现有 1210 张 webp 实测等效 q85-86
+  [string]$Python = ''             # 指定 python（需 Pillow）；留空自动找
 )
 
 # -KeepAudio 是 -Audio embed 的旧名，保留兼容；其余情况以 -Audio 为准
@@ -604,6 +611,81 @@ if ($cfg.appid -ne $AppId) { throw "AppID 覆写失败（产物里是 $($cfg.app
 Info "project.config.json → appid=$($cfg.appid) compileType=$($cfg.compileType)"
 if ($cfg.compileType -ne 'game') {
   Write-Host "  ⚠ compileType 不是 game（$($cfg.compileType)）：导入时必须手动选「小游戏」" -ForegroundColor Yellow
+}
+
+# ---------------------------------------------------------------------------
+# 3.5) 资源瘦身（-Slim）：png → webp
+#      R305：微信单包 20 MB（CLI 用 MiB 计数，见 work\cli_upload_020.log 里
+#      19,030,717 B 显示为 '18.1 MB'），而包里 png 占 7.5 MB、mp3 6 MB 不许删、
+#      已有 1210 张 webp 又都是 q85-86 的有损（重编码只会变大）→ 唯一能瘦的就是 png。
+#      做法：同 uuid 换扩展名写 .webp + 把 import json 里的 "fmt":"0" 改成 "fmt":"4"；
+#      引擎按 fmt 索引 extnames 取扩展名，所以不需要动 config/paths/uuids。
+#      只替换「体积降幅 ≥10% 且可见像素平均误差 ≤6/255」的文件，其余原样保留。
+# ---------------------------------------------------------------------------
+if ($Slim) {
+  Step '资源瘦身（png → webp）'
+  $slimPy = Join-Path $PSScriptRoot 'slim_png.py'
+  if (-not (Test-Path -LiteralPath $slimPy)) { Fail "找不到 $slimPy" }
+
+  $py = $Python
+  if (-not $py) {
+    $cands = @(
+      'C:\Users\liutian\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe',
+      (Join-Path $env:USERPROFILE '.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe')
+    )
+    foreach ($c in $cands) {
+      if (-not $py -and (Test-Path -LiteralPath $c)) { $py = $c }
+    }
+    if (-not $py) {
+      $cmd = Get-Command python -ErrorAction SilentlyContinue
+      if ($cmd) { $py = $cmd.Source }
+    }
+  }
+  if (-not $py) { Fail '-Slim 需要带 Pillow 的 python：用 -Python 指定解释器' }
+
+  # 两种包布局都试：upload = subpackages\<bundle>\native，preview/remote = assets\<bundle>\native
+  $slimRoots = @(
+    (Join-Path $out "subpackages\$ResBundle\native"),
+    (Join-Path $out "assets\$ResBundle\native")
+  ) | Where-Object { Test-Path -LiteralPath $_ }
+  if ($slimRoots.Count -eq 0) { Fail "找不到 native 目录（试过 subpackages\$ResBundle\native 与 assets\$ResBundle\native）" }
+
+  $slimLogDir = Join-Path $Tools 'build-logs'
+  if (-not (Test-Path -LiteralPath $slimLogDir)) { New-Item -ItemType Directory -Path $slimLogDir -Force | Out-Null }
+  $slimReport = Join-Path $slimLogDir ("slim_{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+
+  # 注意：不要写成 `Get-DirStat -Path $slimRoots[0]`——参数模式下 `[0]` 不会被当成索引，
+  # 第一次跑就吃了一次「瘦身前 0 KB / 瘦身后 0 KB」的假告警。先落到标量再算。
+  $slimRoot = @($slimRoots)[0]
+
+  function Get-SlimStat([string]$Root) {
+    $all = @(Get-ChildItem -LiteralPath $Root -Recurse -File -ErrorAction SilentlyContinue)
+    $bytes = 0L; $pngBytes = 0L; $png = 0; $webp = 0
+    foreach ($f in $all) {
+      $bytes += $f.Length
+      if ($f.Extension -eq '.png') { $png++; $pngBytes += $f.Length }
+      elseif ($f.Extension -eq '.webp') { $webp++ }
+    }
+    [pscustomobject]@{ Bytes = $bytes; Files = $all.Count; Png = $png; PngBytes = $pngBytes; Webp = $webp }
+  }
+
+  $beforeStat = Get-SlimStat $slimRoot
+  Info ("瘦身前：{0} / {1} 文件，png {2} 张 / {3}" -f (Format-Size $beforeStat.Bytes), $beforeStat.Files, $beforeStat.Png, (Format-Size $beforeStat.PngBytes))
+
+  $slimArgs = @($slimPy) + @($slimRoots) + @(
+    '--mode', 'webp', '--min-bytes', "$SlimMinBytes", '--min-gain', '0.10',
+    '--webp-quality', "$SlimQuality", '--webp-max-rgb-diff', '6.0',
+    '--report', $slimReport, '--jobs', '8'
+  )
+  & $py @slimArgs
+  if ($LASTEXITCODE -ne 0) { Fail "slim_png.py 失败（exit=$LASTEXITCODE），报告：$slimReport" }
+
+  $afterStat = Get-SlimStat $slimRoot
+  $saved = [long]$beforeStat.Bytes - [long]$afterStat.Bytes
+  $script:SlimSaved = $saved
+  Info ("瘦身后：{0} / {1} 文件，png {2} 张 / {3}，webp {4} 张" -f (Format-Size $afterStat.Bytes), $afterStat.Files, $afterStat.Png, (Format-Size $afterStat.PngBytes), $afterStat.Webp)
+  Info ("省 {0}（{1:N1}%），报告：{2}" -f (Format-Size $saved), (100.0 * $saved / [Math]::Max(1, $beforeStat.Bytes)), $slimReport)
+  if ($saved -le 0) { Fail '瘦身没有省下任何字节：先看报告，别把没瘦的包发上去' }
 }
 
 # ---------------------------------------------------------------------------

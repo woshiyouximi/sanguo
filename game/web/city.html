@@ -68,6 +68,11 @@
   .cmd.hot small{color:#C9B48A}
   .cmd[disabled]{border-image-source:url("assets/bg/env/ui_btn_wood_disabled.png");opacity:.75;cursor:default}
   .cmd .note{font-size:12px;color:#E2914E;letter-spacing:.02em}
+/* [F7] 副令列（情報／移動）：和七令同一種木牌，但壓暗一級，讓「7 + 2」一眼分得出來 */
+.grid.subgrid{grid-template-columns:repeat(2,1fr);margin-top:12px}
+.grid.subgrid .cmd{height:64px;opacity:.86}
+.grid.subgrid .cmd b{font-size:21px}
+.grid.subgrid .cmd small{font-size:12px}
 
   .log{flex:1;min-height:0;display:flex;flex-direction:column;gap:2px;margin-top:8px;overflow:hidden;
     background:linear-gradient(180deg,rgba(8,11,15,.66) 0,rgba(8,11,15,.34) 40%,rgba(8,11,15,0) 100%);
@@ -323,7 +328,7 @@
     </div>
     <div class="hud">
       <div class="chip"><span class="k">人口</span><span class="v" id="vPop">—</span></div>
-      <div class="chip"><span class="k">金</span><span class="v gold" id="vGold">—</span></div>
+      <div class="chip"><span class="k">本城金</span><span class="v gold" id="vGold">—</span></div>
       <div class="chip"><span class="k">兵</span><span class="v" id="vTroops">—</span></div>
       <div class="chip"><span class="k">預備兵</span><span class="v" id="vPrep">—</span></div>
       <div class="chip"><span class="k">防禦</span><span class="v" id="vDef">—</span></div>
@@ -352,14 +357,20 @@
         <div class="chip"><span class="k">關數</span><span class="v" id="fvGate">—</span></div>
         <div class="chip"><span class="k">武將數</span><span class="v" id="fvGens">—</span></div>
         <div class="chip"><span class="k">總兵數</span><span class="v" id="fvTroops">—</span></div>
-        <div class="chip"><span class="k">金錢</span><span class="v gold" id="fvGold">—</span></div>
+        <!-- [F16] 錢只有一個口徑：每城 money(+0x92)。這一欄「國庫」＝Σ 我方每城 money，
+             上面 HUD 的「本城金」＝當前城 money —— 兩個數各有標籤，不再同屏兩個數看不出區別。 -->
+        <div class="chip"><span class="k">國庫</span><span class="v gold" id="fvGold">—</span></div>
         <div class="chip"><span class="k">人口</span><span class="v" id="fvPop">—</span></div>
       </div>
     </section>
 
     <section class="sec">
-      <h2>內政命令 <span class="hint" id="cmdHint">九條</span></h2>
+      <!-- [F7] 原作核心指令是 7 項（指南 L96-105：搜索/開發/徵兵/任命/武將資料/自治/出征），
+           不是九宮格。情報與移動降成「副令」放在第二列：仍然可用（前一輪已把情報改成只讀），
+           但不占當年的七令之一 —— 每將每年一次只對前 7 條生效。 -->
+      <h2>內政命令 <span class="hint" id="cmdHint">七條</span></h2>
       <div class="grid" id="grid"></div>
+      <div class="grid subgrid" id="subgrid"></div>
     </section>
 
     <section class="sec logsec" style="flex:1;min-height:0;display:flex;flex-direction:column">
@@ -483,12 +494,20 @@ function scenarioIndexOf(id) {
 scenIdx = scenarioIndexOf(save?.scenario);
 scenario = SCEN[scenIdx] || null;
 
+/* [F5] 紀元錨點：本頁頂部「西元 N 年 M 月」、8 欄面板「時間 N 年」、日誌日期全走 era.js。
+ * 錨點 = 這份存檔的劇本起始年（189/200/208/219…），顯示即 `startYear + yearOf - 1`；
+ * 缺 startYear 的老檔由 `Saves.startYearOf()` 兜 184（`yearOf()` 本身只做年內換算）。 */
+era.setAnchor(Saves.startYearOf(save));
+
 /* 截圖/驗收用：?fresh=1 不讀存檔、直接開新局（除錯口子；只有下命令才會寫回槽位） */
 const FRESH = dbg('fresh') === '1';
 if (FRESH) save = Saves.newCampaign(scenario || {});
 save = Saves.deepClone(save || Saves.newCampaign(scenario || {}));
 M.ensureExtras(save);
 if (scenario) for (const c of scenario.cities || []) M.ensureCityState(save, c);
+// [F16] 舊單錢包（`save.gold`）一次性併進我方首城；之後本頁只認每城 money。
+// 已遷移過的檔直接早退（`goldMigrated`），不會重複計錢。
+if (M.migrateGold) M.migrateGold(save, scenario?.cities || []);
 if (!Array.isArray(save.owned) || !save.owned.length) {
   save.owned = (scenario?.cities || []).slice(0, 3).map((c) => c.NAME);
 }
@@ -557,10 +576,12 @@ applyHall();
 const autoTick = M.autonomyTick(save, scenario?.cities || [], ctx, { loose: dbg('loose') === '1' });
 if (autoTick.refilled.length || autoTick.auto) persist();
 
-/* 除錯口子：?gold=3000 直接改金（只為驗收/自測，UI 上沒有這個入口） */
-if (qs.has('gold')) {
+/* 除錯口子：?gold=3000 直接改**本城金**（只為驗收/自測，UI 上沒有這個入口）
+ * [F16] 錢只有每城 money 一個口徑；舊寫法改 `save.gold`（單錢包）在遷移後已歸 0，改了也看不到。 */
+if (qs.has('gold') && cityDef) {
   const g = Number(dbg('gold'));
-  if (Number.isFinite(g) && g >= 0) save.gold = Math.trunc(g);
+  const st = M.ensureCityState(save, cityDef);
+  if (st && Number.isFinite(g) && g >= 0) st.money = Math.trunc(g);
 }
 
 /* ---------------- 持久化 ---------------- */
@@ -622,7 +643,9 @@ function renderHud() {
   $('cityName').textContent = cityDef ? cityDef.NAME : '（無城）';
   $('headSub').textContent = `${systemName(sysRaw, scenIdx) || scenario?.system?.TIME || '劇本'} · ${era.eraTextOfMonth(save.month)}`;
   $('vPop').textContent = st ? fmt(st.pop) : '—';
-  $('vGold').textContent = fmt(save.gold);
+  // [F16] 錢只有一個口徑：每城 `money(+0x92)`。HUD「本城金」讀當前城；國庫（Σ 我方每城）
+  // 在下面 8 欄面板的「國庫」chip。舊碼讀 `save.gold`（單錢包）→ 同屏兩個數卻沒標籤。
+  $('vGold').textContent = st ? fmt(st.money) : '—';
   $('vTroops').textContent = st ? `${fmt(st.troops)}/${fmt(M.RECRUIT.CAP)}` : '—';
   $('vTroops').title = st ? `步兵 ${fmt(st.inf)} · 騎兵 ${fmt(st.cav)}` : '';
   // R12 預備兵池：原作面板 0x48B2B8「預備兵 %d/%d」（+0x86 現有 / +0x82 上限）
@@ -637,7 +660,20 @@ function renderHud() {
   $('vMajor').textContent = cityDef ? (M.majorOf(save, cityDef) || '—') : '—';
   $('vWise').textContent = cityDef ? (M.wiseOf(save, cityDef) || '—') : '—';
   $('vEff').textContent = cityDef ? `×${M.efficiencyOf(save, cityDef, ctx).toFixed(2)}` : '—';
-  $('vGens').textContent = cityDef ? String(M.rosterOf(save, cityDef.NAME, ctx).length) : '—';
+  // [F19] 武將數 = 當前/上限（原作指南 L92「武將數（如 13/10）」）。
+  // 劇本資料本身超編（濮陽 15／洛陽 15／江夏 17）→ **不裁切**，只把 N/CAP 標紅，
+  // 否則「載入即砍人」會和 garrison.json 的武將表對不上。
+  if (cityDef) {
+    const n = M.rosterOf(save, cityDef.NAME, ctx).length;
+    const cap = M.officerCapState ? M.officerCapState(n) : { n, cap: 10, over: n > 10 };
+    $('vGens').textContent = `${cap.n} / ${cap.cap}`;
+    $('vGens').classList.toggle('hot', cap.over);
+    $('vGens').title = cap.over
+      ? `超編：劇本原始武將 ${cap.n} 名 > 上限 ${cap.cap}（不裁切，只標紅）`
+      : `武將 ${cap.n} / 上限 ${cap.cap}`;
+  } else {
+    $('vGens').textContent = '—';
+  }
   // 主將疲勞（原作 general+0x3A）：只在這一頁顯示一次；≥60 轉橙，和 monthly 的士氣懲罰同門檻。
   const major = cityDef ? M.majorOf(save, cityDef) : '';
   const majorTire = major ? tireOfName(major) : null;
@@ -680,37 +716,47 @@ function renderCivic() {
   return cv;
 }
 
-/* ---------------- 8 條命令宮格（＋R10 自治 = 9 鍵） ---------------- */
+/* ---------------- 內政命令宮格（[F7] 原作 7 項 + 2 條副令） ----------------
+ * 指南 L94-105 的五大核心指令表其實是 7 項：搜索／開發／部隊徵兵／任命太守·軍師／
+ * 武將資料（含使用物品）／內政自治／部隊出征。順序照指南，不照舊九宮格。
+ * 「移動」「情報」降成第二列副令：仍然可用（情報已是只讀表格），但不占七令。
+ */
 const CMD_SUB = {
-  開發: (st) => `不耗金 · 民防共增`,
-  徵兵: (st) => `預備 ${st ? st.prep : '—'} · 步／騎`,
   搜索: (st) => `金 ${M.SEARCH.COST} · 人才/寶物`,
-  移動: () => '調將 · 調兵',
+  開發: () => '不耗金 · 民防共增',
+  徵兵: (st) => `預備 ${st ? st.prep : '—'} · 步／騎`,
   任命: () => '太守 · 軍師',
-  物品: () => '裝備 · 背包',
-  情報: () => '本城 · 鄰城',
-  出征: () => '打相鄰敵城',
+  武將資料: () => '數值 · 裝備 · 使用物品',
   自治: () => {
     const n = M.autoCities(save).length;
     return n ? `已設 ${n} 城 · 施行` : '設定代行開發';
   },
+  出征: () => '打相鄰敵城',
+  情報: () => '副令 · 本城/鄰城（只讀）',
+  移動: () => '副令 · 調將調兵',
 };
 function renderGrid() {
   const grid = $('grid');
-  // [F1] 非正月／內政已終了 → 九条全置灰，只讀查看（原作只有 1 月能下內政命令）
+  const subgrid = $('subgrid');
+  // [F1] 非正月／內政已終了 → 全置灰，只讀查看（原作只有 1 月能下內政命令）
   const ro = readOnly();
   const st = cityDef ? M.cityStateOf(save, cityDef.NAME) : null;
-  grid.innerHTML = '';
-  for (const cmd of [...M.CMD_ORDER, ...(M.CMD_EXTRA || [])]) {
+  const noteOf = () => (ro ? `<span class="note">${inAffairsMonth() ? '已終了' : '非正月'}</span>` : '');
+  const makeBtn = (cmd, extraCls) => {
     const b = document.createElement('button');
-    b.className = 'cmd' + (cmd === '開發' || cmd === '徵兵' ? ' hot' : '');
+    b.className = 'cmd' + (cmd === '開發' || cmd === '徵兵' ? ' hot' : '') + (extraCls || '');
     b.dataset.cmd = cmd;
     b.disabled = ro;
-    const cost = M.CMD_META?.[cmd]?.cost;
-    b.innerHTML = `<b>${cmd}</b><small>${CMD_SUB[cmd]?.(st) || ''}</small>`
-      + (ro ? `<span class="note">${inAffairsMonth() ? '已終了' : '非正月'}</span>` : '');
-    void cost;
-    grid.appendChild(b);
+    b.innerHTML = `<b>${cmd}</b><small>${CMD_SUB[cmd]?.(st) || ''}</small>` + noteOf();
+    return b;
+  };
+  grid.innerHTML = '';
+  // 七令：`M.CMD_ORDER` 就是原作順序（city_model.js），`M.CMD_EXTRA` 目前是空陣列
+  for (const cmd of [...M.CMD_ORDER, ...(M.CMD_EXTRA || [])]) grid.appendChild(makeBtn(cmd));
+  // 副令列：情報／移動（舊九宮格的第 4、8 鍵），不占令
+  if (subgrid) {
+    subgrid.innerHTML = '';
+    for (const cmd of M.CMD_SECONDARY || []) subgrid.appendChild(makeBtn(cmd, ' sub'));
   }
 }
 
@@ -1103,6 +1149,52 @@ function openIntel() {
   afterCommand(false);
 }
 
+/* 武將資料抽屜（[F7] 原作第 5 項「武將資料 · 使用物品」）
+ * 指南 L100-102：點武將看數值／裝備，並在這一層「使用物品」。本作把物品頁獨立成
+ * items.html（同一個存檔、同一份背包 `M.BAG_KEY`），所以抽屜底部給一顆「使用物品」直接過去；
+ * 這一步不產出資源、也不吃任何將的年度行動權 → `afterCommand(false)`，與情報同級。
+ */
+function openGeneralData() {
+  const gens = M.rosterOf(save, cityDef.NAME, ctx);
+  openSheet('武將資料 · 數值與裝備', (body) => {
+    if (!gens.length) {
+      body.innerHTML = '<div style="font-size:16px;color:var(--ink-3)">這座城沒有在城武將。</div>';
+      body.__noOk = true;
+      return;
+    }
+    const row = (g) => {
+      const name = g.NAME;
+      const eq = Saves.equipSlotsOf ? Saves.equipSlotsOf(save, name) : {};
+      const lv = Saves.num(save.generalLevel?.[name]) || 1;
+      const loyal = Number.isFinite(Number(save.loyal?.[name])) ? Math.trunc(Number(save.loyal[name])) : (Saves.num(g.LOYAL) || 0);
+      const equip = [eq.weapon || g.Weapon || '—', eq.horse || g.Horse || '—', eq.book || g.Thing || '—'].join(' · ');
+      return `<tr>
+        <td>${escapeHtml(name)}</td>
+        <td>${lv}</td>
+        <td>${fmt(g.STR)}</td>
+        <td>${fmt(g.INT)}</td>
+        <td style="font-size:14px">武 ${escapeHtml(equip.split(' · ')[0])}<br>馬 ${escapeHtml(equip.split(' · ')[1] || '—')}<br>物 ${escapeHtml(equip.split(' · ')[2] || '—')}</td>
+        <td>${loyal}</td>
+        <td>${tireOfName(name)}</td></tr>`;
+    };
+    body.innerHTML = `<table class="info">
+      <thead><tr><th>武將</th><th>等級</th><th>武</th><th>智</th><th>裝備</th><th>忠</th><th>疲</th></tr></thead>
+      <tbody>${gens.map(row).join('')}</tbody></table>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:center">
+        <button class="btn primary" id="goItems"><span>使用物品</span></button>
+        <span style="font-size:14px;color:var(--ink-3)">背包與裝備在 items.html；看完/用完回這頁即可。</span>
+      </div>`;
+    body.__noOk = true;   // 只有「取消」與上面那顆按鈕，不設預設確定
+    const go = body.querySelector('#goItems');
+    if (go) go.onclick = () => {
+      persist();
+      location.href = M.itemsUrl(cityDef.NAME) + (UNLIMITED ? '&unlimited=1' : '');
+    };
+  });
+  // 看資料不占令（和情報同一口徑）
+  afterCommand(false);
+}
+
 /* 出征抽屜 */
 function openDeploy() {
   const targets = M.deployTargets(save, cityDef, ctx);
@@ -1174,17 +1266,19 @@ function onCmd(cmd, bypassLock = false, execName = '') {
   else if (cmd === '搜索') doSearch(execName);
   else if (cmd === '移動') openMove();
   else if (cmd === '任命') openAppoint();
-  else if (cmd === '物品') {
-    // 去 items.html 換裝備不產出任何資源，不佔內政窗口
-    location.href = M.itemsUrl(cityDef.NAME) + (UNLIMITED ? '&unlimited=1' : '');
-  } else if (cmd === '情報') openIntel();
+  else if (cmd === '武將資料' || cmd === '物品') openGeneralData();   // [F7] 物品併進「武將資料」
+  else if (cmd === '情報') openIntel();
   else if (cmd === '出征') openDeploy();
   else if (cmd === '自治') openAuto();
 }
-$('grid').onclick = (e) => {
-  const b = e.target.closest('.cmd');
-  if (b) onCmd(b.dataset.cmd);
-};
+// 七令在 #grid、副令（情報/移動）在 #subgrid，兩塊共用同一個入口
+for (const id of ['grid', 'subgrid']) {
+  const el = $(id);
+  if (el) el.onclick = (e) => {
+    const b = e.target.closest('.cmd');
+    if (b) onCmd(b.dataset.cmd);
+  };
+}
 
 /* ---------------- 啟動 ---------------- */
 fit();
@@ -1197,11 +1291,11 @@ audio()?.bgm(`domestic:${(save.owned || []).length}`);
 /* 除錯口子：?do=develop,search,search；?dump=1 把存檔前後差異塞進 <pre id="dump">
  * 這是除錯入口（UI 上沒有），所以它繞過「一月一令」——正式按鈕仍受 lastActionMonth 限制。 */
 const plan = String(dbg('do') || '').split(',').map((s) => s.trim()).filter(Boolean);
-const MAP = { develop: '開發', recruit: '徵兵', search: '搜索', move: '移動', appoint: '任命', item: '物品', intel: '情報', deploy: '出征', auto: '自治' };
-const snapshot = plan.length ? JSON.stringify({ gold: save.gold, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed }) : '';
+const MAP = { develop: '開發', recruit: '徵兵', search: '搜索', move: '移動', appoint: '任命', item: '武將資料', intel: '情報', deploy: '出征', auto: '自治' };
+const snapshot = plan.length ? JSON.stringify({ gold: M.nationalGold(save, scenario?.cities || []), cityGold: cityDef ? M.cityMoneyOf(save, cityDef) : 0, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed }) : '';
 for (const step of plan) {
   const cmd = MAP[step] || step;
-  if (cmd === '出征' || cmd === '移動' || cmd === '任命' || cmd === '情報' || cmd === '物品' || cmd === '自治') continue;
+  if (cmd === '出征' || cmd === '移動' || cmd === '任命' || cmd === '情報' || cmd === '武將資料' || cmd === '自治') continue;
   // [F8] 開發/搜索要指定執行武將；除錯口子直接拿太守（沒有太守就拿名冊第一個），
   // 這樣 `?do=develop` 仍是一條命令一次執行，不會卡在選將抽屜上。
   const needExec = cmd === '開發' || cmd === '搜索';
@@ -1219,13 +1313,13 @@ if (DEV && qs.has('dump') && qs.get('dump') !== '0') {
     city: cityDef?.NAME,
     slot: activeSlot,
     before: snapshot ? JSON.parse(snapshot) : null,
-    after: { gold: save.gold, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed, searchLog: (save.searchLog || []).slice(-6) },
+    after: { gold: M.nationalGold(save, scenario?.cities || []), cityGold: cityDef ? M.cityMoneyOf(save, cityDef) : 0, cities: save.cities[cityDef?.NAME], roster: save.roster, appointed: save.appointed, searchLog: (save.searchLog || []).slice(-6) },
   }, null, 1) + '\nDUMP>>>';
 }
 /* 截圖/驗收用：?sheet=recruit|auto|intel 進頁就打開對應抽屜（除錯參數，不算玩法） */
 const dbgSheet = dbg('sheet');
 if (dbgSheet) {
-  const sheetMap = { recruit: doRecruit, auto: openAuto, intel: openIntel, move: openMove, appoint: openAppoint, deploy: openDeploy };
+  const sheetMap = { recruit: doRecruit, auto: openAuto, intel: openIntel, move: openMove, appoint: openAppoint, deploy: openDeploy, general: openGeneralData };
   try { sheetMap[dbgSheet]?.(); } catch (err) { console.error(err); }
 }
 
@@ -1264,6 +1358,15 @@ window.__city = {
   onCmd,
   doDevelop,
   doSearch,
+  openGeneralData,
+  // [F16] 驗收用：國庫（Σ 我方每城 money）與本城金分開讀，還原同屏兩個數的標籤
+  national: M.nationalGold(save, scenario?.cities || []),
+  cityGold: cityDef ? M.cityMoneyOf(save, cityDef) : 0,
+  // [F19] 驗收用：當前/上限 + 是否超編
+  gensCap: cityDef ? M.officerCapState(M.rosterOf(save, cityDef.NAME, ctx).length) : null,
+  // [F7] 驗收用：七令（CMD_ORDER）與副令（CMD_SECONDARY）
+  cmdOrder: M.CMD_ORDER,
+  cmdSecondary: M.CMD_SECONDARY,
 };
 </script>
 </body>

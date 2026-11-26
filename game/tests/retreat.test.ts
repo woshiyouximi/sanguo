@@ -362,3 +362,54 @@ describe('R38 maybeRetreat：AI 兵力劣势自动撤退', () => {
     assert.equal(b.every((u) => actionIntervalOf(u) === GENERAL_SLOW_INTERVAL), true, '仍是 46 帧档');
   });
 });
+
+/**
+ * R91 正证：撤退单位**不还手**，机制不在攻击链而在选目标（`0x43BCA7` 的 `and eax,0x4000` 分支）。
+ *
+ * 撤退态把搜敌降级成「只朝朝向那一侧、只 1 格」（`n=1` @0x43BCE1，`dir` 取朝向 @0x43BCEE），
+ * 于是**背后的敌人永远选不到**；攻击/伤害链（`0x43D686`/`0x43D400`）本身没有任何状态门。
+ * 本作没 facing 字段，用 `retreatSx(u)`（A=+1、B=−1）代替朝向。
+ */
+describe('R91 撤退不还手：搜敌被降级为「朝向侧 1 格」', () => {
+  /** 摆一个干净的两人局：B 侧一个兵在 (30,6) 撤退态，A 侧一个兵摆在指定格。 */
+  function duel(ax: number, ay: number): { w: World; b: Unit; a: Unit } {
+    const w = makeWorld({ seed: 5 }, 2);
+    assert.equal(requestRetreat(w, 'B'), true);
+    const b = w.units.find((u) => u.side === 'B' && u.alive && !u.isGeneral);
+    const a = w.units.find((u) => u.side === 'A' && u.alive && !u.isGeneral);
+    assert.ok(b && a, '需要有双方小兵各一名');
+    // 其余单位挪远，避免干扰
+    for (const u of w.units) {
+      if (u === b || u === a) continue;
+      if (u.alive) place(u, unitCell(u).gx, unitCell(u).gy);
+    }
+    place(b, 30, 6);
+    place(a, ax, ay);
+    a.cd = 99; // A 侧本 tick 不行动，避免它先手改变局面
+    b.cd = 0;
+    return { w, b, a };
+  }
+
+  it('背后（B 的撤退方向是 −x，背后是 +x）贴身的敌人打不到 → 本 tick 0 次攻击、改为走一格', () => {
+    const { w, b } = duel(31, 6);
+    const attacks = w.stats.attacksB;
+    step(w);
+    assert.equal(w.stats.attacksB, attacks, '撤退者背后的敌人不该被选中（0x43BCE1 n=1）');
+    assert.equal(unitCell(b).gx, 29, '没找到敌人就执行 cmd 8：B 侧 −x 一格');
+  });
+
+  it('正前方（−x）一格有敌人 → 仍然打得着（防一刀切）', () => {
+    const { w, b } = duel(29, 6);
+    const attacks = w.stats.attacksB;
+    step(w);
+    assert.equal(w.stats.attacksB, attacks + 1, '朝向侧一格内的敌人应被选中（0x43BCEE dir=朝向）');
+    assert.equal(unitCell(b).gx, 30, '有敌人时打人而不是挪窝');
+  });
+
+  it('正前方但距离 2 格（远于「只 1 格」）→ 选不到，仍然走一格', () => {
+    const { w } = duel(28, 6);
+    const attacks = w.stats.attacksB;
+    step(w);
+    assert.equal(w.stats.attacksB, attacks, '撤退态的搜索半径恒为 1 格，与兵种射程无关');
+  });
+});

@@ -339,6 +339,11 @@ export interface Unit {
   kind?: 'infantry' | 'cavalry';
   /** 主将单位：由 createWorld 塞进 units，命中走 HitRoll_General 分支 */
   isGeneral?: boolean;
+  /**
+   * 主将站位（F26）：只有 `isGeneral` 的單位帶，缺省 `mid`。小兵不帶 —— 它们的列由
+   * 阵形坐标决定（`formationCells()`）。同距接敌的 tie-break 只看这个字段（`nearestEnemy()`）。
+   */
+  col?: GeneralCol;
   /** 最近一次出手的 world.tick（视图选 attack_back 帧用） */
   lastAttackTick?: number;
   /** 最近一次挨打的 world.tick（视图选 hit_back / death_back 用） */
@@ -458,6 +463,13 @@ export interface SideConfig {
    * —— 這樣既有對局（測試/鏡像仿真）逐位不變；要開就顯式給。
    */
   strategy?: number | null;
+  /**
+   * 武將站位（F26）：`front` / `mid` / `back`，缺省 `mid`（既有對局逐格不變）。
+   *
+   * 原作戰前四件事之一（指南 L152「武將站位 ... 決定誰先挨打」），只挪主將的初始縱深
+   * ±1 格（`colOffsetOf()` 的換算），小兵仍由陣形落位。
+   */
+  col?: GeneralCol;
   general: { name?: string; str: number; int: number; level?: number };
 }
 
@@ -877,6 +889,81 @@ export function formationCells(
   return out;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// F26 武將站位（前 / 中 / 後列）
+//
+// 原作戰前可調四件事：出戰順序 / 陣形 / **武將站位** / 軍師技。指南原文
+//（`work/ref_pdf/sanguo2_guide.txt` L152）：「武將站位 拖到前 / 中 / 后列，決定誰先挨打」，
+// L161 再列一次「鼠标左键 拖顺序、选阵形、选站位、点"出战"」。戰前面板的「定位」行
+// 左右各顯一檔（`work/video_ui_b/crop_cmp_mid.png`：兩側都是「後列」，中間金匾是行標籤）
+// ⇒ 是**三檔**，不是自由座標。
+//
+// 縱深量的換算（`work/video_ref/REPORT.md` Q4b）：源幀 640×360、遊戲畫面寬 488px、
+// 14 條車道 ⇒ 1 身位 ≈ 33px；雁形陣三排腳底 y≈150/190/235 ⇒ 排距 40–45px ≈ 1.2–1.4 身位。
+// 本項目 1 格 = ROW_PX 71.43px、車道 53.57px ⇒ 1 格 = 1.33 身位 ⇒ **1 排距 ≈ 1 格**
+//（40–45px × 53.57/33 = 65–73px，÷ 71.43px = 0.91–1.02 格）。所以取整成
+// **前 = +1 格、中 = 0、後 = −1 格**，不是【待證】的保守值。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 武將站位三檔（原作的「前 / 中 / 後列」）。 */
+export type GeneralCol = 'front' | 'mid' | 'back';
+
+/** 縱深序：數字越小越靠前（先接敵）。未知值一律按中列（`normalizeCol()` 的兜底）。 */
+export const COL_RANK: Record<GeneralCol, number> = { front: 0, mid: 1, back: 2 };
+
+/**
+ * 站位字串歸一化：認 `front|f|前*` / `back|b|後*|后*` / `mid|middle|m|中*`，
+ * 其餘（含 undefined、拼錯、數字）一律 `mid` —— 出征 URL 是外部輸入，解析失敗不能炸戰鬥。
+ */
+export function normalizeCol(raw: unknown): GeneralCol {
+  if (typeof raw !== 'string') return 'mid';
+  const s = raw.trim().toLowerCase();
+  if (s === 'front' || s === 'f' || s.startsWith('前')) return 'front';
+  if (s === 'back' || s === 'b' || s.startsWith('後') || s.startsWith('后')) return 'back';
+  return 'mid';
+}
+
+/** 站位的縱深序（`front`=0 / `mid`=1 / `back`=2）。同距接敵的 tie-break 用它。 */
+export function colRankOf(col: unknown): number {
+  return COL_RANK[normalizeCol(col)];
+}
+
+/**
+ * 站位 → **相對本側陣列的縱深偏移（格）**：前 +1、中 0、後 −1。
+ *
+ * 這是「朝敵方」的正方向；A 側面朝 −x（`step()` 的 `f = side === 'A' ? -1 : 1`），
+ * 所以落位時還要乘上 `toward = A ? -1 : +1`（见 `createWorld()` 的主将落位段）。
+ */
+export function colOffsetOf(col: unknown): number {
+  const c = normalizeCol(col);
+  return c === 'front' ? 1 : c === 'back' ? -1 : 0;
+}
+
+/**
+ * 解析出征 URL 的 `cols=` 參數：`關羽:front,張飛:back`（緊湊式）。
+ *
+ *  - 分隔符：`,` `，` `;` `；` 都認；鍵值分隔：`:` `：` 都認（中文冒號是常見誤輸入）；
+ *  - 兩端空白一律 trim（`關羽 : 前` 也能讀）；
+ *  - 值走 `normalizeCol()`，未知值回落 `mid`（**仍然記住這個名字**，只是按中列）；
+ *  - 沒有冒號的段落、空名字、非字串輸入整段丟掉 —— 絕不拋異常，戰鬥照常開。
+ */
+export function parseCols(raw: unknown): Record<string, GeneralCol> {
+  const out: Record<string, GeneralCol> = {};
+  if (typeof raw !== 'string') return out;
+  // 出征令是外部輸入：正常 5 將 × 8 字，這裡先擋病態長度（1 萬字不會拖慢建局）
+  const text = raw.length > 4096 ? raw.slice(0, 4096) : raw;
+  for (const part of text.split(/[,，;；]/)) {
+    const seg = part.trim();
+    if (!seg) continue;
+    const m = seg.match(/^([^:：]+)[:：](.*)$/);
+    if (!m) continue;
+    const name = m[1]!.trim();
+    if (!name) continue;
+    out[name] = normalizeCol(m[2]);
+  }
+  return out;
+}
+
 /**
  * 主将自动放技的间隔（tick）＝ **10 秒**。
  *
@@ -1033,8 +1120,27 @@ export function createWorld(opts: CreateOptions): World {
     // `X>=0x70 → −0x20`，否则 `X>=0x36 ? +1 : −1`（174 §3.2）。
     const slot = data.formations.slots[rt.formation] ?? data.formations.slots[0]!;
     const shift = Math.floor((200 - rt.soldiers) / 25);
-    let gx = side === 'A' ? GRID_W - (slot.anchorX + shift) : slot.anchorX + shift;
-    gx = Math.max(0, Math.min(GRID_W - 1, gx));
+    // F26 武將站位：前/中/後列 = 相對本側陣列的三條縱深線（換算見 `colOffsetOf()`：
+    // 源排距 40–45px ≈ 1 格）。A 側面朝 −x ⇒ 「前」是 gx−1；B 側面朝 +x ⇒ 「前」是 gx+1。
+    // 中列 `colOffsetOf()` 返回 0 ⇒ `gx` 与原式逐格相同（既有測試/仿真不受影响）。
+    const col = normalizeCol(rt.col);
+    const toward = side === 'A' ? -1 : 1;
+    const base = Math.max(0, Math.min(GRID_W - 1,
+      side === 'A' ? GRID_W - (slot.anchorX + shift) : slot.anchorX + shift));
+    let gx = Math.max(0, Math.min(GRID_W - 1, base + toward * colOffsetOf(col)));
+    // F26：站位把主將推進陣列時，目標格常被自家小兵占著（方陣 100 兵的 `x=1` 前排正好在
+    // 中列前一格）。原作的撞格迴圈只沿 x 把主將擠回原位 —— 那等於把站位原地抵消掉。
+    // 所以先做一次同車道換位：把小兵挪去主將原位，站位才真的落到場上。
+    // 只在 `col !== 'mid'`（`gx !== base`）時發生；中列走原式，既有對局逐格不變。
+    if (gx !== base) {
+      const blocker = world.units.find((u) => u.side === side
+        && Math.round(u.x) === gx && Math.round(u.y) === 6);
+      const baseFree = !world.units.some((u) => Math.round(u.x) === base && Math.round(u.y) === 6);
+      if (blocker && baseFree) {
+        blocker.x = base;
+        blocker.prevX = base;
+      }
+    }
     const taken = new Set(world.units.map((u) => cellKey(Math.round(u.x), Math.round(u.y))));
     for (let guard = 0; guard < GRID_W; guard++) {
       if (!taken.has(cellKey(gx, 6))) break;
@@ -1053,6 +1159,7 @@ export function createWorld(opts: CreateOptions): World {
       alive: true,
       cd: 0,
       isGeneral: true,
+      col,
     });
     gen.hp = gen.maxHp;
   }
@@ -1905,7 +2012,14 @@ export function formationBonus(data: GameData, aForm: number, bForm: number): nu
   return data.formations.matrix[aForm]?.vs[bForm] ?? 0;
 }
 
-function nearestEnemy(world: World, u: Unit): Unit | null {
+/**
+ * 最近敌人（本作缺省前压/主将压上的选目标口径）：欧氏距离，`d < bestD` 才换。
+ *
+ * F26 tie-break：距离**完全相等**时，列更靠前的候选优先被选中（原作「站前面的先挨打」）。
+ * 只在候选真的带 `col` 时才会生效 —— 小兵的 `col` 是 undefined、两边都按中列算（rank 1），
+ * 所以没有站位参数的旧对局仍是「数组里先出现的那个」，逐位不变。
+ */
+export function nearestEnemy(world: World, u: Unit): Unit | null {
   const c = unitCell(u);
   let best: Unit | null = null;
   let bestD = Infinity;
@@ -1913,7 +2027,8 @@ function nearestEnemy(world: World, u: Unit): Unit | null {
     if (!v.alive || v.side === u.side) continue;
     const t = unitCell(v);
     const d = Math.hypot(t.gx - c.gx, t.gy - c.gy);
-    if (d < bestD) {
+    const tie = d === bestD && best !== null && colRankOf(v.col) < colRankOf(best.col);
+    if (d < bestD || tie) {
       bestD = d;
       best = v;
     }
@@ -2461,11 +2576,21 @@ export function rushStepPlan(world: World, u: Unit): StepPlan | null {
   return planToward(unitCell(u), unitCell(tgt), STEP_W_CONE, STEP_W_CONE_WIDE, 'rush');
 }
 
+/**
+ * 撤退方向（`0x43CC95` 小队 / `0x43C7E3` 主将：`sx = A?+1:-1`，与敌人位置无关）。
+ *
+ * 它同时是 `0x43BF26` 每次移动写给 sprite 的**朝向**（`x` 变大写 0、变小写 `0x800000`），
+ * 所以 `0x43BCA7` 的撤退分支（`n=1`、`dir = 朝向`）等价于「只朝本方边界那一侧看 1 格」。
+ */
+function retreatSx(u: Unit): 1 | -1 {
+  return u.side === 'A' ? 1 : -1;
+}
+
 /** 撤退一步：纯 ±x，无 y 分量（`0x43CC95`：`sx=(A?+1:-1), sy=0`，权重 100/0） */
 export function retreatStepPlan(u: Unit): StepPlan {
   // `0x43CC95`（小队）/ `0x43C7E3`（主将）：sx = A?+1:-1、sy = 0，方向朝本方边界、与敌人位置无关。
   // 权重：小队 `0x48E8E0` = 80/10/10（各 10% 走一次 ±45°），主将 `0x48E658` = 100/0（纯直线）。
-  const sx = u.side === 'A' ? 1 : -1;
+  const sx = retreatSx(u);
   return u.isGeneral
     ? planDirected(sx, 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'retreat')
     : planDirected(sx, 0, STEP_W_CONE, STEP_W_CONE_WIDE, 'retreat');
@@ -2498,12 +2623,21 @@ function rowEnemyAt(u: Unit, occ: Occ, dir: 1 | -1, range: number): Unit | null 
 /**
  * 能打就不走（`0x43BCA7` → `0x43BBE6`）：**同一车道**、只沿 ±x 找射程内的敌人。
  *
- * 原作先随机一个首扫方向（`dir0`），命中就返回；没命中再反方向扫一次。这里等价地
- * 「两侧都扫、只有两侧都有敌人才抽一次 rng」，避免每周期给全场随机流白插一路消耗。
+ * 普通态（`0x43BD06`）：`n = 2`，先随机一个首扫方向（`dir0`），命中就返回；没命中再反方向扫一次。
+ * 这里等价地「两侧都扫、只有两侧都有敌人才抽一次 rng」，避免每周期给全场随机流白插一路消耗。
  * 接线了 `world.roll`（R115）时这一步走 `roll.bit()` = 原作 `rand() & 1`，
  * 保证「先看哪一侧」的**流消耗**与原作同源（结果仍是二选一，不影响伤害）。
+ *
+ * **撤退态**（`0x43BCD8` 的 `and eax,0x4000`）：原作把搜索降级成「**只朝当前朝向那一侧、只 1 格**」
+ * （`n=1` @0x43BCE1；`dir` 取 sprite 朝向 @0x43BCEE，不掷骰）。于是撤退者**背后的敌人永远选不到** ——
+ * 这就是「撤退不还手」的正证（`0x43D686`/`0x43D400` 那条攻击链本身一道状态门都没有）。
+ * 本作没有 facing 字段，而 `0x43BF26` 每次移动都把朝向写成「走的那一边」、撤退只朝本方边界走，
+ * 所以这里用 `retreatSx(u)` 代替朝向。第二道门 `0x43BD64`（撤退态 + 攻击方向与朝向相反 → 跳过）
+ * 已被这条单向扫描涵盖；将来若补 facing 字段，两道门应分开实现。
  */
 function adjacentEnemy(world: World, u: Unit, occ: Occ): Unit | null {
+  // `0x43BCA7` 撤退分支：只朝朝向那一侧探 1 格（`0x43BCE1` n=1）。
+  if (isRetreating(u)) return rowEnemyAt(u, occ, retreatSx(u), 1);
   const range = attackRangeOf(u);
   const left = rowEnemyAt(u, occ, -1, range);
   const right = rowEnemyAt(u, occ, +1, range);
@@ -3444,8 +3578,9 @@ export function settle(world: World): SettleResult {
   // 用 trunc 而不是 round，跟 web 层 `tireGain()`（FATIGUE_CORE）保持逐位一致。
   const tireGain = 15 + Math.trunc(world.tick / TICK_HZ / 10);
   const meritGain = Math.min(100, tireGain);
-  // 战后处置：招降 / 斩首 / 释放 + 掉落。只看战场已有的敌将/兵力，随机走同一个 world.rng，
-  // 所以同一个 ?seed= 下 settle 的结果（含 post）完全可复现。
+  // 战后处置：招降 / 斩首 / 释放 + 掉落。只看战场已有的敌将/兵力：开了原作乱数流
+  // （R115 `world.roll`）时走 roll，否则仍走 `world.rng`；两种模式下同一个 ?seed=
+  // settle 的结果（含 post）都完全可复现。
   // 注意 `capture.ts` 的 `PostBattleWorld.endReason` 只有 'troops'|'general' 两档；
   // R38 的 'retreat'（撤退离场）在战后处置上与"兵尽"同义，这里折成 'troops' 传过去。
   const post = resolvePostBattle(
@@ -3457,6 +3592,8 @@ export function settle(world: World): SettleResult {
     },
     world.data,
     world.rng,
+    [],
+    world.roll,
   );
 
   // R62 战后惩罚 `0x447520`：士气 −20、忠诚 −(10−节操)×2。

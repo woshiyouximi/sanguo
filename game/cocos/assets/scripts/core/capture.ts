@@ -11,10 +11,15 @@
  *
  * 本模块是纯逻辑（无 DOM、不读 localStorage），所有随机都走传入的 `rng`，
  * 保证 `?seed=N` 下同一局的结果可复现。
+ *
+ * R115：`resolvePostBattle()` 可再收一个原作乱数流 `roll`（`SangoRng`）。给了 `roll`
+ * 时，所有 `rand()%n` 点走 `roll.int(n)`、`rand()&1` 点走 `roll.bit()`，序列与 1998 年
+ * 的 `0x450132` 一致；不给（或传 null）时逐字节保持旧行为，老存档/老测试不受影响。
  */
 
 import type { GameData, General, Item } from '../types';
 import type { Side } from './battle';
+import type { SangoRng } from './sango_rng';
 
 // ---------------------------------------------------------------------------
 // 类型
@@ -45,6 +50,11 @@ export interface PostGeneral {
 export interface PostBattleState {
   data: GameData;
   rng: () => number;
+  /**
+   * 原作乱数流（R115）：非空时招降/斩首/被俘判定改从它取数，
+   * 此时 `rng` 不再被消费；缺省/null 时仍走 `rng` 的旧行为。
+   */
+  roll?: SangoRng | null;
   /** 已拿过的唯一物品 seq（`ONLYONE` 全局只出一次） */
   dropTaken?: string[];
   /** 胜方剩余兵力（用于被俘概率） */
@@ -220,14 +230,17 @@ export function recruitChanceOf(g: PostGeneral, state: PostBattleState): number 
  * - `t=0`：一次
  * - `t>=1`：`rand()%100 >= L && rand()%3 == 0`（短路：第一个不过就不掷第二个）
  */
-function rollRecruit(t: number, loyal: number, rng: () => number): boolean {
+function rollRecruit(t: number, loyal: number, rng: () => number, roll?: SangoRng | null): boolean {
+  // 原作这三条都是 `rand()%n`（`0x450117`）：给了 roll 时走 `roll.int(n)`（= rand()%n），
+  // 否则保持旧的 `floor(rng()*n)`，逐字节不变。
+  const draw = (n: number): number => (roll ? roll.int(n) : Math.floor(rng() * n));
   if (t < 0) {
-    if (Math.floor(rng() * 100) >= loyal) return true;
-    if (Math.floor(rng() * 100) >= loyal) return true;
+    if (draw(100) >= loyal) return true;
+    if (draw(100) >= loyal) return true;
     return false;
   }
-  if (t === 0) return Math.floor(rng() * 100) >= loyal;
-  return Math.floor(rng() * 100) >= loyal && Math.floor(rng() * 3) === 0;
+  if (t === 0) return draw(100) >= loyal;
+  return draw(100) >= loyal && draw(3) === 0;
 }
 
 /**
@@ -273,7 +286,7 @@ export function canRecruit(winnerSide: Side, loser: PostGeneral, state: PostBatt
   if (loyal > 50) {
     return { ok: false, chance: 0, reasons: [`忠诚 ${loyal}（50 < L ≤ 70）：硬门 0x13，必不降`] };
   }
-  const ok = rollRecruit(t, loyal, state.rng);
+  const ok = rollRecruit(t, loyal, state.rng, state.roll);
   const pct = (chance * 100).toFixed(1);
   reasons.push(`忠诚 ${loyal} / 节操 ${constancy} / t=${t}：成功率 ${pct}%`);
   reasons.push(ok ? '掷骰成功 → 归顺' : '掷骰失败');
@@ -325,8 +338,17 @@ export function dropWeight(item: Item, level: number, taken: string[]): number {
 /**
  * 一次加权轮盘。`taken` 里的唯一物品权重归零（`+0x20==1` → w=0）。
  * 战斗只有胜方掷一次（见 `resolvePostBattle`）。
+ *
+ * R115：`0x408EE2` 的轮盘落点是 `rand()%total`，给了 `roll` 时走 `roll.int(total)`
+ * （`int` 会先 trunc，权重表本身是整数时二者完全等价）；否则仍是旧的 `rng()*total`。
  */
-export function rollDrop(data: GameData, level: number, taken: string[], rng: () => number): DropItem | null {
+export function rollDrop(
+  data: GameData,
+  level: number,
+  taken: string[],
+  rng: () => number,
+  roll?: SangoRng | null,
+): DropItem | null {
   const pool: { item: Item; w: number }[] = [];
   let total = 0;
   for (const item of data.items) {
@@ -337,7 +359,7 @@ export function rollDrop(data: GameData, level: number, taken: string[], rng: ()
     }
   }
   if (total <= 0 || pool.length === 0) return null;
-  let r = rng() * total;
+  let r = roll ? roll.int(total) : rng() * total;
   for (const p of pool) {
     r -= p.w;
     if (r < 0) return { itemId: String(p.item.Sequence), name: p.item.Name };
@@ -361,12 +383,18 @@ export function rollDrop(data: GameData, level: number, taken: string[], rng: ()
  *
  * 单人局（没有 `officers`）时 rng 消耗顺序与旧版逐字一致：
  * 被俘掷骰 → 招降的两次掷骰 → 斩首掷骰（见 tests/capture.test.ts ④⑤）。
+ *
+ * R115：第 5 参 `roll` 给了原作乱数流时，上面每个掷骰点都改从 `roll` 取数
+ * （`rand()%n` → `roll.int(n)`），`rng` 一次也不消费；`roll` 缺省/null 时行为与旧版
+ * 逐字节相同。被俘判定用的 `0x40ED3A` 公式未解（`captureChance` 是最小模型），
+ * 因此这里用 `roll.float()` 保留同一 [0,1) 分布，而不是硬套某个 `%100`。
  */
 export function resolvePostBattle(
   world: PostBattleWorld,
   data: GameData,
   rng: () => number,
   taken: string[] = [],
+  roll?: SangoRng | null,
 ): PostBattleReport {
   if (!world.winner || world.winner === 'draw') return emptyReport();
   const winner: Side = world.winner;
@@ -378,6 +406,7 @@ export function resolvePostBattle(
   const state: PostBattleState = {
     data,
     rng,
+    roll: roll ?? null,
     dropTaken: taken,
     winnerSoldiers: ws.aliveCount,
     loserSoldiers: ls.aliveCount,
@@ -422,7 +451,9 @@ export function resolvePostBattle(
     const target: PostGeneral = { ...raw, alive: true, loyal, constancy: base.constancy };
 
     // 1) 是否被俘（公式未解，用 captureChance 的最小模型）；没抓住 = 逃脱（status 7）
-    if (rng() >= captureChance(target, state)) continue;
+    //    R115：公式未解 ⇒ 不能声称复刻某个 `rand()%n`，有 roll 时取 `roll.float()`
+    //    保持与旧 `rng()` 相同的 [0,1) 均匀分布。
+    if ((roll ? roll.float() : rng()) >= captureChance(target, state)) continue;
 
     // 2) 招降
     const verdict = canRecruit(winner, target, state);
@@ -440,7 +471,7 @@ export function resolvePostBattle(
       if (nowLoyal >= 50) entry.loyal = Math.floor((nowLoyal * 2) / 3);
       report.expBonus += target.level * 16;
       report.meritBonus += 15;
-    } else if (Math.floor(rng() * 100) < 50) {
+    } else if ((roll ? roll.int(100) : Math.floor(rng() * 100)) < 50) {
       // 3) 斩首 `0x40EF9A`（AI 侧 50%）
       report.executed.push(entry);
       report.expBonus += target.level * 32;

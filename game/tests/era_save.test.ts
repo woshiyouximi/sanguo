@@ -289,13 +289,17 @@ test('city.html: 内政 8 栏的 id 与标签都在，且不再有千分位', ()
   for (const id of ['fvTime', 'fvKing', 'fvCity', 'fvGate', 'fvGens', 'fvTroops', 'fvGold', 'fvPop']) {
     assert.ok(html.includes(`id="${id}"`), `缺 #${id}`);
   }
-  for (const k of ['時間', '君主', '城數', '關數', '武將數', '總兵數', '金錢', '人口']) {
+  // [F16] 「金」這個字要能看出是國庫還是本城金：兩處都要寫明，不能只寫一個「金」
+  for (const k of ['時間', '君主', '城數', '關數', '武將數', '總兵數', '國庫', '人口']) {
     assert.ok(html.includes(`<span class="k">${k}</span>`), `缺「${k}」标签`);
   }
+  assert.ok(html.includes('<span class="k">本城金</span>'), 'HUD 的「金」chip 要標明是本城金');
+  assert.ok(!/<span class="k">金錢<\/span>/.test(html), '舊的「金錢」標籤（口徑不明）應已改掉');
   assert.ok(!/toLocaleString\('en-US'\)/.test(stripComments(html)), '数字不该再过 en-US 千分位');
   assert.ok(html.includes("from './era.js'"), 'city.html 要 import era.js');
   assert.ok(/era\.eraTextOfMonth\(save\.month\)/.test(html), '页头年月走纪元');
   assert.ok(/M\.civicFields\(save, scenario\?\.cities \|\| \[\], ctx\)/.test(html), '渲染要调 civicFields');
-  // 布局骨架没被换掉：9 条命令的容器与结果面板还在
+  // 布局骨架没被换掉：命令的容器与结果面板还在（F7 后主区 #grid + 副区 #subgrid）
   assert.ok(html.includes('id="grid"') && html.includes('id="log"'));
+  assert.ok(html.includes('id="subgrid"'), '副令（情報／移動）區塊要存在');
 });

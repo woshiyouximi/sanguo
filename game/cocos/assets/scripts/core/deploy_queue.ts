@@ -1,12 +1,48 @@
 /**
  * 出陣隊列 —— 戰役編成層的「5 個武將槽」。
  *
- * 為什麼需要這一層：原作軍師技 `3 後選出陣`（分支 `Execute 34`）的 `0x44DE44` 只有一句
- * 「成功」日誌、零狀態寫入（`work/dis_battle_B_44D450.txt:763`）；`ATTRIB=1` 表明它是
- * **戰前選擇**類（`docs/03a-武将技表MAGIC.md:297`），真實語義是「使用方在敵方之後選將/兵種」
- * （`project/109` §5.3）。這件事不發生在戰場裏，而發生在**部隊編成**：
- * `docs/07b_存档字段详解.md` §6 的 Obj3 部隊池是 128 × 0x6C，每隊固定 5 個武將槽
- * （`+0x010 / +0x014 / +0x018 / +0x01C / +0x020` = u32 Idx(General*)），槽序即出陣序。
+ * ## 原作反彙編結論（R81：`work/r81_exec34/REPORT.md`，把「3 槽」從 [推測] 變 [反彙編]）
+ *
+ * 原作**沒有「前 3 槽上陣」這種字段**。戰場那一側的數據結構是
+ * `army = [0x4A668C]`（A 軍）/ `[0x4A6690]`（B 軍），布局：
+ *   · `army+0x00` = entry 數（部隊池里該隊的武將數，逐條 `memcpy 0x48` 填進來）
+ *   · `army+0x04` = **唯一的「出陣下標」**（`0x446EE8` 處初始化 `mov [ecx+4],0`）
+ *   · `army+0x1C` = entries[] 基址，步長 `0x48`
+ *   · `army+0x454 / +0x458` = 進戰場時抄給單位 `+0x44 / +0x40` 的兩個值
+ *
+ * `0x446F45`（全程序只有 `0x448690` 里兩個調用點）就是「取當前出陣單位」：
+ * ```
+ * 00446F48  mov  eax, [ebp+8]        ; army
+ * 00446F4B  mov  ecx, [eax+4]        ; ← 出陣下標，只有一個
+ * 00446F4E  imul ecx, ecx, 0x48
+ * 00446F54  lea  eax, [edx+ecx+0x1C] ; &army->entries[idx]
+ * ```
+ * `0x448690` 每側只建 **1** 個單位（`g_unitA = 0x446F45([0x4A668C])`、
+ * `g_unitB = 0x446F45([0x4A6690])`，然後 `call 0x43A1C4` 初始化這兩個），
+ * 沒有循環、沒有 count 上限、也沒有 `cmp ...,3`。
+ *
+ * 軍師技 `3 後選出陣`（`Execute 34`）的分支 `0x44DE44` 全文只有：
+ * ```
+ * 0044DE44  push 0x491900        ; Big5 "成功"
+ * 0044DE4C  push [ebp-0x1C]      ; 消息欄上下文
+ * 0044DE4D  call 0x46DAE0        ; 打一句話
+ * 0044DE55  jmp  0x44E6C7        ; 函數尾
+ * ```
+ * **零狀態寫入** —— 它不立任何旗標、不動 `army+0x04`、不回寫存檔。
+ *
+ * 編成頁那張「選出陣武將」列表（窗口過程 `0x44960B`，A 側寫 `0x449853`、B 側寫 `0x4496D1`）
+ * 點選時做的是 `army->+0x04 = 列表首行 + 光標`，界限是**列表總數**
+ * （`cmp idx, [0x491094]` / `[0x491034]`，帶滾動 `[0x49108C]`），
+ * 也就是「5 個槽裏任選一員當出陣武將」，不是「前 3 槽」、也不是「後 3 位」。
+ * 敵方那一側由 `0x4042ED(army, 1) → 0x4040F3(army)` 自動選（`0x447DF1` / `0x447E34`）。
+ *
+ * 所以本檔案裏：
+ *   · `DEPLOY_SLOTS` = 5 槽 —— 對應原作部隊池的 5 個武將槽（槽序即列表序）；
+ *   · `DEPLOY_FIELD_SLOTS` = 3 —— 是**本重製版**戰場寬度（每側同時 3 個單位），
+ *     **与 Exec34 無關**，別再拿它當「後選出陣可重排的槽數」；
+ *   · `ORIGINAL_DEPLOY_PICK_SLOTS` = 1 —— 原作每側真正可決定的「出陣位」個數；
+ *   · 「後選出陣」= **敵方先定、我方後選**（時點/順序），我方用 `pickDeploy()` 把
+ *     任意一員提到出陣位（第 0 槽），其餘槽相對順序不動。
  *
  * 本檔案只做**純邏輯**：不碰 DOM、不碰 localStorage、不 import `battle.ts`，
  * 所以三個消費端共用同一份 ——
@@ -14,9 +50,8 @@
  *   · `game/cocos/assets/scripts/DeployRoot.ts`（同步副本，`work/cocos_sync/sync_core3.mjs`）、
  *   · `game/tests/deploy_queue.test.ts`（node）。
  *
- * 槽位語義（對照原作 5 槽）：
- *   · 最多 `DEPLOY_SLOTS` = 5 槽，**順序即出陣順序**；前 `DEPLOY_FIELD_SLOTS` = 3 槽是
- *     「上陣」，其餘 2 槽預備 —— 後選出陣允許在敵方確定之後重排的就是前 3 槽。
+ * 槽位語義：
+ *   · 最多 `DEPLOY_SLOTS` = 5 槽，**順序即出陣順序**。
  *   · 每槽 `{ general, troop, troops }`：武將名（`generals.json` 的 NAME）、兵種單字
  *     （原作 `UseForce` 的 刀/槍/弓/…）、帶兵數（1..100，與 `troopCapOf()` 同上限）。
  *
@@ -28,8 +63,33 @@
 /** 每方最多 5 個武將槽（原作 Obj3 部隊池，docs/07b §6）。 */
 export const DEPLOY_SLOTS = 5;
 
-/** 前 3 槽「上陣」，後 2 槽預備；後選出陣只重排這 3 槽。 */
+/** 前 3 槽是本重製版的「上陣區」（戰場每側 3 個單位）——**不是** Exec34 的槽數。 */
 export const DEPLOY_FIELD_SLOTS = 3;
+
+/**
+ * 原作一側的「出陣位」個數：**恰好 1**。
+ * `0x446F45` 只取 `army->entries[army->+0x04]` 這一個 entry，`0x448690` 每側只建 1 個單位；
+ * `0x44DE44`（Execute 34）零狀態寫入。所以「後選出陣」放開的是「誰站上出陣位」，
+ * 不是「重排前 3 槽」。
+ */
+export const ORIGINAL_DEPLOY_PICK_SLOTS = 1;
+
+/** 反彙編取證：`work/orig_numbers/text_dis.tsv` 里的原始指令（位址 → 指令文字）。 */
+export const ORIGINAL_DEPLOY_EVIDENCE: ReadonlyArray<readonly [string, string]> = [
+  ['00446F4B', 'mov ecx, dword ptr [eax + 4]'],
+  ['00446F4E', 'imul ecx, ecx, 0x48'],
+  ['00446F54', 'lea eax, [edx + ecx + 0x1c]'],
+  ['0044869C', 'call 0x446f45'],
+  ['004486A4', 'mov dword ptr [0x4a8a24], eax'],
+  ['004486EC', 'call 0x446f45'],
+  ['004486F4', 'mov dword ptr [0x4a8a20], eax'],
+  ['0044873F', 'call 0x43a1c4'],
+  ['0044DE44', 'push 0x491900'],
+  ['0044DE4D', 'call 0x46dae0'],
+  ['0044DE55', 'jmp 0x44e6c7'],
+  ['004496D1', 'mov dword ptr [ecx + 4], edx'],
+  ['00449853', 'mov dword ptr [eax + 4], ecx'],
+];
 
 /** 沒給兵種時的缺省值：朴刀（原作兵種表下標 0，`TROOP_BY_CHAR.刀`）。 */
 export const DEFAULT_TROOP = '刀';
@@ -183,7 +243,9 @@ export function canMove(from: number, to: number, limit: number = DEPLOY_SLOTS):
 
 /**
  * 把第 `from` 槽移到第 `to` 槽（其餘槽相對順序不變）。
- * `limit` 之外的下標（預備槽）在後選出陣時不給動 —— 傳 `DEPLOY_FIELD_SLOTS` 即可。
+ * `limit` 之外的下標（預備槽）不給動 —— 傳 `DEPLOY_FIELD_SLOTS` 就是「只在本重製版的 3 行
+ * 上陣區裏拖」。這只是 UI 的拖動範圍，**不是** Exec34 的授權範圍（後選出陣的授權見
+ * `chooseAfterFoe` / `pickDeploy`）。
  */
 export function moveSlot(queue: unknown, from: number, to: number, limit: number = DEPLOY_SLOTS): DeployQueue {
   const q = normalizeQueue(queue);
@@ -245,34 +307,80 @@ export function swapSides(a: unknown, b: unknown): { a: DeployQueue; b: DeployQu
   return { a: normalizeQueue(b), b: normalizeQueue(a) };
 }
 
-/** 「後選出陣」的編成結果：敵方先定，我方在敵方之後才填/重排前 3 槽。 */
+/**
+ * 「後選出陣」的編成結果：敵方先定（`foe`），我方在敵方之後才選（`mine`）。
+ *
+ * 注意 `fieldSlots` —— 原作每側只有 **1** 個出陣位（`0x446F45` 的 `[eax+4]` 單一下標、
+ * `0x448690` 每側只建 1 個單位），所以這裏是 1，不是 3。重製版的「3 行上陣區」
+ * （`DEPLOY_FIELD_SLOTS`）是戰場寬度，與 Exec34 無關。
+ */
 export interface AfterFoePlan {
   /** 敵方隊列：先定，後選方**不得**再改 */
   foe: DeployQueue;
   /** 我方隊列：敵方確定之後才填 */
   mine: DeployQueue;
-  /** 可以重排的上陣槽數（= 前 N 槽） */
+  /** 原作可決定的出陣位數 = `ORIGINAL_DEPLOY_PICK_SLOTS`（1） */
   fieldSlots: number;
-  /** 可重排的槽下標，即 `[0, 1, 2]` */
+  /** 可決定的槽下標，即 `[0]`（出陣位） */
   reorderable: number[];
+  /** 我方可以拿來當出陣位的槽下標 = `0 .. mine.length-1`（列表裏任選一員） */
+  pickable: number[];
+  /** 決策順序：敵方先定（`foe`），我方後選（`mine`） */
+  pickOrder: 'foe-first';
+  /** 敵方先定的出陣武將名（`foe` 為空時 `null`） */
+  foeLeader: string | null;
+  /** 我方當前的出陣武將名（`mine` 為空時 `null`） */
+  mineLeader: string | null;
 }
 
 /**
- * 後選出陣（seq 3 / Execute 34）：使用方在**敵方之後**選將/兵種。
+ * 後選出陣（seq 3 / Execute 34）：使用方在**敵方之後**選出陣武將。
  *
- * 純語義函數，不做 UI、不改 world：把「敵方隊列已定、我方前 3 槽可重排、後 2 槽預備」
- * 這件事變成一條可測的契約。戰場內核只需要 `ArmyStatus.chooseAfterFoe = true` 這個旗標，
- * 真正的重排落在編成頁（`deploy.html` / `DeployRoot.ts`）用同一份 `moveSlot(..., limit)`。
+ * 反彙編依據（`work/r81_exec34/REPORT.md`）：
+ *   · `0x44DE44`（Execute 34 分支）只有一句「成功」消息，**零狀態寫入**；
+ *   · `0x446EE8` 把出陣下標初始化成 0，`0x446F45` 只取 `army->entries[army->+0x04]` 一個；
+ *   · 編成頁列表（`0x44960B` 窗口過程，A 側寫 `0x449853`、B 側寫 `0x4496D1`）
+ *     點選時 `army->+0x04 = 列表首行 + 光標`，界限是**列表總數**（任意一員），不是 3；
+ *   · 敵方由 `0x4042ED(army, 1) → 0x4040F3(army)` 先自動選（`0x447DF1` / `0x447E34`）。
+ *
+ * 所以契約是：**敵方先定且不得改；我方可把任意一員提到出陣位**（`pickDeploy`），
+ * 而不是「重排前 3 槽」。`fieldSlots` 參數保留只為兼容舊調用，任何 >1 的值都夾到 1。
  */
 export function chooseAfterFoe(
   foe: unknown,
   mine: unknown,
-  fieldSlots: number = DEPLOY_FIELD_SLOTS,
+  fieldSlots: number = ORIGINAL_DEPLOY_PICK_SLOTS,
 ): AfterFoePlan {
-  const n = Math.max(0, Math.min(DEPLOY_SLOTS, Math.trunc(Number(fieldSlots)) || 0));
+  const f = normalizeQueue(foe);
+  const m = normalizeQueue(mine);
+  const raw = Math.trunc(Number(fieldSlots));
+  const n = Math.max(0, Math.min(ORIGINAL_DEPLOY_PICK_SLOTS, Number.isFinite(raw) ? raw : 0));
   const reorderable: number[] = [];
   for (let i = 0; i < n; i++) reorderable.push(i);
-  return { foe: normalizeQueue(foe), mine: normalizeQueue(mine), fieldSlots: n, reorderable };
+  const pickable: number[] = [];
+  for (let i = 0; i < m.length; i++) pickable.push(i);
+  return {
+    foe: f,
+    mine: m,
+    fieldSlots: n,
+    reorderable,
+    pickable,
+    pickOrder: 'foe-first',
+    foeLeader: f.length > 0 ? f[0]!.general : null,
+    mineLeader: m.length > 0 ? m[0]!.general : null,
+  };
+}
+
+/**
+ * 後選方落地：把第 `index` 槽提到**出陣位**（第 0 槽），其餘槽相對順序不變。
+ *
+ * 對應原作 `army->+0x04 = 列表首行 + 光標`（`0x449853` / `0x4496D1`）：選誰，誰就站出陣位，
+ * 原第 0 槽順延。下標越界/非整數/已在 0 槽 → 原樣返回（不拋異常）。
+ */
+export function pickDeploy(queue: unknown, index: number): DeployQueue {
+  const q = normalizeQueue(queue);
+  if (!Number.isInteger(index) || index <= 0 || index >= q.length) return q;
+  return moveSlot(q, index, 0, DEPLOY_SLOTS);
 }
 
 /** 隊列的緊湊串（給 URL / 日誌）：`張飛:槍:80;關羽:刀:100`。 */

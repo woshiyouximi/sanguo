@@ -24,6 +24,19 @@
  *    （`(sx,sy)` + 两组权重），抽样/占位互斥/瞬移/40 帧滑动都在 `battle.ts step()` 里。
  *    这与原作分工一致：命令字只是 `army+0x94+idx*4` 的数据，规则在更新器里。
  *
+ * R83 反汇编真值（2026-11，证据与脚本在 `work/r83_steps/`，全部 `[确认]`）：
+ *  - **一格 = 一次行动 tick**：方向表 `0x48E560` 8 项 = (1,0)(1,-1)(0,-1)(-1,-1)(-1,0)
+ *    (-1,1)(0,1)(1,1)，分量恒为 −1/0/+1；`0x43C4C0` 只试 `(x0+dx, y0+dy)`
+ *    （`0043C52D add edx,[ebp-0x30]`），没有「半格」「两格」。
+ *  - **时长 40 帧/格**：`0x43B574` 复位 `[u+0x34] = 0x28`
+ *    （`0043B5DE c7 41 34 28 00 00 00`）；撤退态 `and eax,0x4000` 命中后改 `0x2e`=46
+ *    （`0043B5FD c7 40 34 2e 00 00 00`），主将再追加 `2*(F(敌军团)−F(己军团))`
+ *    （`0043B64A..0043B653`；F = `[x+0x40]->[0x48]->int16[+0x40]`，字段语义【仍未定】）。
+ *  - **滑动 40 帧**：`0x43BF26` 调 `0x43BE42` 时第 4 参写死 `0x28`（`0043BF5F push 0x28`），
+ *    `0x43BE42` 里 `idiv` 用它把像素位移除成 16.16 速度（`0043BEF9`）。
+ *  - 一格 = 96×72 px、格心 (0x30,0x24)：`0x43A4E0` `imul eax,0x60; add eax,0x30` /
+ *    `imul edx,0x48; add edx,0x24`；抖动 ±0x18/±0x12 px，夹取 ±0x780000/±0x5a0000。
+ *
  * 与作物的差异（每处都标了 `[推测]`，见 `project/147_部队指令层.md` §4 与 158 §5）：
  *  - 原作 8 个命令槽是「主将 + 7 支部队」，本作每个士兵是独立 `Unit`，
  *    所以按**位置**切前/後/左/右/中五军（`classifySoldiers`），再投影回槽 1..5；
@@ -37,7 +50,6 @@ import {
   allRush,
   GRID_H,
   planDirected,
-  planToward,
   requestRetreat,
   retreatStepPlan,
   rushStepPlan,
@@ -240,6 +252,13 @@ const ENTRY_OF_LABEL: Record<string, EntrySpec> = {
 /**
  * 33 组 × 前 4 条 label（照抄串表 `0x48F94C` 起，组步长 `0x48`）。
  * 第 5/6 条恒为 `全軍待機` / `全軍突擊`，由 `SLOT_HOLD_RUSH` 补。
+ *
+ * R83 复核（`work/r83_steps/menu_dump.mjs`，Big5 解码）：
+ *  - 串表 `0x48F94C..0x490294` = **198 项 × 12 字节**，Big5（**不是 GBK**，GBK 解出乱码）；
+ *  - 指针表 `0x48EB60` 198 项，每项恰指向串表 +12 递增，198 个互不相同；
+ *  - 执行表 `0x48EE78` 198 dword，索引 `= [0x4a6674](阵形号)*0x18 + slot*4`
+ *    （`004450CD` 段 `imul ecx,ecx,0x18` / `call [ecx+eax*4+0x48ee78]`），只有 18 个不同目标；
+ *  - 本表 33 行 × 4 项与串表逐项一致，slot4/5 的 33 项各只有 1 种取值。
  */
 const GROUP_LABELS: readonly (readonly [string, string, string, string])[] = [
   // 0-3
@@ -270,6 +289,9 @@ const GROUP_LABELS: readonly (readonly [string, string, string, string])[] = [
   ['前軍前進', '前軍後退', '前軍上移', '前軍下移'], // 20
   ['全軍前進', '全軍後退', '左右分散', '中央集中'], // 21
   ['前軍前進', '伏軍攻擊', '前軍分散', '前軍集中'], // 22
+  // 23：原作数据自相矛盾 —— 串表 slot0=`前軍前進`/slot1=`伏軍攻擊`，但执行表
+  // slot0=0x44501B（伏軍攻擊）、slot1=0x4449A9（前軍前進），两者正好互换。
+  // 本文件按**串表（按钮文字）**建表，不跟随执行表的错位；见 `work/r83_steps/REPORT.md` §4。
   ['前軍前進', '伏軍攻擊', '前軍分散', '前軍集中'], // 23
   ['前軍前進', '伏軍攻擊', '前軍分散', '前軍集中'], // 24
   ['前軍前進', '伏軍攻擊', '前軍分散', '前軍集中'], // 25
@@ -285,7 +307,12 @@ const GROUP_LABELS: readonly (readonly [string, string, string, string])[] = [
 /** 33 组里第 5/6 条恒为这两条（`[确认]`，198 项无一例外） */
 const SLOT_HOLD_RUSH = ['全軍待機', '全軍突擊'] as const;
 
-/** 组号 × 33 的行数自检：33 组是原作数据，少一行都要在测试里炸出来 */
+/**
+ * 组号 × 33 的行数自检：33 组是原作数据，少一行都要在测试里炸出来。
+ *
+ * 出处：`0x4A6674`（阵形号，取值 0..32）× `0x18` 索引 `0x48EE78` 执行表 198 项 ÷ 6 = 33 组；
+ * 串表 198 项 × 12 字节 = `0x948` 字节，与 `0x48F94C..0x490294` 的长度严丝合缝。
+ */
 const GROUP_COUNT = 33;
 
 /** 个别「同名 label 但入口不同」的槽位修正（key = `组:槽`） */
@@ -547,19 +574,38 @@ export function applyArmyCmdKind(world: World, side: Side, kind: ArmyCmdKind): b
 // `0x43BF26`/`0x43BE42`），与本层的分工和原作一致：先写命令字，更新器再按字分派。
 // ---------------------------------------------------------------------------
 
-/** 命令字（`army+0x94 + idx*4`）：`0 待機 / 1 前進 / 2 後退 / 3 上移 / 4 下移 / 5 分散 / 6 集中 / 7 突擊 / 8 撤退 / 9 歸陣` */
-const CMD_HOLD = 0;
-const CMD_ADVANCE = 1;
-const CMD_BACK = 2;
-const CMD_SHIFT_UP = 3;
-const CMD_SHIFT_DOWN = 4;
-const CMD_SPREAD = 5;
-const CMD_FOCUS = 6;
-const CMD_RUSH = 7;
-const CMD_RETREAT = 8;
-const CMD_RETURN = 9;
+/**
+ * 命令字（`army+0x94 + idx*4`）：`0 待機 / 1 前進 / 2 後退 / 3 上移 / 4 下移 / 5 分散 / 6 集中 / 7 突擊 / 8 撤退 / 9 歸陣`
+ *
+ * 出处：主将分派 `0x43CF07`，`cmp cmd,8; ja 0x43CF89` 后
+ * `jmp dword ptr [cmd*4 + 0x43cf8d]`（`0043CF37..0043CF40`），表 9 项实测：
+ *   [0]=0x43CF71(→0x43C907 待機+0x43C47E) [1]=0x43CF47(→0x43C758) [2]=0x43CF55(→0x43C795)
+ *   [3..7]=0x43CF89(ret) [8]=0x43CF63(→0x43C7E3)。
+ * 小队分派 `0x43CFB1`，`cmp cmd,9; ja 0x43D0C5` 后 `jmp [cmd*4 + 0x43d0c9]`
+ * （`0043CFE1..0043CFEE`），表 10 项实测：
+ *   [0]=0x43CFF5(→0x43C907) [1]=0x43D006(→0x43C921) [2]=0x43D017(→0x43C9EF)
+ *   [3]=0x43D028(→0x43CA7B) [4]=0x43D039(→0x43CAB8) [5]=0x43D0AB(→0x43CB87)
+ *   [6]=0x43D09D(→0x43CAF5) [7]=0x43D047(→0x43CDD3+0x43C888) [8]=0x43D0B9(→0x43CC95)
+ *   [9]=0x43D072(→0x43C888(u, army+8, army+0xc))。
+ */
+const CMD_HOLD = 0; //       0x43CF8D[0]/0x43D0C9[0] → 0x43C907（0043C90A push 0x48e6a0）
+const CMD_ADVANCE = 1; //    0x43CF8D[1] → 0x43C758（0043C767）/ 0x43D0C9[1] → 0x43C921（0043C939）
+const CMD_BACK = 2; //       0x43CF8D[2] → 0x43C795（0043C798 push 0x100）/ 0x43D0C9[2] → 0x43C9EF
+const CMD_SHIFT_UP = 3; //   0x43CF8D[3] → 0x43CF89（ret，主将无效）/ 0x43D0C9[3] → 0x43CA7B（0043CA8A push 1）
+const CMD_SHIFT_DOWN = 4; // 0x43CF8D[4] → 0x43CF89（ret）/ 0x43D0C9[4] → 0x43CAB8（0043CAC7 push -1）
+const CMD_SPREAD = 5; //     0x43CF8D[5] → 0x43CF89（ret）/ 0x43D0C9[5] → 0x43CB87（0043CB97 cmp eax,1）
+const CMD_FOCUS = 6; //      0x43CF8D[6] → 0x43CF89（ret）/ 0x43D0C9[6] → 0x43CAF5（0043CAFE [0x48e4d0]）
+const CMD_RUSH = 7; //       0x43CF8D[7] → 0x43CF89（ret）/ 0x43D0C9[7] → 0x43CDD3（0043CDDF [ecx+0x38f4]）
+const CMD_RETREAT = 8; //    0x43CF8D[8] → 0x43C7E3（0043C81E push 0x4000）/ 0x43D0C9[8] → 0x43CC95（0043CCD0）
+const CMD_RETURN = 9; //     0x43CF8D 越界（ja 0x43CF89）/ 0x43D0C9[9] → 0x43D072（0043D093 call 0x43c888）
 
-/** 中央集中的目标行：原作 `0x48E4D0 = 6`（不是 `(14-1)/2 = 6.5`，见 project/155 §2.2） */
+/**
+ * 中央集中的目标行：原作 `0x48E4D0 = 6`（不是 `(14-1)/2 = 6.5`）。
+ *
+ * 0x48E4D0: 反彙編 `0043CAFE 8b0dd0e44800 mov ecx,[0x48e4d0]` /
+ *           `0043CB04 2b480c sub ecx,[eax+0xc]` / `0043CB0E 743b je 0x43cb4b`
+ *           —— dy = 6 − y，归到第 6 行才允许前压（`0x48E898`）。
+ */
 export const FOCUS_ROW = 6;
 
 function foeSideOf(side: Side): Side {
@@ -653,66 +699,114 @@ function isFrontline(side: Side, cell: { gx: number }, enemyArmy: { gx: number }
 }
 
 /**
- * 单个命令字 → 抽格计划。逐条对应 `project/155_部队指令语义.md` §2.2 的表：
+ * 朝目标格的基向量（`0x43C888`）：**dx、dy 各自独立取符号**，两轴都非零就是斜走一格。
  *
- * | 命令 | 基向量 | 权重 | 备注 |
- * |------|--------|------|------|
- * | 0 待機 | — | `0x48E6A0` 全 0 | 一格不走（不抽样） |
- * | 1 前進 | 士兵 `(A?-1:+1, 0)`；主将同 | `0x48E6E8`(80/10/10) / `0x48E730`(100/0) | 前线 3 格内改朝敌军团格 |
- * | 2 後退 | `(A?+1:-1, 0)` | `0x48E778`(80/10/10) | **方向与敌人无关**（sy=0）；锥形里 10% 各走一次 ±45° |
- * | 3 上移 | `(0, +1)` | `0x48E7C0`(100/0) | x 分量恒 0，A/B 不镜像 |
- * | 4 下移 | `(0, -1)` | `0x48E7C0` | 同上 |
- * | 5 分散 | `(sx,0)` / `(sx,±1)` | 三档都是 `0x48E6E8` 锥形 | `y∉[4,9]` 纯前进；`y≥7` 向 +y；`y<7` 向 −y |
- * | 6 集中 | `(0, sign(6−y))`，归行后 `(sx,0)` | `0x48E850`(80/10/10) / `0x48E898`(35,5,…,5,35) | 目标行 6；归行后 35% 正前/35% 正后/六斜各 5% |
- * | 7 突擊 | 朝缓存敌 unit 格 | `0x48E808`(80/10/10) | 目标选择见 `rushTargetOf`（`army+0x38F4`） |
- * | 8 撤退 | `(A?+1:-1, 0)` | `0x48E8E0`/直线 | 同时置 `0x4000`（由 `requestRetreat` 做） |
- * | 9 歸陣 | 朝己方军团格 | `0x48E808` | `0x43C888(u, army+8, army+0xc)` |
+ * 反彙編 `0043C888..0043C8F0`：`0043C894 sub ecx,[eax+8]`（dx）、`0043C8A0 sub eax,[edx+0xc]`（dy）、
+ * `0043C8A6..0043C8BF` 对 dx 做 `cmp/jle/setge/dec`、`0043C8C8..0043C8E1` 对 dy 同样做一遍，
+ * 然后 `0043C8EA push 0x48e808` 调 `0x43C4C0`。
+ *
+ * 注意 `battle.ts` 的 `planToward` 是「先沿 x 对齐，x 相同才走 y」（`sy = sx!==0 ? 0 : sign(dy)`），
+ * 那是本作早期为连续走位写的，**不是** `0x43C888` 的语义；本文件的三处「朝目标一步」
+ * （前進/分散的前线分支、歸陣）按真值走这里。
+ */
+function planSignToward(
+  from: { gx: number; gy: number },
+  to: { gx: number; gy: number },
+  w1: readonly number[],
+  w2: readonly number[],
+  kind: StepPlan['kind'],
+): StepPlan | null {
+  const sx = Math.sign(to.gx - from.gx);
+  const sy = Math.sign(to.gy - from.gy);
+  // 已在目标格：`0x43C4C0(u,0,0,desc)` → `0x43C2A5` 索引 4 → `0x48E580[4] = -1` ⇒ 一项都不抽。
+  if (sx === 0 && sy === 0) return null;
+  return planDirected(sx, sy, w1, w2, kind);
+}
+
+/**
+ * 单个命令字 → 抽格计划。逐条对应 `project/155_部队指令语义.md` §2.2 的表（R83 已按反彙編复核）：
+ *
+ * | 命令 | 基向量 | 权重（desc） | 反彙編入口 |
+ * |------|--------|--------------|------------|
+ * | 0 待機 | — | `0x48E6A0` 全 0 | 主将 `0x43CF71`/小队 `0x43CFF5` → `0x43C907` |
+ * | 1 前進 | 主将 `(A?-1:+1,0)`；士兵同，前方 3 格内改朝敌军团 | `0x48E5C8` 100/0（主将）/ `0x48E6E8` 80/10/10（士兵） | `0x43C758`（`0043C767`）/ `0x43C921`（`0043C939`、`0043C9C2`） |
+ * | 2 後退 | `(A?+1:-1,0)`，**与敌人无关** | `0x48E5C8` 100/0（主将，先置 `0x100`）/ `0x48E778` 80/10/10（士兵） | `0x43C795`（`0043C798`）/ `0x43C9EF`（`0043CA4D`） |
+ * | 3 上移 | `(0,+1)` | `0x48E7C0` 100/0 | `0x43CA7B`（`0043CA8A`，A/B 相同） |
+ * | 4 下移 | `(0,-1)` | `0x48E7C0` 100/0 | `0x43CAB8`（`0043CAC7`，A/B 相同） |
+ * | 5 分散 | 前线→朝敌军团；否则 `(sx,0)`/`(sx,+1)`/`(sx,-1)` | 全是 `0x48E6E8` | `0x43CB87`（`0043CB97`、`0043CBCD`、`0043CBD6`、`0043CC19`） |
+ * | 6 集中 | `(0,sign(6−y))`，归行后 `(sx,0)` | `0x48E850` 80/10/10 / `0x48E898` 35,5,5,5,5,5,5,35 | `0x43CAF5`（`0043CAFE`、`0043CB32`、`0043CB57`） |
+ * | 7 突擊 | 朝缓存的敌 unit 格（`army+0x38F4`） | `0x48E808` | `0x43CDD3` → `0x43D068 call 0x43c888`（只走小队表） |
+ * | 8 撤退 | `(A?+1:-1,0)` | `0x48E658` 直线（主将）/ `0x48E8E0` 80/10/10（士兵） | `0x43C7E3`（`0043C7F2`）/ `0x43CC95`（`0043CCA4`），都置 `0x4000` |
+ * | 9 歸陣 | 朝己方军团格（`u+0x40` 的 `+8/+0xc`） | `0x48E808` | `0x43D072` → `0043D093 call 0x43c888` |
+ *
+ * 时长：每条指令都是「**一个行动 tick = 一格**」，tick 间隔由 `0x43B574` 定 —— 普通 **40 帧**
+ * （`0043B5DE [u+0x34]=0x28`）、撤退态 **46 帧**（`0043B5FD [u+0x34]=0x2e`）、撤退中的主将
+ * 再 `+2*(F(敌军团)−F(己军团))`（`0043B64A..0043B653`）。视觉滑动固定 40 帧
+ * （`0043BF5F push 0x28`），所以下令后第 1 格最早 1 帧、最晚 40 帧出现，之后严格每 40 帧一格
+ * （撤退 46 帧）。
  */
 export function cmdStepPlan(world: World, side: Side, u: Unit, cmd: number): StepPlan | null {
   const c = unitCell(u);
   const forward = side === 'A' ? -1 : 1;
   const enemyArmy = armyCellOf(world, foeSideOf(side));
-  // 主将 cmd 3..7 = 无操作：`0x43CF07` 表里槽 0 的 3..7 全指向 `0x43CF89`（直接 ret）。
+  // 主将 cmd 3..7 = 无操作：`0x43CF07` 的跳表 `0x43CF8D` 里 [3..7] 五项全指向 `0x43CF89`（直接 ret）。
   if (u.isGeneral && cmd >= CMD_SHIFT_UP && cmd <= CMD_RUSH) return null;
   switch (cmd) {
     case CMD_HOLD:
       return null;
     case CMD_ADVANCE:
-      // 主将：`0x43C758` 纯 ±x 直线（`0x48E5C8`），不参与"前线 3 格"改道。
+      // 主将：`0043C767..0043C774` desc `0x48E5C8`（100/0）+ `(A?-1:+1, 0)` 直线。
       if (u.isGeneral) return planDirected(forward, 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'advance');
+      // 士兵前线：`0043C9C2..0043C9EE` → `0x43C888(u, 敌军团+8, 敌军团+0xc)`，desc `0x48E808`。
       if (enemyArmy && isFrontline(side, c, enemyArmy)) {
-        return planToward(c, enemyArmy, STEP_W_CONE, STEP_W_CONE_WIDE, 'advance');
+        return planSignToward(c, enemyArmy, STEP_W_CONE, STEP_W_CONE_WIDE, 'advance');
       }
+      // 否则 `0043C988` 起：desc `0x48E6E8` = 80/10/10（第二组 60/15/15/5/5 挤友军）。
       return planDirected(forward, 0, STEP_W_CONE, STEP_W_CONE_WIDE, 'advance');
     case CMD_BACK:
-      // `0x43C9EF`：`sx=(A?+1:-1), sy=0`。**没有 y 分量，也不看敌人在哪。**
+      // 主将 `0x43C795`：先 `0043C798 push 0x100; call 0x43b51e`（後退旗标），再
+      // `0043C7B5`(A)/`0043C7CC`(B) 用 desc `0x48E5C8` —— **100/0 直线，不是锥形**（R83 修正）。
+      if (u.isGeneral) return planDirected(-forward, 0, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'back');
+      // 士兵 `0x43C9EF`：`0043CA4D`(A)/`0043CA64`(B) desc `0x48E778` = 80/10/10。
+      // 第一小队特例 `0x48E7C0` 要 `[army+0x64]!=0 && [u+0x20]==1`（`0043C9F8`/`0043CA01`），
+      // 而 `army+0x64` 全 .text 只有两处写 0 ⇒ 该分支不可达（project/155 §6.1）。
       return planDirected(-forward, 0, STEP_W_CONE, STEP_W_CONE_WIDE, 'back');
     case CMD_SHIFT_UP:
+      // `0043CA8A`：push desc `0x48E7C0`、sy=+1、sx=0；B 侧 `0043CAA1` 字节级相同。
       return planDirected(0, 1, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'shiftUp');
     case CMD_SHIFT_DOWN:
+      // `0043CAC7`：desc `0x48E7C0`、sy=−1、sx=0。
       return planDirected(0, -1, STEP_W_STRAIGHT, STEP_W_STRAIGHT, 'shiftDown');
     case CMD_SPREAD: {
+      // `0043CB8F call 0x43c831` == 1 → `0x43C888(u, 敌军团)`（`0043CBBD`），desc `0x48E808`。
       if (enemyArmy && isFrontline(side, c, enemyArmy)) {
-        return planToward(c, enemyArmy, STEP_W_CONE, STEP_W_CONE_WIDE, 'spread');
+        return planSignToward(c, enemyArmy, STEP_W_CONE, STEP_W_CONE_WIDE, 'spread');
       }
-      // `0x43CB87`：`!(y>3 && y<10)` → 纯前进；`y>=7` → +y；否则 −y。
+      // `0043CBCD cmp [u+0xc],3` / `0043CBD6 cmp,0xa`：`!(y>3 && y<10)` → (sx,0)。
       if (!(c.gy > 3 && c.gy < 10)) return planDirected(forward, 0, STEP_W_CONE, STEP_W_CONE_WIDE, 'spread');
+      // `0043CC19 cmp [u+0xc],7`：`y>=7` → (sx,+1)（`0043CC2B`/`0043CC42`）；否则 (sx,−1)（`0043CC65`/`0043CC7C`）。
       if (c.gy >= 7) return planDirected(forward, 1, STEP_W_CONE, STEP_W_CONE_WIDE, 'spread');
       return planDirected(forward, -1, STEP_W_CONE, STEP_W_CONE_WIDE, 'spread');
     }
     case CMD_FOCUS: {
-      // `0x43CAF5`：`dy = 6 − y`；不为 0 先归第 6 行（只有 y 分量），归好后才能前压。
+      // `0043CAFE mov ecx,[0x48e4d0]` / `0043CB04 sub ecx,[u+0xc]`；dy≠0 → `0043CB32` desc `0x48E850`。
       const dy = FOCUS_ROW - c.gy;
       if (dy !== 0) return planDirected(0, Math.sign(dy), STEP_W_CONE, STEP_W_CONE_WIDE, 'focus');
+      // dy==0 → `0043CB57`(A)/`0043CB6E`(B) desc `0x48E898` = 35,5,5,5,5,5,5,35。
       return planDirected(forward, 0, STEP_W_FOCUS_ROW, STEP_W_FOCUS_ROW, 'focus');
     }
     case CMD_RUSH:
+      // `0x43CDD3` 选目标（缓存 `army+0x38F4`）后 `0043D068 call 0x43c888`，desc `0x48E808`。
+      // 目标格→基向量的取符号在 battle.ts 的 `rushStepPlan`（本文件不重复实现，见 R83 报告）。
       return rushStepPlan(world, u);
     case CMD_RETREAT:
+      // 士兵 `0x43CC95`（`0043CCA4`）/ 主将 `0x43C7E3`（`0043C7F2`），两者都 `0043CCD0`/`0043C81E`
+      // `push 0x4000; call 0x43b51e` 置撤退态。
       return retreatStepPlan(u);
     case CMD_RETURN: {
+      // `0x43D072..0043D098`：目标格 = 己方军团 `[u+0x40]+8/+0xc`，再 `0x43C888`，desc `0x48E808`。
       const own = armyCellOf(world, side);
-      return own ? planToward(c, own, STEP_W_CONE, STEP_W_CONE_WIDE, 'toward') : null;
+      return own ? planSignToward(c, own, STEP_W_CONE, STEP_W_CONE_WIDE, 'toward') : null;
     }
     default:
       return null;

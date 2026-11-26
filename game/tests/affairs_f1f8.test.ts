@@ -29,7 +29,8 @@ function fnBody(text, name) {
 test('F1 大地圖：內政鍵按月份分流（正月=內政，其餘=只讀查看）', () => {
   const body = fnBody(campaign, 'render');
   assert.match(body, /const inAffairs = Saves\.monthOfYear\(save\.month\) === 1;/, '窗口判斷要用 monthOfYear');
-  assert.ok(body.includes('正月 · 內政八命令'), '正月按鈕文案');
+  // [F7] 原作核心指令是 7 項（指南 L96-105），文案跟著 8→7
+  assert.ok(body.includes('正月 · 內政七命令'), '正月按鈕文案（F7：七命令）');
   assert.ok(body.includes('非正月 · 只讀'), '非正月降級成只讀');
   // 進城頁的連結：非正月帶 &view=1（city.html 據此只讀）
   assert.ok(

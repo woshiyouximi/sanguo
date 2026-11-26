@@ -19,7 +19,9 @@
  *   - `startSkill` 是逐帧模型：WAIT 真挂起，`SkillSession.advance()` 每 tick 递一帧，
  *     `cast()` 走这条路径，于是"第 N 帧才生效"的技能与原作节奏一致；
  *   - 物件伤害在原作由 C 侧碰撞循环判定，这里改成"物件位置并集 + 半径"的几何判定；
- *   - 随机数走 world.rng，序列与 1998 年的 rand() 不同，但同一 seed 可复现。
+ *   - 随机数默认走 world.rng，序列与 1998 年的 rand() 不同，但同一 seed 可复现；
+ *     战场开了 `world.roll`（R115）时，脚本的 `rand(min,max)` 与命中概率改走原作
+ *     `0x450132` 乱数流（`rand()%n` 语义），同一 seed 下同样可复现。
  */
 import { FX_TTL_DEFAULT, allRush as allRushSide } from "../battle.ts";
 import type { GeneralState, Side, Unit, World } from "../battle.ts";
@@ -415,6 +417,38 @@ const clampY = (y: number): number => Math.max(0, Math.min(13, Number.isFinite(y
  * 里的少数几条，远小于它）。
  */
 const MAX_SYNC_INSTANCES = 256;
+/**
+ * 脚本 `0x303 rand(min,max)` 的一抽（原作 `0x420BAA`）。
+ *
+ * 汇编：先比较 `arg0/arg1` 并交换成 `min/max`，`n = max - min + 1`，
+ * `call 0x450117(n)`（= `rand()%n`），最后 `+ min` —— 即
+ * `min + rand()%(max-min+1)`。`world.roll` 非空时走原作乱数流 `roll.int(n)`；
+ * 否则回落旧 `world.rng()`，没开 roll 的战场序列逐位不变。
+ * 非整数参数是旧扩展（原作只有整数），用 `float()` 保持同一分布。
+ */
+export function scriptRand(world: World, min: number, max: number): number {
+    let lo = Math.min(min, max);
+    let hi = Math.max(min, max);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi))
+        return 0;
+    const roll = world.roll;
+    if (Number.isInteger(lo) && Number.isInteger(hi)) {
+        lo = Math.round(lo);
+        hi = Math.round(hi);
+        return lo + (roll ? roll.int(hi - lo + 1) : Math.floor(world.rng() * (hi - lo + 1)));
+    }
+    return lo + (roll ? roll.float() : world.rng()) * (hi - lo);
+}
+/**
+ * 脚本结算里的「rate 概率」一次抽：`[0,1)` 均匀。
+ *
+ * 原作这些点由 C 侧碰撞循环取 `0x450132` 后自己比较；`world.roll` 存在时用
+ * `roll.float()`（同一分布），否则保持旧 `world.rng()`。
+ */
+export function scriptChance(world: World): number {
+    const roll = world.roll;
+    return roll ? roll.float() : world.rng();
+}
 class SkillRun implements VmHost, SyscallContext {
     world: World;
     side: Side;
@@ -1766,7 +1800,7 @@ class SkillRun implements VmHost, SyscallContext {
                 continue;
             this.hitUnits.add(u);
             hits += 1;
-            if (this.world.rng() < rate)
+            if (scriptChance(this.world) < rate)
                 this.applyHpDelta(this.byUnit.get(u) ?? 0, -1);
         }
         this.totalHits += hits;
@@ -1936,16 +1970,8 @@ class SkillRun implements VmHost, SyscallContext {
         this.engine[i] = value | 0;
     }
     rand(min: number, max: number): number {
-        let lo = Math.min(min, max);
-        let hi = Math.max(min, max);
-        if (!Number.isFinite(lo) || !Number.isFinite(hi))
-            return 0;
-        if (Number.isInteger(lo) && Number.isInteger(hi)) {
-            lo = Math.round(lo);
-            hi = Math.round(hi);
-            return lo + Math.floor(this.world.rng() * (hi - lo + 1));
-        }
-        return lo + this.world.rng() * (hi - lo);
+        // R115：0x303 的落点抽，roll 优先（见 scriptRand / 0x420BAA 反汇编）。
+        return scriptRand(this.world, min, max);
     }
     /**
      * `0x301(name, vol)` / `0x300(unit, name, vol)`：真的播。
@@ -2253,7 +2279,7 @@ class SkillRun implements VmHost, SyscallContext {
             if (u.isGeneral) {
                 this.applyHpDelta(this.byUnit.get(u) ?? 0, -generalDmg);
             }
-            else if (this.world.rng() < rate) {
+            else if (scriptChance(this.world) < rate) {
                 this.applyHpDelta(this.byUnit.get(u) ?? 0, -1);
             }
         }

@@ -4,9 +4,12 @@
  *   node --test tests/deploy_queue.test.ts
  *
  * 這一層存在的理由：軍師技 `3 後選出陣`（`Execute 34`）的 `0x44DE44` 零狀態寫入，
- * `ATTRIB=1` 表明它是戰前選擇 —— 真實語義「使用方在敵方之後選將/兵種」落在
+ * `ATTRIB=1` 表明它是戰前選擇 —— 真實語義「使用方在敵方之後選出陣武將」落在
  * 原作 Obj3 部隊池的 5 個武將槽（`docs/07b` §6），不在戰場內核（project/109 §5.3、
  * project/162）。所以這裡釘的是編成層契約：槽數、順序、兵種/兵力、存檔往返、舊檔兼容。
+ *
+ * R81 反彙編更正：原作每側只有 **1 個出陣位**（`0x446F45` 的 `[eax+4]` 單一下標），
+ * 「前 3 槽可重排」是 [推測]、已被證偽 —— 見 `work/r81_exec34/REPORT.md`。
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +19,7 @@ import {
   DEFAULT_TROOPS,
   DEPLOY_FIELD_SLOTS,
   DEPLOY_SLOTS,
+  ORIGINAL_DEPLOY_PICK_SLOTS,
   canMove,
   chooseAfterFoe,
   fillQueue,
@@ -27,6 +31,7 @@ import {
   moveUp,
   normalizeQueue,
   parseQueueKey,
+  pickDeploy,
   queueKey,
   queueOf,
   sameQueue,
@@ -98,7 +103,7 @@ test('canMove：只認整數下標，且受 limit 限制', () => {
   assert.equal(canMove(2, 0), true);
   assert.equal(canMove(2, 2), false);
   assert.equal(canMove(1.5, 0), false);
-  assert.equal(canMove(0, 3, DEPLOY_FIELD_SLOTS), false, '後選出陣只給動前 3 槽');
+  assert.equal(canMove(0, 3, DEPLOY_FIELD_SLOTS), false, '重製版 3 行上陣區之外的槽不給拖');
   assert.equal(canMove(2, 0, DEPLOY_FIELD_SLOTS), true);
   assert.equal(canMove(0, 4, DEPLOY_SLOTS), true);
   assert.equal(canMove(0, 5), false);
@@ -224,29 +229,39 @@ test('queueKey / parseQueueKey：緊湊串往返，缺兵數按缺省補、空�
 // 六、chooseAfterFoe 語義（seq 3 的落地契約）
 // ---------------------------------------------------------------------------
 
-test('chooseAfterFoe：敵方先定不得再改，我方前 3 槽可重排、後 2 槽預備', () => {
+test('chooseAfterFoe：敵方先定不得再改，我方只有 1 個出陣位、可從任一槽挑', () => {
   const foe = makeQueue(['敵甲', '敵乙', '敵丙', '敵丁', '敵戊']);
   const mine = makeQueue(NAMES);
   const plan = chooseAfterFoe(foe, mine);
-  assert.equal(plan.fieldSlots, DEPLOY_FIELD_SLOTS);
-  assert.deepEqual(plan.reorderable, [0, 1, 2]);
+  assert.equal(plan.fieldSlots, ORIGINAL_DEPLOY_PICK_SLOTS, '原作每側只有 1 個出陣位');
+  assert.deepEqual(plan.reorderable, [0], '可決定的槽只有出陣位（第 0 槽）');
+  assert.deepEqual(plan.pickable, [0, 1, 2, 3, 4], '列表裏 5 員任選一員當出陣武將');
+  assert.equal(plan.pickOrder, 'foe-first', '敵方先定、我方後選');
+  assert.equal(plan.foeLeader, '敵甲');
+  assert.equal(plan.mineLeader, '張飛');
   assert.deepEqual(plan.foe, foe, '敵方隊列原樣帶出');
   assert.deepEqual(plan.mine, mine);
 
-  // 第 3 槽 → 第 1 槽：在前 3 槽內，合法。
-  assert.deepEqual(names(moveSlot(plan.mine, 2, 0, plan.fieldSlots)), ['趙雲', '張飛', '關羽', '馬超', '黃忠']);
-  // 預備槽（第 4/5 槽）不給動。
+  // 第 3 槽（趙雲）→ 出陣位：原作列表點選就是 `army->+0x04 = 光標`，任意一員都行。
+  assert.deepEqual(names(pickDeploy(plan.mine, 2)), ['趙雲', '張飛', '關羽', '馬超', '黃忠']);
+  // 出陣位只有 1 個，所以 moveSlot 用 fieldSlots 當 limit 時第 4/5 槽不給動（與舊行為一致）。
   assert.deepEqual(names(moveSlot(plan.mine, 3, 0, plan.fieldSlots)), NAMES);
-  assert.deepEqual(names(moveSlot(plan.mine, 4, 0, plan.fieldSlots)), NAMES);
+  assert.equal(canMove(0, 1, plan.fieldSlots), false, '重排範圍只有 1 槽');
   // 敵方是輸入，函式不會改它。
   assert.deepEqual(names(plan.foe), ['敵甲', '敵乙', '敵丙', '敵丁', '敵戊']);
 });
 
-test('chooseAfterFoe：fieldSlots 越界自動夾到 0..5，空隊列也不炸', () => {
-  assert.equal(chooseAfterFoe([], [], 99).fieldSlots, DEPLOY_SLOTS);
-  assert.deepEqual(chooseAfterFoe([], [], 99).reorderable, [0, 1, 2, 3, 4]);
+test('chooseAfterFoe：fieldSlots 一律夾到 0..1（舊的「3 槽」入參被證偽），空隊列也不炸', () => {
+  assert.equal(chooseAfterFoe([], [], 99).fieldSlots, ORIGINAL_DEPLOY_PICK_SLOTS);
+  assert.deepEqual(chooseAfterFoe([], [], 99).reorderable, [0]);
+  assert.equal(chooseAfterFoe([], [], 3).fieldSlots, 1, '傳 3 也夾到 1');
   assert.equal(chooseAfterFoe([], [], -1).fieldSlots, 0);
   assert.deepEqual(chooseAfterFoe([], [], -1).reorderable, []);
+  assert.deepEqual(chooseAfterFoe([], []).pickable, []);
+  assert.equal(chooseAfterFoe([], []).foeLeader, null);
+  assert.equal(chooseAfterFoe([], []).mineLeader, null);
+  assert.deepEqual(pickDeploy([], 0), []);
+  assert.deepEqual(pickDeploy([], 9), []);
 });
 
 test('swapSides：兩份隊列對調，且不共享槽對象引用', () => {

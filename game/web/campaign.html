@@ -1892,6 +1892,12 @@ const bootScen = SCEN.findIndex((s) => s.id === Number(save.scenario));
 applyScenario(bootScen >= 0 ? bootScen : 0);
 save.scenario = scenario.id;
 ensureCityState();
+// [F5] 紀元錨點：頂欄「西元 N 年 M 月」與內政面板「時間 N 年」都走 era.js，
+// 錨點 = 這份存檔的劇本起始年（189/200/208/219…），顯示即 `startYear + yearOf - 1`。
+Era.setAnchor(Saves.startYearOf(save));
+// [F16] 舊的單錢包 `save.gold` 併進我方第一座城的 money（只在該城沒有 money 時回填一次），
+// 之後錢只認每城 `st.money`；`migrateGold()` 會把 save.gold 歸 0 並記 goldMigrated。
+if (typeof CM.migrateGold === 'function') CM.migrateGold(save, scenario.cities);
 save.ts = Saves.num(save.ts);
 // R4：老檔沒有 king → 按 owned 第一座城的 KING 補；補不出來留空（頂欄顯示「未選」＋換君主）
 ensureKing();
@@ -2015,6 +2021,10 @@ function loadSlot(index) {
   save.ts = Saves.num(save.ts) || Saves.num(entry.ts) || Date.now();
   ensureCityState();
   ensureKing();   // R4：換了槽也要重算君主（老檔按城補）
+  // [F5] 切槽＝換劇本 ⇒ 重設紀元錨點（否則 189 的檔會沿用上一個檔的 184）
+  Era.setAnchor(Saves.startYearOf(save));
+  // [F16] 老槽的單錢包 → 併進我方首城（只回填一次），切槽後錢也只認每城 money
+  if (typeof CM.migrateGold === 'function') CM.migrateGold(save, scenario.cities);
   selected = null;
   activeSlot = i + 1;
   gameStarted = true;
@@ -2492,9 +2502,17 @@ function openGeneralSheetOf(name) {
 }
 
 /**
- * 內政終了（0x427FE0）：收束本月內政 → 月令鎖住（窗口結束），回大地圖。
+ * 內政終了（0x427FE0）：收束本年內政 → **結束窗口並跑完一整年**，明年 1 月再開窗口。
  * [F1/F2] 「內政終了」只在 1 月有效：一年只有一個內政窗口。逐將行動權記在
  * `save.acted`（每將每年一次），不隨窗口結束清零 —— 明年年序一變自然解鎖。
+ *
+ * [F4] 原作語義：內政點「結束內政」＝**進大地圖跑時間**（指南 L114-116「內政點"结束内政"
+ * 就进来了」、L39-41 流程圖「每年 1 月→【內政模式】→【大地圖模式】跑一整年」），
+ * 不是「鎖月令等玩家一個月一個月按」。差異清單行 57 指出本作缺的就是這一步：
+ * 「『結束內政 → 跑一年』缺位：「內政終了」只鎖月令；推進時間的動作是「推進一月」」。
+ * 所以這裡標完月令就 `advanceMonth(12)` —— 一次跑完 12 個月（正月 → 次年 1 月），
+ * 行軍/AI/年結算全走 `advanceMonth` 既有流水線（batch 模式＝戰鬥就地結算、不跳守城頁）。
+ * 只按一個月仍走「推進一月」與 `?adv=1`（單月調試路徑保留）。
  */
 function endMonth() {
   if (!gameStarted) return notice('尚未開局：先選劇本開始新遊戲。');
@@ -2508,9 +2526,10 @@ function endMonth() {
     return;
   }
   CM.markMonthActed(save, UNLIMITED);
-  pushLog(`內 政 終 了：本月令已收束（原作 0x427FE0 → 0x41BBF5）`, 'info');
-  render();
-  autosave();
+  pushLog(`內 政 終 了：本年內政窗口收束（原作 0x427FE0 → 0x41BBF5）`, 'info');
+  pushLog(`大 地 圖：結束內政 → 跑完一年（${save.month} 月 → 次年 1 月，原作「結束內政就進大地圖跑時間」）`, 'info');
+  // [F4] 一次跑完一年；advanceMonth 末尾自己 autosave() + render()
+  advanceMonth(12);
 }
 
 /**
@@ -2635,6 +2654,11 @@ function startNewGame(idx, king) {
   save.lastActionMonth = 0;
   ensureCityState();
   ensureKing();   // R4 + R78：君主定了才建得出勢力表（沒給君主時按 owned 首城補）
+  // [F5] 新局：`newCampaign()` 已按劇本寫入 startYear（189/200/208/219），這裡把 era 錨點對上，
+  // 頂欄第一眼就是「西元 189年 1月」而不是寫死的 184。
+  Era.setAnchor(Saves.startYearOf(save));
+  // [F16] 新局 default 的 1200 金（`save.gold`）併進首城 money，之後只有每城 money 一個錢包。
+  if (typeof CM.migrateGold === 'function') CM.migrateGold(save, scenario.cities);
   selected = null;
   gameStarted = true;
   activeSlot = slotNo();
@@ -2734,7 +2758,9 @@ function render() {
   // 頂欄紀元：原作是「西元 209年 3月」（A_map_t0130.png 左上匾）。內部資料仍是 year/month
   // （save.month 是絕對月序），只把**顯示**換成 era.js 的一句話，換錨點也只改 era.js。
   $('ym').textContent = Era.eraTextOfMonth(save.month);
-  $('gold').textContent = save.gold.toLocaleString();
+  // [F16] 頂欄「金」＝**國庫 = Σ 我方每城 money**（原作金錢是城 +0x92，沒有勢力錢包）。
+  // 以前讀 `save.gold`（單錢包），跟列表行的 `$3,941`（本城金）是同屏兩個數卻看不出區別。
+  $('gold').textContent = CM.nationalGold(save, scenario?.cities || ALL).toLocaleString();
   $('ct').textContent = save.owned.length;
   $('rec').textContent = Saves.recordText(save) + (save.defWins ? ` · 守 ${save.defWins}` : '');
   renderKingBar();
@@ -2753,7 +2779,7 @@ function render() {
     return `<div class="${cls}" data-name="${c.NAME}">
       <div class="n"><i class="fdot" style="background:${color}"></i>${c.NAME}<span>${mine(c.NAME) ? '我方' : (force || '無主')}</span></div>
       <div class="s"><b>${st.troops}</b> 兵 · 防 ${CM.ensureCityState(save, c).def}</div>
-      <div></div><div class="s">${st.pop.toLocaleString()} 人 · $${st.money.toLocaleString()}</div>
+      <div></div><div class="s">${st.pop.toLocaleString()} 人 · <span class="dim">本城金</span> $${st.money.toLocaleString()}</div>
     </div>`;
   }).join('');
 
@@ -2767,7 +2793,7 @@ function render() {
     acts.push(`<div class="btn" data-act="develop"${dis}><span>開 發</span><small>${sub('不耗金 → 民 +3000')}</small></div>`);
     // [F1] 正月才是內政月；其餘月份這顆鍵降級成只讀「查看」（能看不能下命令）。
     acts.push(inAffairs
-      ? `<div class="btn primary" data-act="city"><span>內 政</span><small>正月 · 內政八命令</small></div>`
+      ? `<div class="btn primary" data-act="city"><span>內 政</span><small>正月 · 內政七命令</small></div>`
       : `<div class="btn" data-act="city"><span>查 看</span><small>非正月 · 只讀</small></div>`);
     if (MARCH_ON) {
       const cap = dispatchCapOf(selected);   // R75：按主將帶兵上限（原固定 100）
@@ -2800,7 +2826,7 @@ function render() {
 
   $('hint').textContent = selected
     ? (isMine
-      ? `內政：${selected} 兵 ${troopsOf(selected)} · 民 ${save.cities[selected].pop.toLocaleString()} · 金 ${save.cities[selected].money.toLocaleString()}`
+      ? `內政：${selected} 兵 ${troopsOf(selected)} · 民 ${save.cities[selected].pop.toLocaleString()} · 本城金 ${save.cities[selected].money.toLocaleString()}（國庫 ${CM.nationalGold(save, scenario?.cities || ALL).toLocaleString()}）`
       : (() => {
         // 敵城：太守/守將/守軍都走 garrison.json，不再拿防御值當武力代理
         const names = guardsOf(selected, 3);
@@ -2820,12 +2846,18 @@ function render() {
       const ps = CM.prepStateOf(save, def);
       const gens = CM.rosterOf(save, selected, { scenIdx: currentScenarioIdx(), generals: GDATA.generals }) || [];
       const cell = (k, v) => `<div class="cc"><b>${k}</b><span>${v}</span></div>`;
+      // [F19] 武將數上限：原作指南 L92「武將數（如 13/10）」⇒ 上限 10（待證）。
+      // 劇本資料本身就有超編城（濮陽 15／洛陽 15／江夏 17），**載入不裁切**，只把 N/CAP 標紅。
+      const cap = CM.officerCapState ? CM.officerCapState(gens.length) : { n: gens.length, cap: 10, over: gens.length > 10 };
+      const genCell = cap.over
+        ? `<div class="cc"><b>武將</b><span style="color:#E2554B">${cap.n} / ${cap.cap}<span class="dim"> · 超編</span></span></div>`
+        : cell('武將', `${cap.n} / ${cap.cap}`);
       card.innerHTML =
         cell('人口', `${Math.max(0, Math.trunc(Saves.num(st.pop))).toLocaleString()} / 1,000,000`)
         + cell('防禦', `${Math.max(0, Math.trunc(Saves.num(CM.ensureCityState(save, def).def)))} / 999`)
-        + cell('金錢', `$${Math.max(0, Math.trunc(Saves.num(st.money))).toLocaleString()}`)
+        + cell('金錢', `<span class="dim">本城金</span> $${Math.max(0, Math.trunc(Saves.num(st.money))).toLocaleString()}`)
         + cell('預備兵', `${ps.prep} / ${ps.cap}`)
-        + cell('武將', `${gens.length} / 10`)
+        + genCell
         + cell('太守·軍師', `${CM.majorOf(save, def) || '—'} · ${CM.wiseOf(save, def) || '—'}`);
       card.hidden = false;
     } else {
@@ -3043,7 +3075,8 @@ function armyInfoRows(a) {
   const lv = a.general ? generalLevelOf(a.general) : 0;
   const at = marchAtCity(a);
   const place = at ? `城（${at}）` : '平原（路上）';
-  const gold = Saves.num(save?.gold);
+  // [F16] 軍情第 6 行「金錢」也讀國庫（Σ 我方每城 money），不再讀舊單錢包 save.gold。
+  const gold = CM.nationalGold(save, scenario?.cities || ALL);
   const advisorName = armyAdvisorOf(a);
   const advSeq = advisorName ? armyWiseSeq(advisorName) : 0;
   const advText = advisorName
@@ -3056,7 +3089,7 @@ function armyInfoRows(a) {
     ['目的地', `${a.to}<span class="dim"> · ${marchMonths(a.pathIndex)} 個月</span>`],
     ['武將數', `${officers.length}${officers.length > 1 ? `<span class="dim"> · ${officers.join('、')}</span>` : ''}`],
     ['兵數', `${Saves.num(a.troops)}`],
-    ['金錢', `${gold.toLocaleString('en-US')}<span class="dim"> · 勢力共用</span>`],
+    ['金錢', `${gold.toLocaleString('en-US')}<span class="dim"> · 國庫（Σ 每城金）</span>`],
     ['目前所在地形', armyIsStationed(a)
       ? `${place}<span class="dim"> · 駐紮中（進度凍結）</span>`
       : place],
@@ -3598,11 +3631,44 @@ function drawMap() {
       g.stroke();
     }
   }
-  // 城（R70：归属色改按势力取色；14 家色板集中在 web/saves.js FORCE_PALETTE）
+  // 城（R70：归属色改按势力取色；色板集中在 web/saves.js FORCE_PALETTE）
   let li = 0;
   const ring = (x, y, radius, width, color) => {
     g.beginPath(); g.arc(x, y, radius, 0, Math.PI * 2);
     g.lineWidth = width; g.strokeStyle = color; g.stroke();
+  };
+  /**
+   * [F28] 城上小旗（原作「城 + 勢力旗」：旗形取劇本 `FLAGS`，旗色取勢力色）。
+   * 差異清單行 229：「城不插旗，勢力靠一圈色環」。旗桿插在城圖元左上，旗布往右展開：
+   *   · `FLAGS=2`（12 座關）→ 三角旗（pennant），旗面小一號；
+   *   · `FLAGS=4`（48 座城）→ 方旗（rect），下緣帶一個缺口。
+   * 色板是固定 29 家（saves.js FORCE_PALETTE），同一個勢力在地圖/圖例/列表/旗上永遠同色。
+   */
+  const cityFlag = (x, y, color, flags) => {
+    const pennant = Number(flags) === 2;
+    const top = y - (pennant ? 11 : 13);
+    g.save();
+    g.lineWidth = 1.6;
+    g.strokeStyle = 'rgba(8,12,16,.88)';
+    g.beginPath(); g.moveTo(x + 0.4, y + 10); g.lineTo(x + 0.4, top); g.stroke();
+    g.beginPath();
+    if (pennant) {
+      g.moveTo(x + 1, top + 0.4);
+      g.lineTo(x + 11, top + 3.8);
+      g.lineTo(x + 1, top + 7.6);
+    } else {
+      g.moveTo(x + 1, top + 0.4);
+      g.lineTo(x + 13, top + 0.4);
+      g.lineTo(x + 13, top + 8.2);
+      g.lineTo(x + 1, top + 8.2);
+    }
+    g.closePath();
+    g.fillStyle = withAlpha(color, 0.96);
+    g.fill();
+    g.lineWidth = 1.1;
+    g.strokeStyle = withAlpha(Saves.FORCE_EDGE, 0.82);
+    g.stroke();
+    g.restore();
   };
   for (const c of ALL) {
     const [sx, sy] = toScreen(c.pos_xy[0], c.pos_xy[1]);
@@ -3613,7 +3679,7 @@ function drawMap() {
     const sel = selected === c.NAME;
     // 原作城圖元：`export/png/SHAPE/MAP/CITY01..04.png`（22×18 / 33×24 / 40×28 / 49×35），
     // 按人口四分位分 4 档（`[推测]`，见 project/58）。圖元本身不分陣營；
-    // R70 起归属=「勢力色環」：14 家固定色板，玩家勢力多一圈金環，選中再疊一圈亮金。
+    // R70 起归属=「勢力色環」：29 家固定色板，玩家勢力多一圈金環，選中再疊一圈亮金。
     // 圖元外先描 1px 级深色底環 —— 底图是浅色高原/海面，没有它浅色势力会被吃掉。
     const spr = citySpriteOf(c);
     const ready = !!spr && spr.complete && spr.naturalWidth > 0;
@@ -3641,6 +3707,8 @@ function drawMap() {
     if (player) ring(sx, sy, r + (ready ? 8 : 6.5), 2.2, Saves.FORCE_GOLD);
     // 選中：再疊一圈更亮的金環
     if (sel) ring(sx, sy, r + (ready ? 11.5 : 9.5), 2.6, '#FFF1C8');
+    // [F28] 勢力小旗：空城（無主）不插旗；旗桿在城圖元左上，旗面朝右
+    if (force) cityFlag(sx - (ready ? 25 : 18), sy, color, c.FLAGS);
     // 城名压一层深色描边阴影，压在底图的浅色高原/海面上也能读
     g.save();
     g.shadowColor = 'rgba(5,7,10,.92)'; g.shadowBlur = 4;
@@ -3657,7 +3725,7 @@ function drawMap() {
   // 位置一律走 armyPos()→toScreen()（既有投影），沒有第二套座標系。
   for (const it of armyScreenList()) drawArmyMark(g, it);
   // 图例（R70）：色值同样来自 web/saves.js FORCE_PALETTE，避免「地图一套、图例一套」。
-  // 14 家排两行（每行 7 家）；剧本 2 有 18 家 → 自动排三行。
+  // [F28] 色板从 14 家扩到 29 家固定（剧本 1 有 18 家），撞色不再靠哈希兜；每行 7 家，自动排 2-5 行。
   // V1：下装裱带够高（≥58px）且最多两行时，图例直接写进带里——带子就是图例条，
   // 不再盖住地图底部的桂陽/廬陵/夷州；行数多（剧本 2）时退回半透明底框。
   const seenForces = [];
@@ -3691,12 +3759,12 @@ function drawMap() {
   }
   g.font = `600 ${inBand ? 13 : 14}px "Noto Sans SC",sans-serif`;
   g.fillStyle = Saves.FORCE_GOLD;
-  g.fillText('● 金環＝我方', inBand ? 20 : 26, titleY);
+  g.fillText('● 金環＝我方 · 小旗＝勢力', inBand ? 20 : 26, titleY);
   g.fillStyle = 'rgba(233,228,214,.66)';
   // 空城是劇本資料本身的常態（劇本1 有 39 座），必須講明「灰＝無主」，否則會以為配色漏了
   g.fillText(
-    `色＝勢力（${seenForces.length} 家 · 固定 14 家色板）${unowned ? ` · 灰＝無主（${unowned} 城）` : ''}`,
-    inBand ? 118 : 132, titleY,
+    `色＝勢力（${seenForces.length} 家 · 固定 29 家色板）${unowned ? ` · 灰＝無主（${unowned} 城）` : ''}`,
+    inBand ? 168 : 196, titleY,
   );
   g.font = `${inBand ? 12 : 13}px "Noto Sans SC",sans-serif`;
   let ly = rowTop;
@@ -5353,8 +5421,9 @@ function advanceMonth(n) {
 
     }
     if (income) {
-      // 原作金錢是**每城**欄位（總金 = Σ 城金）；本作國庫是單一錢包，故歲入同步進國庫後才算得出總金。
-      save.gold += income;
+      // [F16] 錢只認每城 `money(+0x92)`：上面那一圈已經把稅收加進「各城的」st.money，
+      // 國庫 = Σ 每城 money（`CM.nationalGold()`）。舊碼這裡還有一行 `save.gold += income`
+      // 把同一筆錢再加進單一錢包 → 同屏兩個數、兩套扣款口徑（差異清單 F16 行 125）。已刪。
       pushLog(`歲 入：+${income} 金（正月 · ${save.owned.length} 城 · 每城 人口×75/10000 + 2250）`, 'info');
     }
     Saves.ledgerAdd(save, { income, months: 1 });
@@ -5723,8 +5792,8 @@ if (qs.get('probe') === 'r7' && gameStarted) {
   };
 }
 
-const adv = Number(qs.get('adv') || 0);
-if (adv > 0 && gameStarted) advanceMonth(adv);
+const bootAdv = Number(qs.get('adv') || 0);
+if (bootAdv > 0 && gameStarted) advanceMonth(bootAdv);
 else if (MARCH_ON && gameStarted) handleMarchEvents(false);   // 讀檔後殘留的抵達/遭遇
 // ?probe=1：把接線結果（等級/預備兵/兩條戰鬥入口）印進 #marchdbg，驗收截圖用
 if (qs.get('probe') === '1' && gameStarted) wireProbe();
@@ -5835,6 +5904,18 @@ function normalizeCampaign(raw) {
   s.month = Saves.intOr(s.month, 1, 1);
   const gold = Number(s.gold);
   s.gold = Number.isFinite(gold) ? Math.max(0, Math.trunc(gold)) : 1200;
+  // [F5] 劇本起始公元年：有就沿用；老檔沒有 → 按 `save.scenario` 反查劇本表（SCEN[i].year），
+  // 查不到才退回 184（剧本 0）。真值由 newCampaign() 從 `scenarios.json system.YEAR` 寫入
+  // （189/200/208/219）；顯示 = startYear + yearOf(month) - 1，`yearOf()` 只做年內換算、一行未動。
+  {
+    const y = Number(s.startYear);
+    if (Number.isFinite(y) && y > 0) {
+      s.startYear = Math.trunc(y);
+    } else {
+      const scIdx = SCEN.findIndex((x) => x.id === Number(s.scenario));
+      s.startYear = scIdx >= 0 ? (Number(SCEN[scIdx].year) || Saves.START_YEAR_FALLBACK) : Saves.START_YEAR_FALLBACK;
+    }
+  }
   s.wins = Saves.intOr(s.wins, 0, 0);
   s.losses = Saves.intOr(s.losses, 0, 0);
   s.defWins = Saves.intOr(s.defWins, 0, 0);

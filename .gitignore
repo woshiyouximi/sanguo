@@ -73,3 +73,6 @@ work/**/*.mp3
 
 # R201 前被 CP936 写坏、已无参考价值的一次性探针（本地保留，不入库）
 work/probe_fix.mjs
+# Python 缓存
+__pycache__/
+*.pyc

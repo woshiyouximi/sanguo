@@ -109,19 +109,24 @@ export function slotIndex(index) {
 }
 
 // ---------------------------------------------------------------------------
-// R70 势力色板（地图分色；色值只在这张表里出现一次）
+// R70 势力色板（地图分色；色值只在这张表里出现一次）— [F28] 29 家全固定
 // ---------------------------------------------------------------------------
 /**
- * 14 家固定色板。前 14 条＝剧本 1（黃巾之亂）实际出场的 14 家（`scenarios.json`
- * 里 distinct KING，与 docs/03c 的 KING 段同名），其余剧本沿用同名同色。
+ * **29 家固定色板**（[F28]：`work\flow_audit\内政大地图_差异.md` 行 229「14 色板对 18 家不够用
+ * → 撞色」）。这 29 个名字 = `scenarios.json` 五个剧本 KING 字段的**文本势力并集**
+ * （剧本 0 另 12 个数字残留 `"1".."12"` 是关城没有势力，不算）。
+ *
+ * 为什么不再用「前 14 家固定 + 表外哈希」：
+ *   · 剧本 1（討伐董卓）18 家，只有 9 家落在旧固定表，其余按 `forceHash` 落备色 ⇒
+ *     实测撞色 `#8A5FA0 = 曹操/王朗`、`#A0603A = 馬騰/袁術`（差异清单行 219-222）；
+ *   · 剧本 2/3 的 `#3A7F8E = 劉備/劉璋` 同理。
+ *   现在**逐家定色**（按剧本势力表的出场顺序排，同一名字永远同一色），
+ *   29 个色值互不相同（`tests/affairs_p1.test.ts` 会验唯一性与最小间距）。
  *
  * `[新设计]` 具体色值不是原作旗色的取色结果：原作每家有一面 `TROOP\FLAGnn`
  * 旗帜（`FLAGNUM` 1..26，见 docs/03c:70 / 05b:309），但那 27 张旗的像素主色
- * 没有反汇编或取色证据。这里只保证：14 家彼此可分辨、在 CHINAMAP 浅色底图上
+ * 没有反汇编或取色证据。这里只保证：29 家彼此可分辨、在 CHINAMAP 浅色底图上
  * 够暗够饱和、且每种颜色在 1px 深色描边下仍能读出归属。
- *
- * 后 14 条是备色：剧本 2 有 18 家（超出 14），表外势力按名字哈希落到备色，
- * 保证「同一个名字任何时候都是同一个颜色」（不随出场顺序变）。
  */
 export const FORCE_PALETTE = Object.freeze([
   { force: '公孫瓚', color: '#6E8FBF' },   // 白馬義從：冷藍灰
@@ -132,15 +137,30 @@ export const FORCE_PALETTE = Object.freeze([
   { force: '喬玄', color: '#7C8A48' },     // 橄欖
   { force: '何進', color: '#B14A3B' },     // 大將軍：朱紅
   { force: '董卓', color: '#6B6F76' },     // 西涼：鐵灰
-  { force: '孫堅', color: '#D0803C' },     // 江東：亮橙
+  { force: '孫堅', color: '#E07C30' },     // 江東：亮橙（F28 微調：與劉焉/張角的橙金分開）
   { force: '陶謙', color: '#4F9A6E' },     // 徐州：玉綠
   { force: '孔岫', color: '#3F6E9A' },     // 靛青
   { force: '丁原', color: '#8C6248' },     // 并州：磚棕
-  { force: '劉繇', color: '#7A6FB0' },     // 揚州：青蓮
+  { force: '劉繇', color: '#7560C4' },     // 揚州：青蓮（F28 微調：與韓馥的紫分開）
   { force: '嚴白虎', color: '#5E7D5A' },   // 吳郡：苔綠
+  { force: '袁紹', color: '#C25B6E' },     // 河北：玫瑰紅
+  { force: '曹操', color: '#4A5FA8' },     // 兗州：深藍
+  { force: '劉備', color: '#8DC24E' },     // 荊益：亮綠
+  { force: '孔融', color: '#3FA8B5' },     // 北海：青藍
+  { force: '喬瑁', color: '#8C8C2C' },     // 東郡：橄欖黃（F28 微調：與劉焉/喬玄分開）
+  { force: '馬騰', color: '#C98F5A' },     // 西涼：淺赭
+  { force: '袁術', color: '#A84A8E' },     // 淮南：洋紅
+  { force: '劉表', color: '#3E6F5A' },     // 荊州：墨綠
+  { force: '王朗', color: '#9E4F6E' },     // 會稽：酒紅
+  { force: '孫權', color: '#CC2F2F' },     // 江東：正紅
+  { force: '張魯', color: '#C7B84F' },     // 漢中：沙黃
+  { force: '劉璋', color: '#4FB3D6' },     // 益州：天藍
+  { force: '金旋', color: '#6E4E33' },     // 武陵：深棕
+  { force: '孟獲', color: '#5E8E3A' },     // 南中：草綠
+  { force: '徹里吉', color: '#8E3F3F' },   // 西羌：暗紅
 ]);
 
-/** 备色（剧本 2 的 18 家 / 以后新增势力用；与上面 14 条不重复） */
+/** 备色（29 家以外的临时势力／劇本外名字用；与上面 29 条不重复） */
 export const FORCE_RESERVE = Object.freeze([
   '#4A8D9E', '#9E4F6E', '#6E8E3A', '#8A5FA0', '#3E6F5A', '#A0603A', '#5A6E8E',
   '#8E8A3A', '#6E4A6E', '#3A7F8E', '#8E6E4A', '#4A6E5A', '#7A4A4A', '#5A8A6E',
@@ -155,7 +175,7 @@ export const FORCE_EDGE = '#080C10';
 
 const FORCE_FIXED = new Map(FORCE_PALETTE.map((e, i) => [e.force, i]));
 
-/** FNV-1a（32 位）：只求「同名同色」，不追求雪崩质量 */
+/** FNV-1a（32 位）：只求「同名同色」，不追求雪崩质量（只给 29 家以外的名字兜底） */
 function forceHash(name) {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < name.length; i++) {
@@ -166,8 +186,9 @@ function forceHash(name) {
 }
 
 /**
- * 势力 → 色板下标：0..13＝固定 14 家，14..27＝备色，-1＝无主/非法。
- * 剧本 1 的 14 家全部落在 0..13（tests 里有断言）。
+ * 势力 → 色板下标：0..28＝固定 29 家，29..42＝备色，-1＝无主/非法。
+ * [F28] 剧本 1 的 18 家、剧本 2/3 的 8 家、剧本 4 的 5 家全部落在 0..28（tests 里有断言），
+ * 不再有「表外靠哈希撞进同一个备色」的情况。
  */
 export function forceColorIndex(force) {
   if (typeof force !== 'string') return -1;
@@ -327,6 +348,9 @@ function ensureSnapshotShape(s) {
 
   intAt('scenario', 1, 1);
   intAt('month', 1, 1);
+  // [F5] 劇本起始公元年（189/200/208/219…）。老檔沒有這一欄 → 184（= 剧本 0 黃巾之亂，
+  // 也是 era.js 的 AD_ANCHOR_DEFAULT）；只影響顯示，`yearOf()` 仍是年內換算。
+  intAt('startYear', 1, START_YEAR_FALLBACK);
   intAt('gold', 0, 1200);
   for (const k of ['wins', 'losses', 'streak', 'bestStreak', 'defWins', 'lastActionMonth']) intAt(k, 0, 0);
   {
@@ -964,8 +988,9 @@ export function metaFromSnapshot(snapshot, index, opts = {}) {
     cityCount: Object.keys(safe.cities && typeof safe.cities === 'object' ? safe.cities : {}).length,
     generalCount: generals.total,
     year: yearOf(month),
-    // 公元鏡像（只給顯示用；換算規則見 era.js 檔頭，錨點 184 可覆蓋）
-    adYear: era.toADYear(yearOf(month)),
+    // [F5] 公元鏡像：以「這一格存檔自己的起始年」換算，不看 current 的 era 錨點，
+    // 否則同一個槽位列表裡，189 年開的檔會跟著別的劇本一起漂。
+    adYear: startYearOf(safe) + yearOf(month) - 1,
     cityOfficers,
     statusCount,
     equipCount: equipped.size,
@@ -1275,6 +1300,8 @@ export function newCampaign(scenario, opts = {}) {
     seeded: true,
     scenario: intOr(sc.id, 1, 1),
     month: 1,
+    // [F5] 劇本起始年入檔：顯示 = `startYear + yearOf(month) - 1`（era.js 的 anchor）。
+    startYear: startYearFrom(sc),
     gold: Number.isFinite(opts.gold) ? opts.gold : 1200,
     wins: 0,
     losses: 0,
@@ -1464,15 +1491,19 @@ export function slotTitle(index, label = SLOT_LABEL) {
  * 原作 4 段（不含行標籤）：
  *   滿槽 → ['金旋', '城數01', '武將003', '時間209年']
  *   空槽 → ['空']
- * 時間用 `entry.adYear`（新檔有）；老檔沒有就從 `entry.year`／`entry.month` 現算，
- * 所以老槽升級後不會出現「時間undefined年」。
+ * 時間用 `entry.adYear`（新檔有）；老檔沒有就從 `entry.snapshot.startYear`（F5）或
+ * `entry.year`／`entry.month` 現算，所以老槽升級後不會出現「時間undefined年」。
  */
 export function slotLineParts(entry, index) {
   if (!entry || typeof entry !== 'object') return ['空'];
   const monarch = String(entry.monarch || '').trim() || '—';
+  const months = Number.isFinite(Number(entry.month)) ? entry.month : (intOr(entry.year, 1, 1) - 1) * 12 + 1;
+  const snapStart = Math.trunc(num(entry.snapshot && entry.snapshot.startYear));
   const adYear = Number.isFinite(Number(entry.adYear))
     ? Math.trunc(Number(entry.adYear))
-    : era.adYearOfMonth(Number.isFinite(Number(entry.month)) ? entry.month : (intOr(entry.year, 1, 1) - 1) * 12 + 1);
+    : (Number.isFinite(snapStart) && snapStart > 0
+      ? snapStart + yearOf(months) - 1                 // [F5] 這格存檔自己的起始年
+      : era.adYearOfMonth(months));                    // 老檔沒有 startYear：退回 era 錨點
   return [
     monarch,
     `城數${era.pad2(intOr(entry.ownedCount, 0, 0))}`,
@@ -1537,6 +1568,34 @@ export const advanceNoticeSimp = '内政时间到了....';
  *   · **人口自然增长公式** —— 04c:178 明写「未定位」；月推进已按 `×1.01` 近似，年度不重复加。
  */
 export const YEAR_MONTHS = 12;
+
+/**
+ * [F5] 舊檔沒有 `startYear` 時的兜底 = 剧本 0《黃巾之亂》的 184（= `era.js` 的 `AD_ANCHOR_DEFAULT`）。
+ * 只在「存檔缺這一欄」時用；新開局一律由 `startYearFrom(劇本)` 寫真值。
+ */
+export const START_YEAR_FALLBACK = 184;
+
+/**
+ * [F5] 劇本 → 起始公元年。`scenarios.json` 的真源是 `system.YEAR`（184/189/200/208/219）；
+ * campaign.html 的 `SCEN` 另外攤平成 `year`，兩個都認，認不出來回 184。
+ */
+export function startYearFrom(scenario) {
+  const sc = scenario && typeof scenario === 'object' ? scenario : {};
+  for (const v of [sc.system && sc.system.YEAR, sc.year, sc.YEAR]) {
+    const n = Math.trunc(num(v));
+    if (Number.isFinite(n) && n > 0 && n < 10000) return n;
+  }
+  return START_YEAR_FALLBACK;
+}
+
+/**
+ * [F5] 存檔的起始公元年（顯示錨點）。缺/非法 → 184；**不做年內換算**
+ * （年內換算仍走 `yearOf()`，兩者相加才是「西元 N 年」：`startYear + yearOf(m) - 1`）。
+ */
+export function startYearOf(save) {
+  const n = Math.trunc(num(save?.startYear));
+  return Number.isFinite(n) && n > 0 && n < 10000 ? n : START_YEAR_FALLBACK;
+}
 
 /** 绝对月数 → 年（1 起）。与 `monthLabel` 同一个式子，拆成两半给年度结算与显示共用 */
 export function yearOf(month) {

@@ -11,7 +11,15 @@
  * R94 的落地方式（project/162）：
  *   · 戰前 `applyWise(w,'A',3)` 只把 `army.chooseAfterFoe` 立起來，數值一律不動；
  *   · 戰中派發器照舊只打那句「成功」日誌，ops 從 `['note']` 變成 `['afterfoe','note']`；
- *   · 真正的「敵方之後重排前 3 槽」由 `deploy_queue.ts:chooseAfterFoe()` 在編成頁消費。
+ *   · 真正的「敵方之後選出陣武將」由 `deploy_queue.ts:chooseAfterFoe()` / `pickDeploy()`
+ *     在編成頁消費。
+ *
+ * R81 反彙編更正（`work/r81_exec34/REPORT.md`）：原作**沒有「前 3 槽」**——
+ *   · `0x446F45` は `army->entries[army->+0x04]` だけ、`+0x04` は初始化時 0（`0x446EE8`）；
+ *   · `0x448690` 每側只建 1 個單位，沒有循環、沒有 `cmp ...,3`；
+ *   · `0x449853` / `0x4496D1` 點選時寫 `army->+0x04 = 列表首行 + 光標`，界限是列表總數；
+ *   · `0x44DE44`（Execute 34）零狀態寫入。
+ *   → 「3 槽可重排」是 [推測]，本檔原本那兩條斷言已被證偽（見檔尾）。
  *
  * 本檔仍釘死「不許做成第 3 回合憑空補 1 隊」：跑滿一場 unit 只減不增。
  */
@@ -29,7 +37,14 @@ import {
 } from '../src/core/strategy.ts';
 import { applyWise, WISE_SPECS, WISE_SYSO_UNSUPPORTED, wiseAppliedAtStart } from '../src/core/wises.ts';
 import { engage } from './_engage.ts';
-import { DEPLOY_FIELD_SLOTS, chooseAfterFoe, makeQueue, moveSlot } from '../src/core/deploy_queue.ts';
+import {
+  DEPLOY_FIELD_SLOTS,
+  ORIGINAL_DEPLOY_PICK_SLOTS,
+  chooseAfterFoe,
+  makeQueue,
+  moveSlot,
+  pickDeploy,
+} from '../src/core/deploy_queue.ts';
 
 const data = loadData({ dir: new URL('../data/', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1') });
 const SEQ = 3;
@@ -59,7 +74,10 @@ test('Execute 34 在策略表仍是 reserve（原作只有一句日誌）；佔�
   assert.equal(Object.keys(WISE_SYSO_UNSUPPORTED).length, 0);
   assert.equal(WISE_SPECS[SEQ]!.kind, 'deploy');
   assert.equal(WISE_SPECS[SEQ]!.op, 'choose_after_foe');
-  assert.equal(WISE_SPECS[SEQ]!.value, DEPLOY_FIELD_SLOTS, '可重排槽數 = 前 3 槽');
+  // R81：`wises.ts` 的 value 是本重製版上陣區寬度（3，給 UI/cocos 用），
+  // 不是原作槽數 —— 原作每側只有 1 個出陣位（見 exec34_truth.test.ts）。
+  assert.equal(WISE_SPECS[SEQ]!.value, DEPLOY_FIELD_SLOTS, '重製版上陣區寬度（UI 用，非原作槽數）');
+  assert.equal(ORIGINAL_DEPLOY_PICK_SLOTS, 1, '原作可決定的出陣位 = 1');
 });
 
 test('戰前 applyWise(3)：只立 chooseAfterFoe，不動戰力/部隊/士氣，且記進生效清單', () => {
@@ -160,14 +178,19 @@ test('tickStrategy 派發 reserve 與直接 runStrategy 相同：afterfoe + note
   assert.equal(w.army.A.chooseAfterFoe, true);
 });
 
-test('旗標的消費點：chooseAfterFoe 給出前 3 槽可重排，且第 3 槽能上移到第 1 槽', () => {
+test('旗標的消費點：chooseAfterFoe 只給 1 個出陣位，pickDeploy 把第 3 位提到出陣位', () => {
   const foe = makeQueue(['敵甲', '敵乙', '敵丙', '敵丁', '敵戊']);
   const mine = makeQueue(['我甲', '我乙', '我丙', '我丁', '我戊']);
   const plan = chooseAfterFoe(foe, mine);
-  assert.equal(plan.fieldSlots, DEPLOY_FIELD_SLOTS);
-  assert.deepEqual(plan.reorderable, [0, 1, 2], '只有前 3 個上陣槽可重排');
+  // 舊斷言「fieldSlots === 3 / reorderable === [0,1,2]」已被 R81 反彙編證偽。
+  assert.equal(plan.fieldSlots, ORIGINAL_DEPLOY_PICK_SLOTS);
+  assert.deepEqual(plan.reorderable, [0], '只有出陣位（第 0 槽）可決定');
+  assert.deepEqual(plan.pickable, [0, 1, 2, 3, 4], '列表裏 5 員任選一員');
+  assert.equal(plan.pickOrder, 'foe-first');
   assert.deepEqual(plan.foe.map((s) => s.general), ['敵甲', '敵乙', '敵丙', '敵丁', '敵戊']);
-  const moved = moveSlot(mine, 2, 0, plan.fieldSlots);
-  assert.deepEqual(moved.map((s) => s.general), ['我丙', '我甲', '我乙', '我丁', '我戊']);
+  const picked = pickDeploy(mine, 2);
+  assert.deepEqual(picked.map((s) => s.general), ['我丙', '我甲', '我乙', '我丁', '我戊']);
   assert.deepEqual(mine.map((s) => s.general), ['我甲', '我乙', '我丙', '我丁', '我戊'], '純函式不改原陣列');
+  // 用 fieldSlots 當 limit 的舊寫法仍受限於 1 槽 —— 這正是被收窄的部分。
+  assert.deepEqual(moveSlot(mine, 2, 0, plan.fieldSlots).map((s) => s.general), ['我甲', '我乙', '我丙', '我丁', '我戊']);
 });

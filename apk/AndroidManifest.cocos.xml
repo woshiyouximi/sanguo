@@ -2,11 +2,11 @@
 <!-- Cocos 版（variant=cocos）：同一个 WebView 壳 + MainActivity，只是 assets\www 换成
      game\cocos-build\web-mobile 的构建产物（index.html 为真正入口，campaign.html 是跳转壳）。
      包名加 .cocos 后缀，好让主包（web 版）和它装在同一台机器上互不覆盖；
-     versionCode 5 / versionName 1.5 与主包 1.4 分开记，问题反馈时才说得清是哪个包。 -->
+     versionCode 6 / versionName 1.6 与主包 1.4 分开记，问题反馈时才说得清是哪个包。 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.sanguo.webview.cocos"
-    android:versionCode="5"
-    android:versionName="1.5">
+    android:versionCode="6"
+    android:versionName="1.6">
 
     <uses-permission android:name="android.permission.INTERNET" />
 

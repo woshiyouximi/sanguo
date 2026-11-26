@@ -724,28 +724,36 @@ test('generals.json 的 Status/Weapon/Horse/Thing 与 v3 口径一致（名字�
 
 // ---------------------------------------------------------------- 7. 势力色板
 
-test('14 家固定色板：色值互不相同、同一势力永远同色', () => {
-  assert.equal(S.FORCE_PALETTE.length, 14);
+test('固定色板：29 家（劇本勢力全員）色值互不相同、同一勢力永遠同色', () => {
+  // [F28] 差異清單行 229：14 色板對 18 家不夠用 → 撞色（曹操/王朗、馬騰/袁術）。
+  // 現在按劇本勢力表逐家定色，5 個劇本的 29 家全部落在固定表，不再走哈希。
+  const PAL = S.FORCE_PALETTE.length;
+  assert.ok(PAL >= 28, `固定色板至少 28 家（差異 F28），實測 ${PAL}`);
   const colors = S.FORCE_PALETTE.map((e) => e.color);
-  assert.equal(new Set(colors).size, 14);
+  assert.equal(new Set(colors).size, PAL, '色值必須互不相同（禁止撞色）');
   for (const e of S.FORCE_PALETTE) {
     assert.match(e.color, /^#[0-9A-Fa-f]{6}$/);
     assert.equal(S.forceColorOf(e.force), e.color);
     assert.equal(S.forceColorOf(e.force), S.forceColorOf(e.force));   // 稳定
-    assert.ok(S.forceColorIndex(e.force) < 14);
+    assert.ok(S.forceColorIndex(e.force) < PAL, e.force);
   }
-  // 剧本1 的 14 家（garrison owner 口径）都能落进固定色板，而不是备色
+  // 29 家＝5 個劇本的勢力名并集（劇本1 的 14 家 + 劇本2..5 的 15 家）
   const FOURTEEN = ['公孫瓚', '劉焉', '張角', '韓馥', '龔景', '喬玄', '何進', '董卓', '孫堅', '陶謙', '孔岫', '丁原', '劉繇', '嚴白虎'];
+  const LATER = ['袁紹', '曹操', '劉備', '孔融', '喬瑁', '馬騰', '袁術', '劉表', '王朗', '孫權', '張魯', '劉璋', '金旋', '孟獲', '徹里吉'];
   for (const f of FOURTEEN) assert.ok(S.forceColorIndex(f) < 14, f);
-  assert.equal(new Set(FOURTEEN.map((f) => S.forceColorOf(f))).size, 14);
+  for (const f of LATER) assert.ok(S.forceColorIndex(f) >= 14 && S.forceColorIndex(f) < PAL, f);
+  assert.equal(new Set([...FOURTEEN, ...LATER].map((f) => S.forceColorOf(f))).size, 29, '29 家 29 色');
 });
 
-test('备色/中性色：其他势力用 14 个备色且稳定，空/无主用中性色', () => {
+test('备色/中性色：表外势力用 14 个备色且稳定，空/无主用中性色', () => {
   assert.equal(S.FORCE_RESERVE.length, 14);
-  const extra = ['袁紹', '曹操', '劉備', '孫權'];
+  const PAL = S.FORCE_PALETTE.length;
+  // 表外名字（不在 29 家固定表里的）才会落备色段
+  const extra = ['南蠻王', '張舉', '韓遂', '公孫度'];
   const idx = extra.map((f) => S.forceColorIndex(f));
-  for (const i of idx) assert.ok(i >= 14 && i < 28, String(i));
-  assert.equal(new Set(idx).size, extra.length);      // 不同名不撞色
+  for (const i of idx) assert.ok(i >= PAL && i < PAL + 14, String(i));
+  // 備色段只有 14 格，表外名字哈希可能撞號（原作勢力都在固定表，撞不到）；至少不能全是同一格
+  assert.ok(new Set(idx).size >= 2, '備色哈希不應全部落同一格');
   for (const f of extra) assert.equal(S.forceColorOf(f), S.forceColorOf(f));
   for (const empty of ['', '   ', null, undefined]) assert.equal(S.forceColorOf(empty), S.FORCE_COLOR_NEUTRAL);
   // 表外势力不是中性灰：按名字哈希落备色，保证「同名同色」
