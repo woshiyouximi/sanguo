@@ -700,13 +700,19 @@ test('R141 没有士兵（只剩主将）时：canUseArmyCmd 返回「已無士�
 // ⑦ 第一层按钮（保護主將 / 武將出擊 / 主將待機|後退 / 全軍撤退）
 // ---------------------------------------------------------------------------
 
-test('R141 保護主將：置 ARMY_FLAG.guardGeneral，并把 takenMul 压到 0.75', () => {
+test('R141 保護主將 = 全軍歸陣（原作 0x4451C3 → 0x444C37(2)：7 个士兵槽写 9）', () => {
   const w = freshWorld(230);
+  applyArmyCmd(w, 'A', 5); // 先突擊，确认歸陣会把它收掉
+  assert.equal(w.rush?.A, true);
   assert.equal(applyArmyCmdKind(w, 'A', 'guardLord'), true);
-  assert.equal((w.army.A.flags & 0x10) !== 0, true, 'army+0x84 |= 0x10（guardGeneral）');
-  assert.equal(w.army.A.takenMul, 0.75);
+  const st = armyOrderOf(w, 'A');
+  for (let i = 1; i < 8; i += 1) assert.equal(st.cmds[i], 9, `槽 ${i} 应写歸陣 9`);
+  assert.equal(st.cmds[0], 0, '主将槽不动（歸陣只写 0x101=除主将）');
+  assert.equal(st.buttons & ARMY_BTN.guardLord, ARMY_BTN.guardLord);
+  assert.equal(w.rush?.A, false, '歸陣会清突擊态');
+  assert.equal((w.army.A.flags & 0x10) !== 0, false, '原作按钮不写 army+0x84 的 0x10');
+  assert.equal(w.army.A.takenMul, 1, '不是减伤');
   assert.equal(w.army.B.takenMul, 1, '只影响本方');
-  assert.equal(armyOrderOf(w, 'A').buttons & ARMY_BTN.guardLord, ARMY_BTN.guardLord);
 });
 
 test('R141 主將後退 / 主將待機：bit 0x10 是开关，命令槽 0 分别写 2 / 0', () => {

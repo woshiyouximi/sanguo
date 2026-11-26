@@ -884,10 +884,13 @@ export class BattleInput {
       const killed = result.killed ?? 0;
       const damage = result.damage ?? 0;
       const hit = result.hit === true || (result.hits ?? 0) > 0;
-      const text = killed > 0 ? `-${killed}` : damage > 0 ? `-${damage}` : hit ? '命中' : 'MISS';
-      fx.push({ kind: 'floater', floater: { x: aim.x, y: aim.y, text, tone: hit ? 'hit' : 'miss' } });
+      // 原作武將技没有命中率，飘 MISS 会让人以为被闪避；只在确实打空时提示「範圍內無敵」。
+      const text = killed > 0 ? `-${killed}` : damage > 0 ? `-${damage}` : hit ? '命中' : '';
+      if (text) {
+        fx.push({ kind: 'floater', floater: { x: aim.x, y: aim.y, text, tone: 'hit' } });
+      }
       this.message = `${slot.name}：${
-        killed > 0 ? `擊殺 ${killed} 名敵兵` : hit ? '命中敵將' : '未命中'
+        killed > 0 ? `擊殺 ${killed} 名敵兵` : hit ? '命中敵將' : '範圍內無敵'
       }${damage > 0 ? `，敵將 −${damage} 點體力` : ''}。`;
     }
 

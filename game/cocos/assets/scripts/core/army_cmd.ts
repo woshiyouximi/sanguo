@@ -62,7 +62,6 @@ import {
   unitCell,
 } from './battle';
 import type { AiBattleCommand, Side, StepPlan, Unit, World } from './battle';
-import { ARMY_FLAG } from './strategy';
 
 // ---------------------------------------------------------------------------
 // 一、类型
@@ -513,8 +512,8 @@ function writeCmds(st: ArmyOrderState, def: ArmyCmdDef): void {
  * 下第一层按钮指令（`保護主將` / `武將出擊` / `主將待機` / `主將後退` / `全軍撤退`）。
  *
  * 语义（`[确认]`）：
- *  - `保護主將` = `army+0x84 |= 0x10`（`ARMY_FLAG.guardGeneral`）；本作消费点
- *    `battle.ts:1716` 的 `takenMul`，所以顺带写 `takenMul = min(现値, 0.75)`（0.75 `[推测]`）。
+ *  - `保護主將` = `0x444C37(2)`：`0x43ADED(armyA, 0x101, 9)` —— 除主将外 7 槽写 9=歸陣，
+ *    士兵回军团线；另置全局 `[0x4a8ae0] |= 8`。**不是**减伤，也不写 `army+0x84`。
  *  - `武將出擊` = `0x43ADED(0,1)` + `[0x4a8ae0] |= 2` + 清 `0x10`。
  *  - `主將後退` = `0x43ADED(0,2)` + `[0x4a8ae0] |= 0x10`（0x445282 mode4）。
  *  - `主將待機` = `0x444C94`：`0x43ADED(0,0)` + 清 `army+0x80` 的 `0x10`。
@@ -526,10 +525,13 @@ export function applyArmyCmdKind(world: World, side: Side, kind: ArmyCmdKind): b
   const st = armyOrderOf(world, side);
   switch (kind) {
     case 'guardLord': {
-      const army = world.army?.[side];
-      if (!army) return false;
-      army.flags |= ARMY_FLAG.guardGeneral;
-      army.takenMul = Math.min(army.takenMul ?? 1, 0.75);
+      // 原作 0x4451C3（mode 4）→ 0x444C37(2) → `0x43ADED(0x4A8A60, 0x101, 9)` + `[0x4a8ae0] |= 8`：
+      // 除主将外 7 个槽全部写 **9 = 歸陣**，士兵走回己方军团线（=回到主将身边），
+      // 同时置全局「守勢」态。这里既不减伤，也不写 army+0x84 的 0x10。
+      for (let i = 1; i < 8; i += 1) st.cmds[i] = CMD_RETURN;
+      if (world.rush?.[side]) {
+        world.rush = { ...(world.rush ?? { A: false, B: false }), [side]: false } as Record<Side, boolean>;
+      }
       st.buttons |= ARMY_BTN.guardLord;
       st.last = kind;
       st.at = world.tick;
