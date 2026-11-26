@@ -139,6 +139,8 @@ export interface CampaignSave {
    * 避免再派第二支兵團時把第一支的將又列進候選。
    */
   siege?: DeploySiege;
+  /** [R233] 是否處在「內政階段」（出征/切場景都不結束內政；原作出內政必經 0x41BBF5） */
+  interiorPending?: boolean;
   /** 大地圖上行軍中的部隊（我方 side 'A'、敵方 side 'B'）；與 web 的 `save.armies` 同形 */
   armies: CampaignArmy[];
   /** 部隊 id 的自增序號，對應 web 的 `save.armySeq` */
@@ -1071,6 +1073,24 @@ export interface DeploySiege {
   officers: string[];
   troops: number;
   advisor?: string;
+}
+
+/**
+ * [R233] 內政階段標記落盤。
+ *
+ * 為什麼要落盤：內政頁的「出征」是內政指令，出兵後本該還在内政裡等玩家按「內政終了」。
+ * 但 `director.loadScene('Deploy')` 會重建 `CampaignRoot`（`interiorPhase` 归 false、时钟恢复流动），
+ * 制作人实测「在内政界面点出征，也会推进时间」。把标记写进存档，回大地图重新 `start()` 时按它恢复。
+ */
+export function setInteriorPending(on: boolean): void {
+  const save = loadSave();
+  if (on) save.interiorPending = true;
+  else delete save.interiorPending;
+  persistSave();
+}
+
+export function isInteriorPending(): boolean {
+  return loadSave().interiorPending === true;
 }
 
 /**

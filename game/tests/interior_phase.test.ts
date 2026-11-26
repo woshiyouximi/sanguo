@@ -63,3 +63,30 @@ test('R231b 內政階段關頁 = 內政終了（清旗標 + 走 endInterior）',
   assert.match(block, /this\.endInterior\(\);/, '內政階段關頁要呼叫 endInterior()');
   assert.match(bodyOf(s, 'private endInterior('), /this\.interiorPhase = false;/, 'endInterior 要清旗標');
 });
+
+test('[R233] 内政阶段要落盘：出征/切换场景回来不能自己走时钟', () => {
+  const source = src();
+  // enterInterior 里落标记
+  const enter = bodyOf(source, 'private enterInterior(');
+  assert.ok(/GameState\.setInteriorPending\(true\)/.test(enter), 'enterInterior 要 setInteriorPending(true)');
+  // endInterior 里清标记
+  const end = bodyOf(source, 'private endInterior(');
+  assert.ok(/GameState\.setInteriorPending\(false\)/.test(end), 'endInterior 要 setInteriorPending(false)');
+  // start() 里据标记恢复内政阶段（时钟先停住再开面板）
+  assert.ok(/GameState\.isInteriorPending\(\)/.test(source), 'start() 要读 isInteriorPending()');
+  const restore = source.slice(source.indexOf('isInteriorPending()'));
+  assert.ok(/this\.clockPaused = true;/.test(restore.slice(0, 400)), '恢复前必须先把时钟停住');
+  // 新局自动开内政也要落标记（否则第一次出征回来就掉出内政）
+  const fresh = source.slice(source.indexOf('if (freshRun && this.save.month <= 1'));
+  assert.ok(/setInteriorPending\(true\)/.test(fresh.slice(0, 300)), '新局自动进内政也要落标记');
+});
+
+test('[R233] GameState 有 setInteriorPending/isInteriorPending 且写进 save', () => {
+  const gs = readFileSync(join(process.cwd(), 'cocos/assets/scripts/GameState.ts'), 'utf8');
+  assert.ok(/export function setInteriorPending\(on: boolean\): void/.test(gs));
+  assert.ok(/export function isInteriorPending\(\): boolean/.test(gs));
+  assert.ok(/interiorPending\?: boolean;/.test(gs), 'CampaignSave 要声明 interiorPending');
+  const body = gs.slice(gs.indexOf('export function setInteriorPending'));
+  assert.ok(/delete save\.interiorPending/.test(body.slice(0, 500)), 'false 时要删键（不留 false 污染存档）');
+  assert.ok(/persistSave\(\)/.test(body.slice(0, 500)), 'setInteriorPending 要落盘');
+});

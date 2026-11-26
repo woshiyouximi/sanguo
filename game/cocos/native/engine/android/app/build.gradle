@@ -21,8 +21,8 @@ android {
         applicationId APPLICATION_ID
         minSdkVersion PROP_MIN_SDK_VERSION
         targetSdkVersion PROP_TARGET_SDK_VERSION
-        versionCode 32
-        versionName "4.2"
+        versionCode 33
+        versionName "4.3"
 
         externalNativeBuild {
             cmake {

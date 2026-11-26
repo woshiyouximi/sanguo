@@ -1950,8 +1950,19 @@ export class CampaignRoot extends Component {
         // [R231b] 新局从内政开始（时钟已由 R226b 停在 3600）——这也算「内政阶段」
         if (home) {
           this.interiorPhase = true;
+          GameState.setInteriorPending(true);
           this.openCityPanel(home);
         }
+      }
+      // [R233] 出征是内政指令：部队出发/回城都不结束内政。进入内政时落了 `interiorPending`，
+      // 从 Deploy/Battle 回来重建本场时据此恢复「内政阶段」，否则时钟会自己走起来
+      // （制作人实测「在内政界面点出征，也会推进时间」）。
+      if (!freshRun && !this.monarchExtinct && GameState.isInteriorPending() && !this.interiorPhase) {
+        this.clockPaused = true;
+        this.clockT = 0;
+        this.interiorPhase = true;
+        const homeCity = this.selected ?? this.save?.owned[0] ?? '';
+        if (homeCity) this.openCityPanel(homeCity);
       }
       // 結局（d4-ending-list）：統一 / 君主亡 / 0 城 → 滿屏結局，蓋在招降面板之上。
       EndingPanel.showIfEnded(
@@ -2721,6 +2732,8 @@ export class CampaignRoot extends Component {
     this.clockPaused = true;
     this.interiorPhase = true;
     this.clockT = 0;
+    // [R233] 内政阶段落盘：出征/攻城往返会重建 CampaignRoot，靠它恢复「还在内政里」
+    GameState.setInteriorPending(true);
     const home = this.selected ?? this.save.owned[0] ?? '';
     this.pushBattleLog([
       // [R232] 戰報是給玩家看的，反匯編位址留在程式註解裡，不要寫進 UI
@@ -2741,6 +2754,8 @@ export class CampaignRoot extends Component {
     this.clockPaused = false;
     this.clockT = 3600;
     this.clockAcc = 0;
+    // [R233] 内政结束（原作 0x41BBF5）→ 清标记，之后切场景回来不再自动进内政
+    GameState.setInteriorPending(false);
     this.pushBattleLog([
       battleLogLine(this.save.month, '內 政 終 了：時間開始流動', 'year'),
     ]);
