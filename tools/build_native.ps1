@@ -48,7 +48,8 @@ param(
     [string] $OutApk = 'F:\sanguo\dist\android\sanguo-native.apk',
     [switch] $SkipSyncCheck,
     [switch] $SkipCocosBuild,
-    [switch] $Clean
+    [switch] $Clean,
+    [switch] $NoProvision
 )
 
 $ErrorActionPreference = 'Stop'
@@ -73,7 +74,8 @@ $NdkDir     = Join-Path $SdkDir 'ndk\23.1.7779620'
 $JavaHome   = 'F:\devtools\jdk\jdk-17.0.21+9'
 $StartScene = '0b007000-1a2b-4c3d-8e4f-000000000001'              # Boot.scene
 $PackageName = 'com.sanguo.sango2'
-$AppAbi     = 'arm64-v8a'
+$AppAbi     = @('arm64-v8a', 'armeabi-v7a')
+$AppAbiText = $AppAbi -join ':'
 $ApiLevel   = 34
 
 $CfgJson    = Join-Path $WorkDir 'build_android.json'
@@ -94,6 +96,21 @@ function Assert-Path([string] $p, [string] $what) {
 
 # ---------------------------------------------------------------- 0. 前置检查
 Write-Step '0/5 前置检查'
+
+$provScript = Join-Path $Root 'tools\provision_android.ps1'
+if ($NoProvision) {
+    Write-Host '  已按 -NoProvision 跳过工具链自动装配。' -ForegroundColor Yellow
+}
+elseif (Test-Path -LiteralPath $provScript) {
+    Write-Host '  检查 Android 工具链（缺件会自动下载，日志 work\cocos_native\provision.log）'
+    & $provScript -SdkDir $SdkDir -NdkVersion (Split-Path $NdkDir -Leaf) -JavaHome $JavaHome
+    if ($LASTEXITCODE -ne 0) {
+        throw '工具链装配失败：先看 work\cocos_native\provision.log，按其中「手工兜底」三行装齐再重跑，或加 -NoProvision 自行准备环境。'
+    }
+}
+else {
+    Write-Host '  未找到 tools\provision_android.ps1，跳过自动装配' -ForegroundColor Yellow
+}
 Assert-Path $CreatorExe 'CocosCreator.exe'
 Assert-Path $Project    'Cocos 项目'
 Assert-Path $SdkDir     'Android SDK'
@@ -257,7 +274,7 @@ if (Test-Path -LiteralPath $gradleProps) {
     $gp = [IO.File]::ReadAllText($gradleProps, [Text.Encoding]::UTF8)
     foreach ($kv in @(
             @('PROP_NDK_VERSION', '23.1.7779620'),
-            @('PROP_APP_ABI',     $AppAbi),
+            @('PROP_APP_ABI',     $AppAbiText),
             @('APPLICATION_ID',   $PackageName)
         )) {
         $k = $kv[0]; $v = $kv[1]
@@ -269,7 +286,7 @@ if (Test-Path -LiteralPath $gradleProps) {
         }
     }
     [IO.File]::WriteAllText($gradleProps, $gp, (New-Object Text.UTF8Encoding($false)))
-    Write-Host "  已核对 $gradleProps（PROP_NDK_VERSION=23.1.7779620 / PROP_APP_ABI=$AppAbi / APPLICATION_ID=$PackageName）"
+    Write-Host "  已核对 $gradleProps（PROP_NDK_VERSION=23.1.7779620 / PROP_APP_ABI=$AppAbiText / APPLICATION_ID=$PackageName）"
 }
 
 # ---------------------------------------------------------------- 4. gradle 出 APK

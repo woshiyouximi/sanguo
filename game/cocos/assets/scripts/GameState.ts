@@ -13,6 +13,7 @@ import type { Army } from './core/march';
 import type { BattleRecord } from './core/battle';
 import { GENERAL_RECORD_MAX } from './core/roster';
 import type { ReinforceConfig } from './core/strategy';
+import { clearRunScoped } from './core/run_scoped';
 import type { General } from './types';
 
 export const SAVE_KEY = 'sanguo_campaign_v1';
@@ -544,6 +545,16 @@ export function initCampaign(
     save.owned = [];
     save.cities = {};
     save.seeded = false;
+    // R214：新局必须把「上一局留下的战后状态」清干净，否则一进大地图就弹出
+    // 「处置上一局的俘虏」面板（2026-11-26 用户实测：选《讨伐董卓》+ 刘备，进去先弹处置张角）。
+    //
+    // 键名单与判定口径统一放在 `core/run_scoped.ts`（纯函数、有 `game/tests/run_scoped.test.ts` 守门）：
+    //   `captured` / `executed` —— `SurrenderModel.queuePostBattle()` 写的待决队列
+    //   `lastBattle` / `lastPost` —— 上一场战果（判「同一场只处置一次」用）
+    //   `roster`（含 `_moved`）/ `acted` / `away` —— 逐将在职、逐将年令、在途武将
+    //   `armies` —— 行军中的部队（新局不该有）
+    // 不清 `wins/losses/streak`：那是玩家战绩，跨局保留（与 web `saves.js` 的 legacy 计分同义）。
+    clearRunScoped(save);
   }
   if (key !== '') save.runKey = key;
   if (!save.seeded) {

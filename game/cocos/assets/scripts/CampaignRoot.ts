@@ -43,6 +43,7 @@ import type { Army } from './core/march';
 // 部隊的完整欄位（officers/advisor/stationed）在 GameState 的 CampaignArmy 上
 import type { CampaignArmy } from './GameState';
 import * as GameState from './GameState';
+import { hasPendingCaptures, healStaleQueue } from './core/run_scoped';
 import { ItemsPanel } from './ItemsPanel';
 import * as M from './MonarchModel';
 import { MonarchPanel } from './MonarchPanel';
@@ -52,7 +53,7 @@ import type { CityListPanelOptions } from './CityListPanel';
 import { EndingPanel } from './EndingPanel';
 import { GeneralBookPanel } from './GeneralBookPanel';
 import type { GeneralBookPanelOptions } from './GeneralBookPanel';
-import { SaveSlotsPanel, adYearOfMonth, ADVANCE_NOTICE } from './SaveSlots';
+import { SaveSlotsPanel, adYearOfMonth, ADVANCE_NOTICE, AD_ANCHOR } from './SaveSlots';
 import type { LoadSlotResult } from './SaveSlots';
 import { ForcesPanel } from './ForcesPanel';
 import { MONARCH_EXTRAS_KEY } from './MonarchPanel';
@@ -186,7 +187,7 @@ const MONARCH_SAVE_KEYS = [
   'tire',
 ] as const;
 
-type ActionKind = 'recruit' | 'develop' | 'march' | 'advance' | 'defend';
+type ActionKind = 'interior' | 'recruit' | 'develop' | 'march' | 'advance' | 'defend';
 
 interface Action {
   kind: ActionKind;
@@ -1128,6 +1129,19 @@ const SKIN_SLOTS: readonly SkinSlot[] = [
 /** 月令按鈕底板槽位數（與 onLoad 裡建的 4 個 actionLabels 一一對應） */
 const ACTION_SKIN_SLOTS = 4;
 
+/**
+ * 劇本起始西元年（`scenarios.json[i].system.YEAR`）：劇本 0 = 184、1 = 189、2 = 200…
+ *
+ * web 側走 `Era.setAnchor(Saves.startYearOf(save))`（`game/web/campaign.html:1896`）；
+ * Cocos 之前把 `AD_ANCHOR = 184` 寫死，於是《討伐董卓》頂欄也顯示「西元 184年」。
+ * 缺欄位／越界時退回 184（劇本 0），與 `SelectModel.ts:88` 讀 `system.YEAR` 同一個來源。
+ */
+export function startYearOfScenario(scenario: unknown): number {
+  const system = (scenario as { system?: { YEAR?: unknown } } | null | undefined)?.system;
+  const year = Math.trunc(Number(system?.YEAR));
+  return Number.isFinite(year) && year >= 100 && year <= 300 ? year : AD_ANCHOR;
+}
+
 @ccclass('CampaignRoot')
 export class CampaignRoot extends Component {
   private gBase: Graphics | null = null;
@@ -1232,6 +1246,8 @@ export class CampaignRoot extends Component {
   private cities: CampaignCity[] = [];
   private paths: CampaignPath[] = [];
   private generals: CampaignGeneral[] = [];
+  /** R214d：劇本起始西元年（`scenarios.json[i].system.YEAR`），頂欄紀元用它當錨點 */
+  private startYear = AD_ANCHOR;
   /** 整份 GameData：城市卡要查 garrison.json（勢力/太守/守將） */
   private data: GameData | null = null;
   private save: CampaignSave | null = null;
@@ -1346,12 +1362,18 @@ export class CampaignRoot extends Component {
       const data = await loadGameData();
       // 剧本索引来自开局选择（RunSetup，标题页/剧本页写入）；越界自动回落 0
       const sci = runScenarioIndex();
+      // R214c：先取出「这一局是不是刚按的开始新局」，initCampaign 与后面自动开内政都要用
+      const freshRun = consumeFreshStart();
       const scenario = (data.scenarios[sci] ?? data.scenarios[0]) as unknown as CampaignScenario | undefined;
       if (!scenario || !Array.isArray(scenario.cities)) {
         throw new Error('scenarios[0].cities 為空，請確認 bundles/res/data/scenarios.json');
       }
       this.cities = scenario.cities;
       this.paths = Array.isArray(scenario.paths) ? scenario.paths : [];
+      // R214d：劇本起始年（scenarios.json 的 `system.YEAR`：劇本 0=184、1=189、2=200…）。
+      // web 走 `Era.setAnchor(Saves.startYearOf(save))`（campaign.html:1896），Cocos 之前把
+      // `AD_ANCHOR = 184` 寫死，於是《討伐董卓》頂欄也顯示「西元 184年」——用戶實機發現。
+      this.startYear = startYearOfScenario(scenario);
       this.generals = data.generals as CampaignGeneral[];
       this.data = data;
       this.computeCityTiers();
@@ -1359,8 +1381,9 @@ export class CampaignRoot extends Component {
         // 开局指纹：换剧本/换君主时整局作废（GameState.initCampaign 里判 runKey）
         key: `${sci}:${runPlayerForce()}`,
         force: runPlayerForce(),
-        // 标题页按过「開始新局」→ 同剧本同君主也要重开（r86 的 P5）；读完即清
-        fresh: consumeFreshStart(),
+        // 标题页按过「開始新局」→ 同剧本同君主也要重开（r86 的 P5）；`consumeFreshStart()`
+        // 已经在 start() 开头取过（R214c：打完仗回大地图时不能再吃一次，否则 fresh 丢失）
+        fresh: freshRun,
       });
       // 君主/勢力：GameState 是白名單存檔，君主欄位走補丁鍵（見 syncMonarchState 註釋）
       this.syncMonarchState();
@@ -1384,14 +1407,57 @@ export class CampaignRoot extends Component {
       // 君主名從**補丁視圖**取：本移植的君主存在 `sanguo_monarch_v1`（`this.monarchState`），
       // `this.save` 上只有 `GameState` 白名單那幾欄，直接 `M.monarchOf(this.save)` 恆為空。
       const monarchName = M.monarchOf(this.syncMonarchState()) || runPlayerForce() || '';
-      SurrenderPanel.showIfNeeded(this.node, {
-        save: this.save,
-        data,
-        home: this.selected ?? this.save.owned[0] ?? '',
-        king: monarchName,
-        mine: this.myOfficerNames(),
-        onDone: () => this.refresh(),
-      });
+      // R214：脏档自愈——队列里有待决名字，却没有配套的 `lastBattle`/`lastPost`（战果记录），
+      // 说明那是上一局或旧版本遗留的（`initCampaign(fresh)` 在 R214 之前不清这几个键）。
+      // 这种「无主队列」一旦弹面板，玩家就会在新局里看到「处置上一局俘虏」——
+      // 2026-11-26 实测：选《討伐董卓》+ 劉備，一进大地图先弹处置张角。
+      // 判定与清库都在 `core/run_scoped.ts`（有 `game/tests/run_scoped.test.ts` 守门）。
+      if (healStaleQueue(this.save)) {
+        GameState.persistSave();
+        console.warn('[R214] 清掉无主战果队列（旧档遗留），不弹招降面板');
+      }
+      // R214 诊断行：真机/模拟器上 `adb logcat -s Cocos` 就能看到这一局到底用什么存档进来的。
+      // （2026-11-26 排查「新局弹处置张角」时，靠它把「读的是哪份档」与「屏幕上画的是什么」分开。）
+      {
+        const diag = this.save as unknown as Record<string, unknown>;
+        console.log('[R214] campaign start', JSON.stringify({
+          sci,
+          force: runPlayerForce(),
+          runKey: this.save.runKey ?? null,
+          owned: this.save.owned,
+          captured: diag.captured ?? null,
+          executed: diag.executed ?? null,
+          hasLastBattle: Boolean(diag.lastBattle || diag.lastPost),
+        }));
+      }
+      // R214b：**只有队列里真有战果时才开面板**。之前无条件 `showIfNeeded`，而它的
+      // `atCity` 缺省是 `officersAt(data, home, scenIdx ?? 0)`——`scenIdx` 拿到 0（黃巾之亂），
+      // 于是《討伐董卓》的新局会按「184 年平原的守将」造出敌将卡：用户看到的就是
+      // 「一进大地图先弹处置张角」（2026-11-26 实测，存档里其实 captured=null）。
+      // 现在两道闸：① `hasPending()` 没队列直接跳过；② 真要开时 `atCity` 用本局剧本号算。
+      const homeCity = this.selected ?? this.save.owned[0] ?? '';
+      if (hasPendingCaptures(this.save)) {
+        const garrisonNow = garrisonOf(data as unknown as GarrisonData, sci, homeCity);
+        const atCity = Array.isArray(garrisonNow?.officers)
+          ? garrisonNow!.officers.map((o) => String(o?.name ?? '')).filter(Boolean)
+          : undefined;
+        SurrenderPanel.showIfNeeded(this.node, {
+          save: this.save,
+          data,
+          home: homeCity,
+          atCity,
+          king: monarchName,
+          mine: this.myOfficerNames(),
+          onDone: () => this.refresh(),
+        });
+      }
+      // R214c：按 PDF《三国群英传2 全界面按键说明》的大循环「内政(1 月) → 大地图(11 月) → 战斗」，
+      // 新局第一年的一月先把内政页打开（原版就是先在内政里安排搜索/开发/征兵再出兵）。
+      // 只对「刚按过 開始新局」的那一次生效，之后回大地图/从出征回来都不再自动弹。
+      if (freshRun && this.save.month <= 1 && !this.monarchExtinct) {
+        const home = this.selected ?? this.save.owned[0] ?? '';
+        if (home) this.openCityPanel(home);
+      }
       // 結局（d4-ending-list）：統一 / 君主亡 / 0 城 → 滿屏結局，蓋在招降面板之上。
       EndingPanel.showIfEnded(
         this.node,
@@ -1877,8 +1943,7 @@ export class CampaignRoot extends Component {
         ];
       }
       return [
-        { kind: 'recruit', title: '徵 兵', caption: '金 500 → 兵 +40', primary: false, enabled: this.save.gold >= 500 },
-        { kind: 'develop', title: '開 發', caption: '金 400 → 民 +3000', primary: false, enabled: this.save.gold >= 400 },
+        { kind: 'interior', title: '內 政', caption: '徵兵 · 開發 · 搜索', primary: false, enabled: true },
         advance,
       ];
     }
@@ -2060,6 +2125,13 @@ export class CampaignRoot extends Component {
     }
     if (!this.selected) return;
     const selected = this.selected;
+    if (kind === 'interior') {
+      // R214d：大地圖底部不再用舊口徑「金 500 → 兵 +40 / 金 400 → 民 +3000」直接改數字，
+      // 一律進城內頁走 P1 規則（徵兵在城內抽屜、開發不收金、逐將年令、正月窗口）。
+      this.hintText = '';
+      this.openCityPanel(selected);
+      return;
+    }
     if (kind === 'recruit') {
       const result = GameState.recruit(selected);
       this.save = GameState.loadSave();
@@ -2354,7 +2426,7 @@ export class CampaignRoot extends Component {
     // 頂欄紀元（web `era.eraTextOfMonth()`，`game/web/era.js:161`；
     // 原作證據 `work/video_ui/A_map_date_zoom_t0130.png`：`西元 184年 4月`，
     // 西元後、年后各一個半角空格，不是「第 1 年 4 月」）
-    this.labelMonth.string = `西元 ${adYearOfMonth(save.month)}年 ${month}月`;
+    this.labelMonth.string = `西元 ${adYearOfMonth(save.month, this.startYear)}年 ${month}月`;
     // 頁頭：「君主 X」單獨一段（可點開屬性卡）+「勢力 Y · 城 N · 戰績」
     const monarch = M.monarchOf(view);
     const force = M.forceIdOf(view);

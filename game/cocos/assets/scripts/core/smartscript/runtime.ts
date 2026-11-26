@@ -292,8 +292,14 @@ interface SysoHostOptions {
  * System.register 包起来的函数体，`import.meta` 不是合法语法（rollup 直接判死）。
  * Cocos 走「预加载」路径（`assets/scripts/shim/host.ts` 已把 SO/数据装好），
  * 这个常量只给下面的同步 XHR / node:fs 兜底分支用，指哪都无所谓。
+ *
+ * R214：这里**绝对不能**写 `new URL(...)`——原生包里 `URL` 是 jsb-adapter 的垫片
+ * （web-adapter.js:345 用 `document.createElementNS(..., "a")` 造假锚点），native 下
+ * `a.protocol` 是 undefined，构造时就 `uri_info.protocol.toLowerCase()` 抛 TypeError；
+ * 而这行在模块顶层，等于整个 main bundle 执行失败 ⇒ 原生包一启动就全黑（2026-11-26 实测）。
+ * 兜底分支后续要拼 URL 的一律走字符串拼接。
  */
-const DATA_URL = new URL('data/', 'https://cocos.local/');
+const DATA_URL = 'https://cocos.local/data/'; // 不要 new URL：native 无真 DOM 锚点
 let cachedProgram: SoProgram | undefined;
 /** 浏览器里由 `initMagicProgram()` 预先塞进来的原始字节。 */
 let preloaded: { bin: ArrayBuffer | Uint8Array; symbols: SoSymbols } | undefined;

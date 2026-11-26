@@ -518,10 +518,17 @@ export function pad3(value: unknown): string {
 /** 西元錨點（web `era.js:41 AD_ANCHOR_DEFAULT`）：第 1 年 = 西元 184 年 */
 export const AD_ANCHOR = 184;
 
-/** 遊戲月 → 西元（web `era.adYearOfMonth`） */
-export function adYearOfMonth(month: unknown): number {
+/**
+ * 遊戲月 → 西元（web `era.adYearOfMonth`）。
+ *
+ * R214d：`anchor` 是這份存檔的劇本起始年（劇本 0=184、1=189、2=200…）。web 用
+ * `Era.setAnchor(Saves.startYearOf(save))` 全局設錨點，Cocos 這裡改成顯式傳參，
+ * 免得同一進程換劇本後還留著上一個錨點。
+ */
+export function adYearOfMonth(month: unknown, anchor: unknown = AD_ANCHOR): number {
   const m = Math.max(1, Math.trunc(numOf(month)) || 1);
-  return AD_ANCHOR + (Math.floor((m - 1) / 12) + 1) - 1;
+  const a = Math.trunc(numOf(anchor)) || AD_ANCHOR;
+  return a + (Math.floor((m - 1) / 12) + 1) - 1;
 }
 
 /** `記錄01` … `記錄10`；越界槽號不拋（web `slotTitle()` 同語義） */
