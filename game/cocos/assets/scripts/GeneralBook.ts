@@ -466,11 +466,15 @@ export function mergeRow(
   // 舊碼兜底用靜態 `rec.Status`（劇本 0 的狀態），《討伐董卓》會把淳于瓊（status_by_times[1]='野'）算成
   // 「在職」，與 `OfficersOfCity` 的運行時口徑不一致（P1-6）。`statusOf` 與 `cityOf` 同源、無新依賴。
   const liveStatus = mapGet(save.generalStatus, name);
+  // [R240] 招募後的狀態要看**運行時人事**：`officer` 非空 = 這個人此刻站在某座城的守将表裡，
+  // 那就是「在職」。舊碼取 `officer.rec.status`（那是劇本靜態欄位，招募來的將仍是「野」），
+  // 於是搜索招到的淳于瓊/蔣義渠/管輅在名冊裡一直顯示「在野」（製作人回報）。
+  // 優先級：存檔 `generalStatus`（俘虜/斬首等戰後狀態）→ 運行時在城 = 在職 → 劇本靜態。
   const status = normBookStatus(
     liveStatus !== undefined && str(liveStatus)
       ? liveStatus
       : officer
-        ? officer.rec.status
+        ? '職'
         : statusOf(rec as unknown as CityGeneral, intOr(ctx.scenIdx, 0, 0)),
   );
   // 有城但沒人認領 = 在野；連城都沒有 = 未登場。兩個都不是「勢力 ''」的同一件事，

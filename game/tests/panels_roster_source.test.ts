@@ -247,3 +247,14 @@ test('舊檔無人事紀錄：回落劇本表且按 scenIdx 取（劇本0 ≠ �
   for (const name of ['張角', '廖化', '裴元紹']) assert.ok(scen0.includes(name), `劇本0平原應有 ${name}`);
   for (const name of ['關羽', '劉備']) assert.ok(!scen0.includes(name), `劇本0平原不應有 ${name}`);
 });
+
+test('[R240] 名冊狀態：在運行時守将表里的人一律「在職」（招募後不得再顯示在野）', () => {
+  const gb = readFileSync(new URL('../cocos/assets/scripts/GeneralBook.ts', import.meta.url), 'utf8');
+  const at = gb.indexOf('const liveStatus = mapGet(save.generalStatus, name);');
+  assert.ok(at > 0, '找不到状态解析');
+  const seg = gb.slice(at, at + 700);
+  assert.ok(seg.includes("officer\n        ? '職'"), 'officer 非空时必须判在職');
+  assert.equal(seg.includes(': officer.rec.status'), false, '不得再用剧情静态 status（招募后仍是「野」）');
+  // 存檔 generalStatus（俘虜等）仍优先
+  assert.ok(seg.indexOf('liveStatus') < seg.indexOf("officer\n        ? '職'"), 'generalStatus 优先级要在 officer 之前');
+});
