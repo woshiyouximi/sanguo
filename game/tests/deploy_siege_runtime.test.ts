@@ -68,6 +68,8 @@ registerHooks({
 
 /** 正式版存檔/戰役狀態總線（含 R231 的 DeploySiege 快照） */
 const GameState = await import(new URL('../cocos/assets/scripts/GameState.ts', import.meta.url).href);
+/** [R232] 在途判定（`awayNameSet`）：攻城快照裡的將要算作不在城內 */
+const O = await import(new URL('../cocos/assets/scripts/OfficersOfCity.ts', import.meta.url).href);
 
 /** Map 假 storage（與 Cocos 的 `sys.localStorage` 同構；`dump` 方便斷言盤上內容） */
 function memStorage(initial = {}) {
@@ -337,4 +339,40 @@ test('[R231] 未滿 cap 時原樣退回（不退到別的城、不加倍、可�
   // 再讀一次（模塊緩存命中）值不變，不會重複退款
   assert.equal(GameState.loadSave().cities['平原'].troops, 220);
   assert.equal(JSON.parse(storage.getItem(GameState.SAVE_KEY)).cities['平原'].troops, 220);
+});
+
+test('[R232] 攻城快照要落盤（save.siege），並把這些將算作在途', () => {
+  GameState.resetCache();
+  const save = GameState.loadSave();
+  save.owned = ['平原'];
+  save.cities = { 平原: { troops: 200, pop: 1000, money: 100 } } as never;
+  save.armies = [];
+  GameState.persistSave();
+
+  GameState.setDeploySiege({
+    from: '平原',
+    target: '樂陵',
+    pathIndex: 0,
+    armyId: 'A9',
+    general: '關羽',
+    officers: ['張飛'],
+    troops: 120,
+  });
+
+  // 1) 落盤：重新讀檔還看得到（不是只放在模塊內存裡）
+  GameState.resetCache();
+  const reload = GameState.loadSave();
+  assert.ok(reload.siege, '重讀存檔後 save.siege 仍在');
+  assert.equal(reload.siege!.general, '關羽');
+  assert.equal(reload.siege!.troops, 120);
+
+  // 2) 在途：這些將不能再出現在城內候選（第二支兵團的編成屏不該帶上他們）
+  const away = O.awayNameSet(reload as never);
+  assert.ok(away.has('關羽'), '攻城主將要算在途');
+  assert.ok(away.has('張飛'), '隨軍將要算在途');
+
+  // 3) 清掉之後要從存檔消失
+  GameState.clearDeploySiege();
+  GameState.resetCache();
+  assert.equal(GameState.loadSave().siege, undefined, 'clearDeploySiege 要把存檔裡的 siege 刪掉');
 });

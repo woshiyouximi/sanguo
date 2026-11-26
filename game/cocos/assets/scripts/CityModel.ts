@@ -2167,6 +2167,16 @@ export function awayNameSet(save: CitySave | null | undefined): Set<string> {
   for (const army of Array.isArray(save.armies) ? save.armies : []) {
     for (const n of armyGeneralNames(army)) set.add(n);
   }
+  // [R232] 已抵達、正在戰前準備（攻城）的部隊：兵團已不在 `armies`，但這些將同樣不在城內
+  const siege = (save as { siege?: { general?: unknown; officers?: unknown } }).siege;
+  if (isRecord(siege)) {
+    const general = typeof siege.general === 'string' ? siege.general : '';
+    if (general) set.add(general);
+    for (const name of Array.isArray(siege.officers) ? siege.officers : []) {
+      const n = typeof name === 'string' ? name : '';
+      if (n) set.add(n);
+    }
+  }
   return set;
 }
 

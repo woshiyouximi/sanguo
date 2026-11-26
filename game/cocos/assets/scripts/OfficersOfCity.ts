@@ -231,7 +231,7 @@ function rosterSourceOf(save: unknown, ctx: OfficersCtx): Rec {
 }
 
 /** 隨軍將名集合（`save.away` 的鍵 ∪ `save.armies` 我方部隊的 general/officers）= `CityModel.awayNameSet` */
-function awayNameSet(save: unknown): Set<string> {
+export function awayNameSet(save: unknown): Set<string> {
   const set = new Set<string>();
   const base = saveRecord(save);
   const away = base.away;
@@ -243,6 +243,17 @@ function awayNameSet(save: unknown): Set<string> {
     const general = str(army.general);
     if (general) set.add(general);
     for (const item of arrayOf(army.officers)) {
+      const name = cityNameOf(item);
+      if (name) set.add(name);
+    }
+  }
+  // [R232] 已抵達、正在戰前準備（攻城）的部隊：兵團已 removeArmy，不在 armies 裡，
+  // 但這些將同樣「不在城內」——不算進在途的話，再派第二支會把他們又列進候選名單。
+  const siege = base.siege;
+  if (isRec(siege)) {
+    const general = str(siege.general);
+    if (general) set.add(general);
+    for (const item of arrayOf(siege.officers)) {
       const name = cityNameOf(item);
       if (name) set.add(name);
     }

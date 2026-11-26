@@ -133,6 +133,12 @@ export interface CampaignSave {
    */
   runKey?: string;
   cities: Record<string, CityRuntime>;
+  /**
+   * [R232] 攻城快照（抵達城下、正在戰前準備的那支部隊）。
+   * 落盤是為了：① 戰前準備時被殺進程不丟兵；② `awayNameSet()` 能把這些將算作在途，
+   * 避免再派第二支兵團時把第一支的將又列進候選。
+   */
+  siege?: DeploySiege;
   /** 大地圖上行軍中的部隊（我方 side 'A'、敵方 side 'B'）；與 web 的 `save.armies` 同形 */
   armies: CampaignArmy[];
   /** 部隊 id 的自增序號，對應 web 的 `save.armySeq` */
@@ -1067,18 +1073,38 @@ export interface DeploySiege {
   advisor?: string;
 }
 
+/**
+ * [R232] 攻城快照**落盤**（`save.siege`），不再只存內存。
+ *
+ * 兩個原因：
+ *   1. 抵達時兵團已經 `removeArmy()` 落盤，若快照只在內存，戰前準備屏被殺進程就丟兵；
+ *   2. `awayNameSet()`（`OfficersOfCity` / `CityModel`）要能把「正在攻城的將」算作在途，
+ *      否則從城裡再派第二支兵團時，第一支的將還會出現在候選名單裡
+ *      （制作人實測：第二支的編成屏出現「我這支隊伍＋前一支的武將」）。
+ */
 let deploySiege: DeploySiege | null = null;
 
 export function setDeploySiege(siege: DeploySiege | null): void {
   deploySiege = siege;
+  const save = loadSave();
+  if (siege) save.siege = siege;
+  else delete save.siege;
+  persistSave();
 }
 
 export function peekDeploySiege(): DeploySiege | null {
-  return deploySiege;
+  if (deploySiege) return deploySiege;
+  const save = loadSave();
+  return save.siege ?? null;
 }
 
 export function clearDeploySiege(): void {
   deploySiege = null;
+  const save = loadSave();
+  if (save.siege) {
+    delete save.siege;
+    persistSave();
+  }
 }
 
 /**
