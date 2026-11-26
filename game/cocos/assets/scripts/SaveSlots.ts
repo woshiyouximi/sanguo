@@ -4,13 +4,20 @@
  * 為什麼要這個東西：Cocos 的 `CampaignRoot` 只有一套自動存檔（`sanguo_campaign_v1` /
  * `sanguo_city_v1` / `sanguo_items_v1` / `sanguo_monarch_v1` …），沒有「選哪一格」的概念；
  * web 版（`game/web/campaign.html` 的 `#saveSheet` + `game/web/saves.js`）有 10 格。
- * 這裡把 web 的槽位行為搬到 Cocos，但**刻意簡化**（見 `project/120_Cocos招降面板.md` §任務 B）：
+ * 這裡把 web 的槽位行為搬到 Cocos（見 `project/120_Cocos招降面板.md` §任務 B）：
  *
  *  - 索引鍵固定 `sanguo_slots_v1 = { active: n, slots: { [n]: { at, meta } } }`（n = 1..10）；
  *  - 每格的存檔本體放自己的鍵 `sanguo_slot_payload_v1_<n>`（不塞進索引，索引保持小）；
  *  - 讀檔 = 把 payload 裡的 `sanguo_*_v1` 整組寫回 live 鍵（**這一步不能省**，否則讀到的
  *    是別人的城），然後 `GameState.resetCache()` 讓下一輪 `loadSave()` 重新讀盤；
- *  - 不做 web 的 v3 快照結構、不做存檔格式遷移、不做改名輸入（Cocos 沒有 `prompt`）。
+ *  - **F-09 遷移**：盤上只有 web 舊單容器 `sanguo_saves_v1`（v3 快照）時，`migrateLegacySaves()`
+ *    把它讀成 Cocos 索引 + 每格 payload；舊鍵**只讀不刪**（web 版照常能讀），遷移冪等、
+ *    壞檔不崩（回退空索引）；由 `readIndex` / 面板開場自動觸發；
+ *  - **F-10 存檔語義**：手動存檔只寫該槽、**不改** `active`（自動存檔目標），與 web
+ *    `campaign.html` 手動存檔（`Saves.writeSlot`）一致；自動存檔 `saveAutoSlot()` 寫
+ *    `active` 那格但也不改它；`active` 只由點槽位列（`setActiveSlot`）與讀檔
+ *    （`loadFromSlot`，web `loadSlot` 同款）改；
+ *  - 不做 web 的 v3 快照結構（遷移時只做欄位收斂，見 `campaignOfWebSnapshot`）、不做改名輸入。
  *
  * 存取層用 `SlotStorage`（只要求 getItem / setItem / removeItem），所以純邏輯可以在 node 裡
  * 用一個 Map 假 storage 斷言，不需要真 localStorage；`storageOf()` 才是 `sys.localStorage`。
@@ -46,6 +53,11 @@ const HALF_H = DESIGN_H / 2;
 
 /** 槽位索引鍵 */
 export const SLOTS_KEY = 'sanguo_slots_v1';
+/**
+ * web 版單容器的舊鍵（`game/web/saves.js` 的 `SAVE_KEY`，v3 快照：`{ v, last, slots[10] }`）。
+ * 遷移後**只讀不刪**：Cocos 不再讀它，但 web 版照常能讀自己的存檔（見 `migrateLegacySaves`）。
+ */
+export const LEGACY_SAVES_KEY = 'sanguo_saves_v1';
 /** 槽數（web `Saves.SLOT_COUNT` 同值） */
 export const SLOT_COUNT = 10;
 /** 槽名上限（web `metaFromSnapshot` 的 `slotName.slice(0,20)` 同值） */
@@ -144,6 +156,26 @@ export interface SaveSlotOptions {
   now?: number;
   /** 劇本名 */
   scenario?: string;
+}
+
+/** `migrateLegacySaves` 的結果（面板提示 / 測試斷言用） */
+export interface MigrateLegacyResult {
+  /** 這一次真的搬了資料嗎（`reason === 'ok'` 時為 true） */
+  migrated: boolean;
+  /**
+   * 結果分類：
+   *  - `ok`：遷移成功；
+   *  - `has-slots`：Cocos 索引已存在，**絕不覆蓋**（這就是冪等的保證）；
+   *  - `no-legacy`：盤上沒有 web 舊鍵，這是正常首次啟動；
+   *  - `bad-json`：舊鍵存在但 JSON 壞掉（不寫任何鍵，讀索引自然回空檔）；
+   *  - `empty`：舊容器存在但一格都沒有（不寫索引，下次還能再試）；
+   *  - `error`：遷移過程意外拋錯（吞掉，回退空檔）。
+   */
+  reason: 'ok' | 'has-slots' | 'no-legacy' | 'bad-json' | 'empty' | 'error';
+  /** 遷移出來的槽數（0..10） */
+  slots: number;
+  /** 遷移後寫進索引的自動存檔目標槽（1..10） */
+  active: number;
 }
 
 /* ====================================================================== */
@@ -254,8 +286,14 @@ export function normalizeMeta(raw: unknown): SlotMeta {
 /* §4 純邏輯：索引讀寫                                                    */
 /* ====================================================================== */
 
-/** 讀索引（壞掉的東西一律丟掉，不拋） */
+/**
+ * 讀索引（壞掉的東西一律丟掉，不拋）。
+ *
+ * F-09：盤上只有 web 的舊槽容器時，先 `migrateLegacySaves` 再讀——遷移內部直接讀
+ * storage、不呼叫本函式（無遞迴），失敗也只是照舊回空索引。
+ */
 export function readIndex(storage: SlotStorage = storageOf()): SlotIndex {
+  migrateLegacySaves(storage);
   const out: SlotIndex = { active: 1, slots: {} };
   const raw = readJson(storage.getItem(SLOTS_KEY));
   if (!raw) return out;
@@ -385,11 +423,15 @@ export function metaOfSave(save: object, scenario = ''): SlotMeta {
 }
 
 /**
- * 存檔到某一格。
+ * 存檔到某一格（手動存檔）。
  *
- * 注意（與 web 的差異）：web 的「存到槽 2」**不改**自動存檔目標；Cocos 目前沒有
- * 槽位化的自動存檔，`active` 就是「自動存檔會寫哪一格」，所以這裡存完就把
- * `active` 指到該槽——否則使用者會看到「存了槽 2，下次自動存又蓋回槽 1」。
+ * 語義對齊 web `campaign.html` 的手動存檔（`Saves.writeSlot`，`:2003-2004`
+ * 「手動存檔不改自動存檔目標」）：**只寫這格，不改 `active`**。`active` = 自動存檔目標槽，
+ * 只由 `setActiveSlot`（點槽位列）/ `loadFromSlot`（讀檔，web `loadSlot` 同款）/
+ * 面板「存到當前槽」（`saveAutoSlot`）維護。
+ *
+ * F-10 之前這裡會 `index.active = n`（與 web 相反，`project/89 4b`）：連存幾格之後
+ * 自動存檔目標被帶著跑，存檔佈局和 web 版對不上。
  */
 export function saveToSlot(
   save: object,
@@ -419,9 +461,23 @@ export function saveToSlot(
   const at = typeof opts.now === 'number' && Number.isFinite(opts.now) ? Math.trunc(opts.now) : Date.now();
   const record: SlotRecord = { at, meta };
   index.slots[String(n)] = record;
-  index.active = n;
   writeIndex(index, storage);
   return record;
+}
+
+/**
+ * 自動存檔：寫「目前的自動存檔目標槽」（`index.active`），**不改** `active`。
+ *
+ * 對齊 web `Saves.writeSlotAuto`：自動存檔只更新內容，目標槽由 `setActiveSlot` /
+ * `loadFromSlot` 決定。面板右下的「存 到 當 前 槽」與未來的定時自動存檔都走這裡。
+ */
+export function saveAutoSlot(
+  save: object,
+  opts: SaveSlotOptions = {},
+  storage: SlotStorage = storageOf(),
+): SlotRecord | null {
+  const index = readIndex(storage);
+  return saveToSlot(save, index.active, opts, storage);
 }
 
 /**
@@ -490,6 +546,117 @@ export function renameSlot(slot: number, name: string, storage: SlotStorage = st
   index.slots[String(n)] = record;
   writeIndex(index, storage);
   return true;
+}
+
+/* ====================================================================== */
+/* §5b 純邏輯：web 舊存檔遷移（F-09）                                     */
+/* ====================================================================== */
+
+/**
+ * web v3 快照 → Cocos 主檔（`sanguo_campaign_v1`）形狀。
+ *
+ * web 快照本來就是 campaign 形狀（`owned` 陣列 / `cities` 城表 / `roster` / `month`…），
+ * 這裡只做三件事：
+ *  ① 跨端拼寫收斂：`owns` 是舊別名，一律收斂成 Cocos 的 `owned`（`owns≈owned`）；
+ *  ② 數值欄位收斂成整數（`month` / `wins` / `losses` / `scenario`），免得 `GameState.normalize`
+ *    收到字串後型別錯亂；
+ *  ③ 補 `seeded`：web 存檔一定已經有 `owned`，不補的話 `GameState.initCampaign` 會把它當
+ *     「還沒開局」再白送 3 座城（`GameState.ts:669-677`）。
+ * 未知鍵原樣帶過（`GameState.normalize` 對白名單外的鍵是保留的）。
+ */
+function campaignOfWebSnapshot(snapshot: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...snapshot };
+  // 「owns≈owned」：兩種拼寫都吃，統一收斂到 Cocos 的 `owned`（去空、去重）
+  const rawOwned = Array.isArray(snapshot.owned)
+    ? snapshot.owned
+    : Array.isArray(snapshot.owns)
+      ? snapshot.owns
+      : [];
+  const owned: string[] = [];
+  for (const raw of rawOwned) {
+    const name = textOf(raw);
+    if (name && !owned.includes(name)) owned.push(name);
+  }
+  out.owned = owned;
+  delete out.owns;
+  out.month = Math.max(1, Math.trunc(numOf(snapshot.month)) || 1);
+  out.wins = Math.max(0, Math.trunc(numOf(snapshot.wins)));
+  out.losses = Math.max(0, Math.trunc(numOf(snapshot.losses)));
+  out.scenario = Math.max(1, Math.trunc(numOf(snapshot.scenario)) || 1);
+  // 壞形狀（字串 / 陣列）→ 空物件：loadSave 的 normalize 會補回預設形狀
+  out.cities = asRecord(snapshot.cities);
+  out.roster = asRecord(snapshot.roster);
+  out.seeded = snapshot.seeded === true || owned.length > 0;
+  return out;
+}
+
+/** web 槽 entry → Cocos 索引 record（槽號已換算成 1..10） */
+function recordOfWebEntry(
+  campaign: Record<string, unknown>,
+  entry: Record<string, unknown>,
+  now: number,
+): SlotRecord {
+  const meta = metaOfSave(campaign);
+  // web 列表欄看「君主」與「槽名」：快照裡沒有君主名時 web 摘要 `entry.monarch` 有；
+  // 槽名（玩家改名）只在 entry 上，劇本名在 `entry.scenarioName`。
+  const monarch = textOf(entry.monarch);
+  if (monarch) meta.monarch = monarch;
+  const scenarioName = textOf(entry.scenarioName);
+  if (scenarioName) meta.scenario = scenarioName;
+  meta.name = textOf(entry.slotName).slice(0, SLOT_NAME_MAX);
+  const entryAt = Math.trunc(numOf(entry.ts));
+  const snapshotAt = Math.trunc(numOf(campaign.ts));
+  const at = entryAt > 0 ? entryAt : snapshotAt > 0 ? snapshotAt : now;
+  return { at, meta };
+}
+
+/**
+ * 把 web 的舊槽容器 `sanguo_saves_v1` 遷移成 Cocos 的索引 + 每格 payload（F-09）。
+ *
+ * 規則（冪等 / 只讀不刪 / 壞檔不崩）：
+ *  - Cocos 索引 `sanguo_slots_v1` 已存在（不管內容好壞）→ 直接 `has-slots` 返回，**絕不覆蓋**；
+ *  - 沒有舊鍵 → `no-legacy`；舊鍵壞 JSON → `bad-json`（一個鍵都不寫，`readIndex` 自然回空檔）；
+ *  - 舊容器 `slots` 是 web 的 0 起陣列：第 i 格 → Cocos 槽 i+1；`snapshot` 不是物件的空槽跳過；
+ *  - 每格寫 `sanguo_slot_payload_v1_<n> = { sanguo_campaign_v1: <快照 JSON> }`；
+ *    web 的 `last` 當 Cocos 的 `active`（自動存檔目標）；一格都沒遷移出來 → `empty`，不寫索引
+ *    （下次還能再試，不會把空容器釘死）；
+ *  - 舊鍵 `sanguo_saves_v1` **從不 removeItem**：遷移後 web 版仍能讀自己的存檔；
+ *  - 任何意外（storage 拋錯 / 資料形狀離譜）都吞掉回 `error`，呼叫端照常拿到空索引。
+ */
+export function migrateLegacySaves(storage: SlotStorage = storageOf()): MigrateLegacyResult {
+  const idle: MigrateLegacyResult = { migrated: false, reason: 'error', slots: 0, active: 1 };
+  try {
+    // ① Cocos 索引已存在：這份才是權威，舊鍵只當歷史殘留（冪等即靠這條）
+    if (storage.getItem(SLOTS_KEY)) return { ...idle, reason: 'has-slots' };
+    // ② 沒有舊鍵（正常首次啟動）/ ③ 舊鍵壞掉（不寫任何鍵）
+    const legacyText = storage.getItem(LEGACY_SAVES_KEY);
+    if (!legacyText) return { ...idle, reason: 'no-legacy' };
+    const legacy = readJson(legacyText);
+    if (!legacy) return { ...idle, reason: 'bad-json' };
+
+    const webSlots: unknown[] = Array.isArray(legacy.slots) ? legacy.slots : [];
+    const now = Date.now();
+    const index: SlotIndex = { active: slotOrZero(legacy.last) || 1, slots: {} };
+    let count = 0;
+    for (let i = 0; i < webSlots.length && i < SLOT_COUNT; i += 1) {
+      const entry = asRecord(webSlots[i]);
+      // web 的空槽是 null / 沒有 snapshot；壞掉的 snapshot（字串）也試著 parse，失敗就跳過
+      const snapshotRaw = entry.snapshot;
+      const snapshot =
+        typeof snapshotRaw === 'string' ? readJson(snapshotRaw) ?? {} : asRecord(snapshotRaw);
+      if (Object.keys(snapshot).length === 0) continue;
+      const slot = i + 1;
+      const campaign = campaignOfWebSnapshot(snapshot);
+      writePayload(storage, slot, { [GameState.SAVE_KEY]: JSON.stringify(campaign) });
+      index.slots[String(slot)] = recordOfWebEntry(campaign, entry, now);
+      count += 1;
+    }
+    if (count === 0) return { ...idle, reason: 'empty' };
+    writeIndex(index, storage);
+    return { migrated: true, reason: 'ok', slots: count, active: index.active };
+  } catch {
+    return { ...idle, reason: 'error' };
+  }
 }
 
 /* ====================================================================== */
@@ -773,7 +940,12 @@ export class SaveSlotsPanel extends Component {
     this.build();
     this.opened = true;
     this.node.active = true;
+    // F-09：第一次在 Cocos 打開面板時，盤上可能只有 web 的舊槽容器——先遷移成 Cocos 索引。
+    // 遷移失敗不影響面板（readIndex 會回空檔），只把結果提示在標題下方。
+    const legacy = migrateLegacySaves(this.storage);
     this.flashText = '';
+    if (legacy.reason === 'ok') this.flashText = `已從 web 舊存檔遷移 ${legacy.slots} 格（舊鍵保留只讀）`;
+    else if (legacy.reason === 'bad-json') this.flashText = 'web 舊存檔已損壞，已回退空檔';
     if (!this.listening) {
       input.on(Input.EventType.TOUCH_END, this.onTouch, this);
       this.listening = true;
@@ -839,17 +1011,26 @@ export class SaveSlotsPanel extends Component {
           persist: () => GameState.persistSave(),
           scenario: this.options.scenario,
         });
-        this.flashText = record ? `已存入槽 ${hit.slot} · ${record.meta.monthText}` : `槽 ${hit.slot} 存不進去`;
+        // F-10：手動存檔不動自動目標，提示裡要說清楚「自動存檔還寫哪一格」，免得玩家以為存歪了
+        const activeNow = readIndex(this.storage).active;
+        const tail = activeNow === hit.slot ? '' : ` · 自動存檔仍寫槽 ${activeNow}`;
+        this.flashText = record
+          ? `已存入槽 ${hit.slot} · ${record.meta.monthText}${tail}`
+          : `槽 ${hit.slot} 存不進去`;
         this.refresh();
         break;
       }
       case 'save-active': {
-        const index = readIndex(this.storage);
-        const record = saveToSlot(this.options.save, index.active, {
-          persist: () => GameState.persistSave(),
-          scenario: this.options.scenario,
-        });
-        this.flashText = record ? `已存入當前槽 ${index.active} · ${record.meta.monthText}` : '存檔失敗';
+        // 自動存檔語義：寫 active 那格，但不改 active（F-10）
+        const record = saveAutoSlot(
+          this.options.save,
+          { persist: () => GameState.persistSave(), scenario: this.options.scenario },
+          this.storage,
+        );
+        const activeNow = readIndex(this.storage).active;
+        this.flashText = record
+          ? `已存入當前槽 ${activeNow} · ${record.meta.monthText}`
+          : '存檔失敗';
         this.refresh();
         break;
       }

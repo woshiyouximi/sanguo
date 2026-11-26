@@ -1108,6 +1108,355 @@ export function successionLand(save: Record<string, unknown>, state: SuccessionS
 
 // #endregion
 
+// #region 遭遇戰（F-06）：真打入口 + 戰後回寫（純邏輯）
+// [[ENCOUNTER_CORE]]
+// 這一段**不 import 'cc'、不碰 GameState / sys / director**：`game/tests/encounter_battle.test.ts`
+// 會按 `[[ENCOUNTER_CORE]]` 標記逐字抽出去、剝掉型別後直接跑行為斷言（Node 的型別剝離）。
+// 要改先看那個測試。
+//
+// [F-06] 為什麼要這一段：Cocos 以前在路上撞到敵軍只擲骰（`Math.random()` 按兵力折算），
+// 和 web 的「跳戰鬥頁真打」（`game/web/campaign.html:4547 startEncounter`）不是一回事。
+// 正式版改成進 `Battle` 場景真打：`GameState.startBattle()` 把雙方將/兵寫進 BattleLaunch，
+// 結算由 BattleRoot 落 `recordBattleResult()`（wins/losses/streak）與 `queuePostBattle()`
+// （俘虜/斬首佇列）；回大地圖時再用「戰前快照 → 戰後增量」回寫兵損與 `save.lastBattle`，
+// 招降面板仍走既有的 `SurrenderModel.resolveCaptureFlow()`（不重複造）。
+// 舊擲骰只留作調試兜底：`?autoenc=1` / `AUTO_ENCOUNTER = true`。
+
+/**
+ * 舊「按兵力折算」遭遇戰結算的總開關。
+ *
+ * **僅調試用：正式版必須真打**（默認 false → 遭遇戰一律進 Battle 場景）。
+ * 只有把它改成 true，或 URL 帶 `?autoenc=1`（`autoEncounterOn()` 認這個），才走舊擲骰。
+ */
+const AUTO_ENCOUNTER = false;
+
+/** 調試開關：`AUTO_ENCOUNTER = true` 或 `?autoenc=1` → 允許舊擲骰結算（正式版必須真打） */
+function autoEncounterOn(debugFlag: unknown): boolean {
+  if (AUTO_ENCOUNTER === true) return true;
+  return debugFlag === true || String(debugFlag ?? '') === '1';
+}
+
+/**
+ * 跨場景快照的 localStorage 鍵：Battle 結算後 `director.loadScene('Campaign')` 建的是**新場景實例**，
+ * CampaignRoot 的欄位全丟，所以「開戰前雙方部隊 + 戰前 wins/losses 快照」只能落 localStorage。
+ */
+const ENCOUNTER_PENDING_KEY = 'sanguo_encounter_v1';
+/** 快照格式版本：形狀改了就把版本 +1，舊快照會被 `parseEncounterPending()` 丟掉 */
+const ENCOUNTER_PENDING_VERSION = 1;
+/** 勝方戰後留在地圖上的兵力比例（與 web `resolveEncounter()` 的 `troops * 0.5` 同口徑） */
+const ENCOUNTER_SURVIVOR_RATE = 0.5;
+/** 戰鬥內兵種/陣形：野戰沒帶 `?troop=&form=`，沿用 BattleRoot 的缺省（大刀/方形、黃巾/雁形） */
+const ENCOUNTER_TROOP = 2;
+const ENCOUNTER_FORM = 0;
+const ENCOUNTER_BTROOP = 10;
+const ENCOUNTER_BFORM = 3;
+/** 戰鬥內兵力區間：web `encounterUrl()` 的 clamp100（雙方都按整數 1..100 送進戰場） */
+const ENCOUNTER_SOLDIERS_MIN = 1;
+const ENCOUNTER_SOLDIERS_MAX = 100;
+
+/** 遭遇戰雙方的部隊快照（`GameState.CampaignArmy` 的可序列化子集，純邏輯區不 import 存檔型別） */
+interface EncounterArmy {
+  id: string;
+  side: 'A' | 'B';
+  from: string;
+  to: string;
+  pathIndex: number;
+  progress: number;
+  troops: number;
+  general?: string;
+  officers?: string[];
+  advisor?: string;
+  stationed?: boolean;
+}
+
+/** 戰前/戰後的勝敗快照（`GameState.CampaignSave` 的 wins/losses/streak/bestStreak 四欄） */
+interface EncounterRecord {
+  wins: number;
+  losses: number;
+  streak: number;
+  bestStreak: number;
+}
+
+/** 跨場景快照：開戰前把雙方部隊與戰前戰績落 localStorage，回大地圖時算增量 */
+interface EncounterPending {
+  version: number;
+  /** 局指紋（與 `initCampaign()` 的 runKey 同源）：換劇本/換勢力不會把上一局的快照套進來 */
+  key: string;
+  ts: number;
+  month: number;
+  /** 傳給 `recordBattleResult(city, …)` 的我方城名（必須在 owned 裡，見 `startEncounterBattle`） */
+  city: string;
+  mine: EncounterArmy;
+  foe: EncounterArmy;
+  before: EncounterRecord;
+}
+
+/** 戰鬥內某將的屬性（查不到就回 BattleRoot 的缺省口徑，不崩） */
+interface EncounterGeneral {
+  name: string;
+  str: number;
+  int: number;
+  level: number;
+  wise?: number | null;
+}
+
+/** `GameState.startBattle()` 吃的 loadout（只列遭遇戰會填的欄位，結構上可賦值給 BattleLoadout） */
+interface EncounterLoadout {
+  gen: string;
+  genStr: number;
+  genInt: number;
+  genLevel: number;
+  troop: number;
+  form: number;
+  soldiers: number;
+  wise: number | null;
+  bgen: string;
+  bstr: number;
+  bint: number;
+  btroop: number;
+  bform: number;
+  bsoldiers: number;
+}
+
+/** `save.lastBattle` 的形狀（`core/roster.ts:readBattleOutcome()` 讀的權威勝負信號） */
+interface EncounterLastBattle {
+  won: boolean;
+  city: string;
+  defend: boolean;
+  captured: string[];
+  executed: string[];
+  dead: string[];
+  joined: string[];
+  ts: number;
+}
+
+/** 戰後回寫計畫：復原哪些部隊、寫什麼 lastBattle/戰報/提示 */
+interface EncounterPlan {
+  winner: 'A' | 'B' | 'draw';
+  restores: EncounterArmy[];
+  lastBattle: EncounterLastBattle;
+  logText: string;
+  logKind: 'win' | 'lost' | 'hold';
+  note: string;
+}
+
+/**
+ * 從對峙雙方挑出「我方（A）/ 敵方（B）」。
+ *
+ * `stationStandoff()` 保證雙方 side 不同；但大地圖上可能出現「兩支都不是我軍」的對撞
+ * （AI 打 AI），那種情況回 null → 呼叫方退回調試折算，不把 B 當成玩家讀者操作。
+ */
+function encounterSides(
+  a: EncounterArmy | null | undefined,
+  b: EncounterArmy | null | undefined,
+): { mine: EncounterArmy; foe: EncounterArmy } | null {
+  if (!a || !b || a.id === b.id || a.side === b.side) return null;
+  const mine = a.side === 'A' ? a : b;
+  const foe = mine === a ? b : a;
+  if (mine.side !== 'A') return null;
+  return { mine, foe };
+}
+
+/** 大地圖兵力 → 戰鬥內兵力（clamp 1..100，取整；與 web `encounterUrl()` 同口徑） */
+function encounterSoldiers(troops: unknown): number {
+  const n = Math.round(Number(troops));
+  if (!Number.isFinite(n)) return ENCOUNTER_SOLDIERS_MIN;
+  return Math.max(ENCOUNTER_SOLDIERS_MIN, Math.min(ENCOUNTER_SOLDIERS_MAX, n));
+}
+
+/** 組 `GameState.startBattle()` 的 loadout：A 側固定我方，B 側固定敵方（BattleRoot 恆把 A 當玩家） */
+function encounterLoadout(
+  mine: EncounterArmy,
+  foe: EncounterArmy,
+  mineGen: EncounterGeneral,
+  foeGen: EncounterGeneral,
+): EncounterLoadout {
+  return {
+    gen: mineGen.name || mine.general || '我軍主將',
+    genStr: mineGen.str,
+    genInt: mineGen.int,
+    genLevel: mineGen.level,
+    troop: ENCOUNTER_TROOP,
+    form: ENCOUNTER_FORM,
+    soldiers: encounterSoldiers(mine.troops),
+    wise: mineGen.wise ?? null,
+    bgen: foeGen.name || foe.general || '來犯之將',
+    bstr: foeGen.str,
+    bint: foeGen.int,
+    btroop: ENCOUNTER_BTROOP,
+    bform: ENCOUNTER_BFORM,
+    bsoldiers: encounterSoldiers(foe.troops),
+  };
+}
+
+/** 把任意 object 收斂成合法的遭遇戰部隊快照；形狀不對回 null（localStorage 是玩家可改的） */
+function encounterArmyOf(raw: unknown): EncounterArmy | null {
+  const row = raw as Partial<EncounterArmy> | null | undefined;
+  if (!row || typeof row !== 'object') return null;
+  const id = String(row.id ?? '');
+  const side = row.side;
+  if (!id || (side !== 'A' && side !== 'B')) return null;
+  const from = String(row.from ?? '');
+  const to = String(row.to ?? '');
+  const troops = Math.round(Number(row.troops));
+  if (!from || !to || !Number.isFinite(troops) || troops <= 0) return null;
+  const progress = Number(row.progress);
+  const army: EncounterArmy = {
+    id,
+    side,
+    from,
+    to,
+    pathIndex: Math.max(0, Math.round(Number(row.pathIndex) || 0)),
+    progress: Number.isFinite(progress) ? Math.max(0, Math.min(1, progress)) : 0,
+    troops,
+    stationed: row.stationed === true,
+  };
+  if (row.general) army.general = String(row.general);
+  if (Array.isArray(row.officers)) {
+    army.officers = row.officers
+      .map((name) => String(name))
+      .filter((name) => name.length > 0)
+      .slice(0, 5);
+  }
+  if (typeof row.advisor === 'string' && row.advisor) army.advisor = row.advisor;
+  return army;
+}
+
+/** 把任意 object 收斂成戰績四欄（非法值一律 0） */
+function encounterRecordOf(raw: unknown): EncounterRecord {
+  const row = (raw ?? {}) as Partial<EncounterRecord>;
+  const int = (value: unknown): number => {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return { wins: int(row.wins), losses: int(row.losses), streak: int(row.streak), bestStreak: int(row.bestStreak) };
+}
+
+/** 開戰前組快照（純函式：給 class 的 `storeEncounterPending()` 序列化用） */
+function encounterPendingOf(args: {
+  key: string;
+  ts: number;
+  month: number;
+  city: string;
+  mine: EncounterArmy;
+  foe: EncounterArmy;
+  before: EncounterRecord;
+}): EncounterPending {
+  const ts = Math.round(Number(args.ts));
+  return {
+    version: ENCOUNTER_PENDING_VERSION,
+    key: String(args.key ?? ''),
+    ts: Number.isFinite(ts) && ts > 0 ? ts : 1,
+    month: Math.max(1, Math.round(Number(args.month) || 1)),
+    city: String(args.city ?? ''),
+    mine: encounterArmyOf(args.mine) as EncounterArmy,
+    foe: encounterArmyOf(args.foe) as EncounterArmy,
+    before: encounterRecordOf(args.before),
+  };
+}
+
+/**
+ * 解析 localStorage 裡的跨場景快照。
+ *
+ * 三道門：`version` 對得上、`key` 與本局 runKey 一致、雙方部隊／城名／ts 形狀合法。
+ * 任何一道不過就回 null（呼叫方清掉舊快照）——寧可這場不結算兵損，也不能把上一局的
+ * 部隊/勝負套進新局。
+ */
+function parseEncounterPending(raw: unknown, runKey: string): EncounterPending | null {
+  const bag = raw as Partial<EncounterPending> | null | undefined;
+  if (!bag || typeof bag !== 'object') return null;
+  if (Math.round(Number(bag.version)) !== ENCOUNTER_PENDING_VERSION) return null;
+  if (String(bag.key ?? '') !== String(runKey ?? '')) return null;
+  const mine = encounterArmyOf(bag.mine);
+  const foe = encounterArmyOf(bag.foe);
+  const city = String(bag.city ?? '');
+  if (!mine || !foe || !city) return null;
+  if (mine.side !== 'A' || foe.side !== 'B') return null;
+  const ts = Math.round(Number(bag.ts));
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  return {
+    version: ENCOUNTER_PENDING_VERSION,
+    key: String(bag.key),
+    ts,
+    month: Math.max(1, Math.round(Number(bag.month) || 1)),
+    city,
+    mine,
+    foe,
+    before: encounterRecordOf(bag.before),
+  };
+}
+
+/** 復原部隊：改回大地圖兵力（勝方半兵）並把行軍進度歸零（與舊折算口徑一致） */
+function encounterHold(army: EncounterArmy, troops: number): EncounterArmy {
+  return { ...army, troops: Math.max(1, Math.round(Number(troops) || 1)), progress: 0 };
+}
+
+/**
+ * 戰後回寫計畫：只憑「戰前戰績快照 vs 回大地圖時的戰績」判勝負。
+ *
+ * BattleRoot 結算時走 `recordBattleResult()`：A 勝 → wins+1、否則 losses+1（平手 `draw` 兩欄都不動），
+ * 所以 wins 增 = 我方勝、losses 增 = 我方敗、都不增 = 平手或中途退出。
+ * lastBattle 只補「權威勝負」；`captured`/`executed` 佇列由 BattleRoot 的 `queuePostBattle()` 寫，
+ * 這裡保持空陣列，避免同一批俘虜被記兩次。
+ */
+function encounterPlan(pending: EncounterPending, after: EncounterRecord, ts: number): EncounterPlan {
+  const win = after.wins > pending.before.wins;
+  const lose = after.losses > pending.before.losses;
+  const winner: 'A' | 'B' | 'draw' = win ? 'A' : lose ? 'B' : 'draw';
+  const restores: EncounterArmy[] = [];
+  const mineName = pending.mine.general ?? pending.mine.id;
+  const foeName = pending.foe.general ?? pending.foe.id;
+  const mineTroops = Math.round(pending.mine.troops);
+  const foeTroops = Math.round(pending.foe.troops);
+  const lastBattle: EncounterLastBattle = {
+    won: winner === 'A',
+    city: pending.city,
+    defend: false,
+    captured: [],
+    executed: [],
+    dead: [],
+    joined: [],
+    ts: Math.max(1, Math.round(Number(ts) || 0)),
+  };
+  if (winner === 'A') {
+    const survivor = encounterHold(pending.mine, mineTroops * ENCOUNTER_SURVIVOR_RATE);
+    restores.push(survivor);
+    return {
+      winner,
+      restores,
+      lastBattle,
+      logText: `遭 遇 戰：我軍 ${mineName} ${mineTroops} 兵 與 ${foeName} ${foeTroops} 兵 對撞——我軍得勝（真打，餘 ${survivor.troops} 兵）`,
+      logKind: 'win',
+      note: `路上遭遇戰：我軍擊退 ${pending.foe.from} 軍（餘 ${survivor.troops} 兵）。`,
+    };
+  }
+  if (winner === 'B') {
+    const survivor = encounterHold(pending.foe, foeTroops * ENCOUNTER_SURVIVOR_RATE);
+    restores.push(survivor);
+    return {
+      winner,
+      restores,
+      lastBattle,
+      logText: `遭 遇 戰：我軍 ${mineName} ${mineTroops} 兵 與 ${foeName} ${foeTroops} 兵 對撞——我軍敗退（真打，敵軍餘 ${survivor.troops} 兵）`,
+      logKind: 'lost',
+      note: '路上遭遇戰：我軍潰敗，殘部回圖（點武將可查看俘虜處置）。',
+    };
+  }
+  // 平手／中途退出（wins/losses 都沒動）：雙方按原兵力回圖，不算勝負
+  restores.push(encounterHold(pending.mine, mineTroops));
+  restores.push(encounterHold(pending.foe, foeTroops));
+  return {
+    winner,
+    restores,
+    lastBattle,
+    logText: `遭 遇 戰：我軍 ${mineName} ${mineTroops} 兵 與 ${foeName} ${foeTroops} 兵 脫離接觸——平手（雙方按原兵力退回）`,
+    logKind: 'hold',
+    note: '路上遭遇戰：兩軍平手，各自退回。',
+  };
+}
+// [[/ENCOUNTER_CORE]]
+// #endregion
+
 /**
  * 九宮底板清單（w5-cocos-skin）。
  *
@@ -1394,6 +1743,9 @@ export class CampaignRoot extends Component {
         // 已经在 start() 开头取过（R214c：打完仗回大地图时不能再吃一次，否则 fresh 丢失）
         fresh: freshRun,
       });
+      // [F-06] 同劇本/同勢力重開（runKey 不變）時，上一局殘留的遭遇戰快照必須清掉，
+      // 否則新局第一幀會拿舊部隊/舊戰績回寫。
+      if (freshRun) this.clearEncounterPending();
       // 君主/勢力：GameState 是白名單存檔，君主欄位走補丁鍵（見 syncMonarchState 註釋）
       this.syncMonarchState();
       this.selected = this.save.owned[0] ?? null;
@@ -1407,6 +1759,11 @@ export class CampaignRoot extends Component {
       // 這裡把戰報整組提回最上層。
       this.promoteLogLabels();
       this.loadBattleLog();
+      // [F-06] 從 Battle 場景回來（遭遇戰真打）：把跨場景快照寫回兵損 + 權威勝負 `save.lastBattle`。
+      // 必須在 healStaleQueue() 之前（先有 lastBattle，俘虜佇列才不算「無主戰果」被清掉），
+      // 也必須在 resolveCaptureFlow() 之前（它靠 lastBattle 判勝負、決定要不要彈招降面板）。
+      const encounter = this.applyPendingEncounter();
+      if (encounter.logs.length > 0) this.pushBattleLog(encounter.logs);
       this.loadMonarchSeat();
       this.refresh();
       // 守城戰在 Deploy 場景結算（GameState.recordBattleResult 直接改 owned），回大地圖是新場景，
@@ -1494,6 +1851,10 @@ export class CampaignRoot extends Component {
         // 敗方：敵方 AI 已在模型層處置我軍俘將並落庫，這裡補提示條 + 重建運行時名單。
         this.hintText = this.clampHint(flow.notice, 160);
         this.seedRuntimeOfficers();
+        this.refresh();
+      } else if (encounter.note) {
+        // [F-06] 遭遇戰回寫完成但沒有招降候選（勝/平手）：提示條補一句「剛才那場是怎麼回事」。
+        this.hintText = this.clampHint(encounter.note, 160);
         this.refresh();
       }
       // R214c：按 PDF《三国群英传2 全界面按键说明》的大循环「内政(1 月) → 大地图(11 月) → 战斗」，
@@ -2161,6 +2522,16 @@ export class CampaignRoot extends Component {
       // 順序與單月推進完全一致：先讓在途部隊走完這個月，再讓 AI 出兵（新部隊 progress=0），
       // 否則本月新出的兵會立刻抵達，跑一年時玩家看不到「行軍中」這一步。
       const moved = this.advanceArmiesMonth();
+      // [F-06] 遭遇戰已把場景切到 Battle（`GameState.startBattle` 裡 `director.loadScene('Battle')`）：
+      // 本函式必須馬上收手——否則剩下的月份/AI 月結算會在本幀繼續寫存檔，回大地圖時就對不上
+      // 開戰前的 wins/losses 快照（戰後回寫靠 `applyPendingEncounter()` 的增量判定）。
+      if (moved.battle) {
+        this.save = GameState.loadSave();
+        if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
+        this.hintText = this.clampHint('遭 遇 戰：已進入戰場（戰鬥結算後回到大地圖）。', 160);
+        this.refresh();
+        return;
+      }
       const ai = this.runMapAi();
       if (!ai) this.spawnRaid();
       this.save = GameState.loadSave();
@@ -3444,6 +3815,179 @@ export class CampaignRoot extends Component {
     this.refresh();
   }
 
+  // -------------------------------------------------------------------------
+  // [F-06] 路上遭遇戰：進 Battle 場景真打 + 戰後回寫
+  // -------------------------------------------------------------------------
+  // 舊碼在 `advanceArmiesMonth()` 的對峙分支直接 `Math.random()` 折算勝負，玩家看不到戰鬥。
+  // 現在：對峙拖過一個月 → 雙方（blocker=駐紮方、mover=推進方）一起送進 Battle 場景，我方固定
+  // A 側；BattleRoot 結算時 `recordBattleResult()` 記 wins/losses、`queuePostBattle()` 記俘虜，
+  // 回大地圖時 `applyPendingEncounter()` 用「戰前快照 → 戰後增量」回寫兵損 + `save.lastBattle`，
+  // 招降面板交給 start() 既有的 `SurrenderModel.resolveCaptureFlow()`（不重複造）。
+  // 跨場景只能靠 sys.localStorage 傳「開戰前快照」（Battle → Campaign 是新場景實例）。
+
+  /**
+   * 讀 URL / 小遊戲啟動參數（照 `BattleRoot.queryValue()` 同款）。
+   *
+   * 用途：`?autoenc=1` 調試開關。刻意用正則解析 `location.search` 而不是 `URLSearchParams`：
+   * 原生/小遊戲平台不保證有這個 Web API（`SkinLab.skinLabEnabled()` 也是同樣寫法）。
+   */
+  private static queryValue(key: string): string | null {
+    try {
+      const host = globalThis as unknown as {
+        window?: { location?: { search?: string } };
+        wx?: {
+          getLaunchOptionsSync?: () => { query?: Record<string, unknown> };
+          getEnterOptionsSync?: () => { query?: Record<string, unknown> };
+        };
+      };
+      const search = host.window?.location?.search ?? '';
+      if (search) {
+        const hit = new RegExp(`(?:^|\\?|&)${key}=([^&]*)`).exec(search);
+        if (hit) return decodeURIComponent(hit[1] ?? '');
+      }
+      const query = host.wx?.getLaunchOptionsSync?.()?.query ?? host.wx?.getEnterOptionsSync?.()?.query;
+      const value = query ? query[key] : undefined;
+      return value === undefined || value === null ? null : String(value);
+    } catch {
+      return null;
+    }
+  }
+
+  /** 遭遇戰跨場景快照的 runKey：與 `initCampaign()` 的 key 同源（劇本:勢力），換局不會串檔 */
+  private encounterRunKey(): string {
+    const key = (this.save as unknown as { runKey?: unknown } | null)?.runKey;
+    return String(key ?? `${this.scenIdx}:${runPlayerForce()}`);
+  }
+
+  /** 某將在戰鬥裡的屬性（查不到就回 BattleRoot 的缺省口徑：str 70 / int 60 / Lv5 / 無軍師技） */
+  private encounterGeneralOf(name: string | undefined): EncounterGeneral {
+    const general = name ? this.generals.find((row) => row.NAME === name) : undefined;
+    const level = name ? this.armyGeneralLevel(name) : 0;
+    const wise = name ? this.armyWiseSeq(name) : 0;
+    return {
+      name: general?.NAME ?? name ?? '',
+      str: general?.STR ?? 70,
+      int: general?.INT ?? 60,
+      level: level > 0 ? level : 5,
+      wise: wise > 0 ? wise : null,
+    };
+  }
+
+  /** 沒帶將名的敵軍（劇本只寫兵不寫將）：按敵城守將情報補名字/屬性 */
+  private encounterIntelGeneral(city: string): EncounterGeneral {
+    const intel = this.enemyIntelOf(city);
+    return {
+      name: intel?.name || `敵將（${city}）`,
+      str: intel?.str ?? 70,
+      int: intel?.int ?? 60,
+      level: 5,
+      wise: null,
+    };
+  }
+
+  /**
+   * 發起遭遇戰：把雙方寫進 BattleLaunch 並切到 `Battle` 場景。
+   *
+   * 回傳 true = 已發起（呼叫方必須立刻停止月推進）；false = 兩邊都不是我軍，呼叫方可退回折算。
+   */
+  private startEncounterBattle(a: CampaignArmy, b: CampaignArmy): boolean {
+    const sides = encounterSides(a, b);
+    if (!sides) return false;
+    const save = this.save;
+    if (!save) return false;
+    const mine = sides.mine;
+    const foe = sides.foe;
+    // 戰後 `recordBattleResult(city, …)` 的 city 必須是**已在 owned 的我方城**：
+    //   · 傳空字 → 它 `if (!city) return;`，wins/losses/lastBattle 全都落不了庫；
+    //   · 傳不在 owned 的城 → 我方 A 勝時會被 `if (won) save.owned.push(city)` 誤算成「攻下這座城」。
+    const city = save.owned.includes(mine.from) ? mine.from : (save.owned[0] ?? mine.from);
+    const month = save.month;
+    const mineGen = this.encounterGeneralOf(mine.general);
+    const foeGen = foe.general ? this.encounterGeneralOf(foe.general) : this.encounterIntelGeneral(foe.from);
+    // 先落快照再切場景：BattleRoot 一進場就能打，回寫靠這份快照 + 戰後 wins/losses 增量。
+    this.storeEncounterPending(
+      encounterPendingOf({
+        key: this.encounterRunKey(),
+        ts: Date.now(),
+        month,
+        city,
+        mine,
+        foe,
+        before: { wins: save.wins, losses: save.losses, streak: save.streak, bestStreak: save.bestStreak },
+      }),
+    );
+    // 兩支都先從地圖撤掉（web `startEncounter()` 同款）：敗方戰後不再出現，勝方由回寫以半兵重建。
+    GameState.removeArmy(mine.id);
+    GameState.removeArmy(foe.id);
+    this.save = GameState.loadSave();
+    this.pushBattleLog([
+      battleLogLine(
+        month,
+        `遭 遇 戰：${mine.general ?? mine.id} ${Math.round(mine.troops)} 兵 對 ${foe.general ?? foe.id} ${Math.round(foe.troops)} 兵——進入戰場（真打）`,
+        'atk',
+      ),
+    ]);
+    GameState.startBattle(city, encounterLoadout(mine, foe, mineGen, foeGen));
+    return true;
+  }
+
+  /**
+   * 回大地圖時把「上一場遭遇戰」的結果寫回：復原勝方部隊（半兵）、寫 `save.lastBattle`。
+   *
+   * 時機：`start()` 的 `loadBattleLog()` 之後、`healStaleQueue()` 與 `resolveCaptureFlow()` 之前——
+   * 先有 lastBattle，俘虜佇列才不會被當「無主戰果」清掉，招降面板也才判得出勝負。
+   */
+  private applyPendingEncounter(): { logs: BattleLogLine[]; note: string } {
+    const save = this.save;
+    if (!save) return { logs: [], note: '' };
+    const raw = this.readEncounterPending();
+    const pending = raw === null ? null : parseEncounterPending(raw, this.encounterRunKey());
+    this.clearEncounterPending();
+    if (!pending) return { logs: [], note: '' };
+    const after: EncounterRecord = {
+      wins: save.wins,
+      losses: save.losses,
+      streak: save.streak,
+      bestStreak: save.bestStreak,
+    };
+    const plan = encounterPlan(pending, after, Date.now());
+    // 勝方（或平手雙方）以半兵回到大地圖，行軍進度歸零 → 重新走原本那條路（與舊折算口徑一致）。
+    for (const army of plan.restores) GameState.addArmy(army);
+    // `lastBattle` 是 `core/roster.readBattleOutcome()` 讀的權威勝負信號；也讓 `healStaleQueue()`
+    // 認得「這批俘虜有主」。俘虜/斬首佇列由 BattleRoot 的 `queuePostBattle()` 寫，這裡不重複寫。
+    (save as unknown as Record<string, unknown>).lastBattle = plan.lastBattle;
+    GameState.persistSave();
+    this.save = GameState.loadSave();
+    return { logs: [battleLogLine(this.save.month, plan.logText, plan.logKind)], note: plan.note };
+  }
+
+  /** 寫跨場景快照（Battle 結算後回大地圖是新場景實例，CampaignRoot 欄位全丟，只能走 localStorage） */
+  private storeEncounterPending(pending: EncounterPending): void {
+    try {
+      sys.localStorage.setItem(ENCOUNTER_PENDING_KEY, JSON.stringify(pending));
+    } catch {
+      // 原生平台 localStorage 不可用時戰後兵損回寫不了，但戰鬥本身照打（記 console 不崩）
+      console.warn('[F-06] 遭遇戰快照寫入失敗：戰後兵損不會回寫');
+    }
+  }
+
+  private readEncounterPending(): unknown {
+    try {
+      const text = sys.localStorage.getItem(ENCOUNTER_PENDING_KEY);
+      return text ? JSON.parse(text) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private clearEncounterPending(): void {
+    try {
+      sys.localStorage.removeItem(ENCOUNTER_PENDING_KEY);
+    } catch {
+      // 清不掉也只是下次啟動被 parse/runKey 擋掉，忽略
+    }
+  }
+
   /**
    * 推進一個月的行軍（web `planArmyMoves()` + `handleMarchEvents()`，campaign.html:1346 / :4404）。
    *
@@ -3451,15 +3995,25 @@ export class CampaignRoot extends Component {
    *   1) 步長按路段長度折算（`armyStep()` = 1 / marchMonths，web `marchStep()`），不再固定 1/3；
    *   2) 駐紮中的部隊 progress 凍結（`frozen`）；
    *   3) 同段有駐紮敵軍時被夾在接觸點（`stationProgressLimit()`），不前進也不後退、不超車；
-   *   4) 對峙（`stationStandoff()`）第一次只記戰報，拖過一個月就結算——Cocos 沒有「路上野戰」
-   *      場景（Deploy/Battle 都錨在城上），所以走 web 批次推進用的 `resolveEncounter()` 口徑
-   *      （campaign.html:4390：兵多者勝率 clamp(0.15,0.85)、勝方留一半兵力）。標 [新設計]。
+   *   4) 對峙（`stationStandoff()`）第一次只記戰報；拖過一個月就**進 Battle 場景真打**
+   *      （F-06：衝突雙方一起送進戰場，我方 A 側；戰後兵損/勝負由 `applyPendingEncounter()` 回寫）。
+   *      只有調試開關 `?autoenc=1` / `AUTO_ENCOUNTER = true` 才走舊的「按兵力折算」
+   *      （campaign.html:4390：兵多者勝率 clamp(0.15,0.85)、勝方留一半兵力）——**僅調試用，
+   *      正式版必須真打**。
    */
-  private advanceArmiesMonth(): { still: CampaignArmy[]; arrived: CampaignArmy[]; logs: BattleLogLine[]; notes: string[] } {
+  private advanceArmiesMonth(): {
+    still: CampaignArmy[];
+    arrived: CampaignArmy[];
+    logs: BattleLogLine[];
+    notes: string[];
+    /** 本幀是否已發起遭遇戰（true → `endInterior()` 必須立刻收手，場景馬上切到 Battle） */
+    battle: boolean;
+  } {
     const scenario = this.scenarioLike();
     const logs: BattleLogLine[] = [];
     const notes: string[] = [];
     const month = this.save?.month ?? 1;
+    let battleStarted = false;
     const armies = GameState.armies();
     const moves = planArmyMoves(armies, (army) => armyStep(scenario, army.pathIndex));
     // 只寫回 progress，不重排順序（`applyArmyProgress` 保證 id 對得上，錯開的九宮格不會抖）
@@ -3499,29 +4053,37 @@ export class CampaignRoot extends Component {
         this.stationNoticed.delete(key);
         const a = standoff.blocker;
         const b = standoff.mover;
-        const mine = Math.max(1, Math.round(a.troops));
-        const foe = Math.max(1, Math.round(b.troops));
-        const chance = Math.max(0.15, Math.min(0.85, mine / (mine + foe)));
-        const win = Math.random() < chance;
-        const winner = win ? a : b;
-        const loser = win ? b : a;
-        GameState.removeArmy(loser.id);
-        GameState.updateArmy(winner.id, { troops: Math.max(1, Math.round(winner.troops * 0.5)), progress: 0 });
-        logs.push(
-          battleLogLine(
-            month,
-            `遭 遇 戰：${a.general ?? '我軍'} ${mine} 兵 與 ${b.general ?? '敵軍'} ${foe} 兵 對撞——${winner.general ?? winner.id} 勝，${loser.general ?? loser.id} 潰散`,
-            'atk',
-          ),
-        );
-        notes.push('路上遭遇戰已結算（本作沒有野外戰場，按兵力折算）。');
+        // [F-06] 正式版：進 Battle 場景真打（雙方將/兵寫進 BattleLaunch，A 側固定我方）。
+        // 只有 `?autoenc=1` / `AUTO_ENCOUNTER = true` 才允許走下面的舊擲骰兜底——僅調試用。
+        const debugDice = autoEncounterOn(CampaignRoot.queryValue('autoenc'));
+        if (!debugDice && this.startEncounterBattle(a, b)) {
+          battleStarted = true;
+        } else {
+          // 舊「按兵力折算」結算（調試兜底）：調試開關打開、或兩邊都不是我軍時才會到這裡。
+          const mine = Math.max(1, Math.round(a.troops));
+          const foe = Math.max(1, Math.round(b.troops));
+          const chance = Math.max(0.15, Math.min(0.85, mine / (mine + foe)));
+          const win = Math.random() < chance;
+          const winner = win ? a : b;
+          const loser = win ? b : a;
+          GameState.removeArmy(loser.id);
+          GameState.updateArmy(winner.id, { troops: Math.max(1, Math.round(winner.troops * 0.5)), progress: 0 });
+          logs.push(
+            battleLogLine(
+              month,
+              `遭 遇 戰：${a.general ?? '我軍'} ${mine} 兵 與 ${b.general ?? '敵軍'} ${foe} 兵 對撞——${winner.general ?? winner.id} 勝，${loser.general ?? loser.id} 潰散`,
+              'atk',
+            ),
+          );
+          notes.push('路上遭遇戰已按兵力折算（調試開關 autoenc 開啟；正式版必須真打）。');
+        }
       }
     }
 
     const after = GameState.armies();
     const still = after.filter((army) => army.progress < 1);
     const arrived = after.filter((army) => army.progress >= 1);
-    return { still, arrived, logs, notes };
+    return { still, arrived, logs, notes, battle: battleStarted };
   }
 
   /**
