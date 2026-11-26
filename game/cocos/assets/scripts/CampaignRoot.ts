@@ -1570,6 +1570,12 @@ export class CampaignRoot extends Component {
   private clockSpeed = 1;
   /** 时钟暂停：内政页开着 / 任一模态暗幕开着 / 场景即将切换 */
   private clockPaused = false;
+  /**
+   * [R231b] 是否处在「内政阶段」。原作内政是一个场景：正月（T=0）自动进去，
+   * 只有按「内政终了」才回大地图。所以城内页的返回键要按这个判断，
+   * 不能只看 `clockT <= 0`（新局是 clockT=3600、clockPaused=true 进场的）。
+   */
+  private interiorPhase = false;
   /** 頁頭左側「君主 X」：可點，開君主屬性卡（v16-cocos-monarch） */
   private labelMonarch: Label | null = null;
   private labelStats: Label | null = null;
@@ -1931,7 +1937,11 @@ export class CampaignRoot extends Component {
       // 只对「刚按过 開始新局」的那一次生效，之后回大地图/从出征回来都不再自动弹。
       if (freshRun && this.save.month <= 1 && !this.monarchExtinct) {
         const home = this.selected ?? this.save.owned[0] ?? '';
-        if (home) this.openCityPanel(home);
+        // [R231b] 新局从内政开始（时钟已由 R226b 停在 3600）——这也算「内政阶段」
+        if (home) {
+          this.interiorPhase = true;
+          this.openCityPanel(home);
+        }
       }
       // 結局（d4-ending-list）：統一 / 君主亡 / 0 城 → 滿屏結局，蓋在招降面板之上。
       EndingPanel.showIfEnded(
@@ -2554,7 +2564,7 @@ export class CampaignRoot extends Component {
     this.clockPaused = true;
     // [R229] 原作沒有「返回」：正月內政裡離開城内頁 = 內政終了（T 重設 3600、時間開始流動），
     // 年中只能查看，所以按鉅仍叫「返回」。
-    const inInterior = this.clockPaused && this.clockT <= 0;
+    const inInterior = this.interiorPhase || this.clockT <= 0;
     this.cityPanel.open({
       cityName,
       data: this.data,
@@ -2574,11 +2584,16 @@ export class CampaignRoot extends Component {
         this.cityPanel?.hide();
         // [R227] 原作「離開內政」＝ T 重設 3600（0x41BBF5）；玩家用「返回」關掉城內頁時同樣處理，
         // 否則 T=0 會立刻再把內政頁彈回來。
-        if (this.clockT <= 0) {
-          this.clockT = 3600;
-          this.clockAcc = 0;
+        if (this.interiorPhase) {
+          // [R231b] 内政阶段按「内政终了」/关页 = 原作 0x41BBF5：T 重设 3600、时间开始流动
+          this.endInterior();
+        } else {
+          if (this.clockT <= 0) {
+            this.clockT = 3600;
+            this.clockAcc = 0;
+          }
+          this.clockPaused = false;
         }
-        this.clockPaused = false;
         this.hintText = `${cityName}：內政已更新（國庫 ${GameState.nationalGold()} 金）。`;
         this.refresh();
       },
@@ -2694,6 +2709,7 @@ export class CampaignRoot extends Component {
   private enterInterior(): void {
     if (!this.save || this.clockPaused) return;
     this.clockPaused = true;
+    this.interiorPhase = true;
     this.clockT = 0;
     const home = this.selected ?? this.save.owned[0] ?? '';
     this.pushBattleLog([
@@ -2710,6 +2726,7 @@ export class CampaignRoot extends Component {
    */
   private endInterior(): void {
     if (!this.save) return;
+    this.interiorPhase = false;
     this.clockPaused = false;
     this.clockT = 3600;
     this.clockAcc = 0;
