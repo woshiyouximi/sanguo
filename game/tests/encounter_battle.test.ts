@@ -59,7 +59,7 @@ function fnBody(src: string, name: string): string {
 const ADVANCE = fnBody(COCOS, 'advanceArmiesMonth');
 const START_BATTLE = fnBody(COCOS, 'startEncounterBattle');
 const APPLY = fnBody(COCOS, 'applyPendingEncounter');
-const END_INTERIOR = fnBody(COCOS, 'endInterior');
+const MONTH_TICK = fnBody(COCOS, 'monthTick');
 const START = fnBody(COCOS, 'start');
 
 test('源码契约：純邏輯區 [[ENCOUNTER_CORE]] 存在，且 AUTO_ENCOUNTER 默認 false', () => {
@@ -116,12 +116,12 @@ test('源码契约：戰後回寫函數存在（寫 lastBattle + 復原勝方部
   assert.ok(atApply < atFlow, 'applyPendingEncounter() 必須排在 resolveCaptureFlow() 之前（先寫 lastBattle）');
 });
 
-test('源码契约：endInterior() 遇戰立刻收手（不繼續跑剩餘月份/AI）', () => {
-  assert.ok(END_INTERIOR, '找不到 endInterior()');
-  assert.ok(END_INTERIOR.includes('moved.battle'), 'endInterior() 沒檢查 moved.battle');
-  const atCheck = END_INTERIOR.indexOf('moved.battle');
-  const atAi = END_INTERIOR.indexOf('this.runMapAi()');
-  assert.ok(atCheck >= 0 && atAi >= 0, 'endInterior() 找不到 moved.battle 或 runMapAi');
+test('源码契约：monthTick() 遇戰立刻收手（不繼續跑剩餘月份/AI）', () => {
+  assert.ok(MONTH_TICK, '找不到 monthTick()');
+  assert.ok(MONTH_TICK.includes('moved.battle'), 'monthTick() 沒檢查 moved.battle');
+  const atCheck = MONTH_TICK.indexOf('moved.battle');
+  const atAi = MONTH_TICK.indexOf('this.runMapAi()');
+  assert.ok(atCheck >= 0 && atAi >= 0, 'monthTick() 找不到 moved.battle 或 runMapAi');
   assert.ok(atCheck < atAi, 'moved.battle 早退必須排在 runMapAi() 之前');
 });
 

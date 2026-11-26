@@ -100,7 +100,7 @@ test('F-07 DeployRoot：武將卡角標 + 主將區/隊列面板三檔按鈕都�
   // 12 張將卡的角標（默認中列由 colOf() 給）
   assert.match(src, /this\.genColLabels\.push\(this\.makeLabel\('', 0, 0, 30, 12, COLORS\.textFaint, 'right'\)\);/);
   assert.match(src, /colLabel\.string = COL_LABEL\[col\];/);
-  assert.match(src, /colLabel\.node\.setPosition\(x \+ GEN_W - 16 - HALF_W, HALF_H - \(y \+ 9\), 0\);/);
+  assert.match(src, /colLabel\.node\.setPosition\(x \+ GEN_W - 34 - HALF_W, HALF_H - \(y \+ 9\), 0\);/);
   // 主將區右上角三檔
   assert.match(src, /private drawMainCols\(g: Graphics\): void \{/);
   assert.match(src, /this\.drawMainCols\(ui\);/);

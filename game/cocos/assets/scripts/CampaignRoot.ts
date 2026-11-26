@@ -1534,6 +1534,21 @@ export class CampaignRoot extends Component {
 
   private labelTitle: Label | null = null;
   private labelMonth: Label | null = null;
+  /**
+   * [R225] 原作大地图时钟（`work/units_per_side/Sango2.exe` 反汇编）：
+   *   `0x41B6C1 subl $1` 每帧 `T -= 1`；`0x41B849=3600` 一帧一年、`0x41B855=300` 一月、`0x41B879=10` 一日；
+   *   `0x41B7F2` 用 `month = (3600-T)/300+1` 现算显示月份（原作没有「月份推进函数」）；
+   *   `T == 0`（`0x41B6CF`）→ 置「内政时间到了」并 `SetScene(0x48CD50=内政)`；
+   *   `0x41BBF5`（内政終了回调）只做 `T = 3600` + 切回大地图，**不跑任何模拟**。
+   * 所以这里也必须是「每帧减 1」的活时钟，而不是按下按钮一次跑 12 个月。
+   */
+  private clockT = 3600;
+  /** 60Hz 累加器：原作逐帧减 1，我们用固定步长把帧率差异吃掉 */
+  private clockAcc = 0;
+  /** 每帧推进的 tick 数（原作 `[0x4A64F8]`，命令行 atoi；默认 1） */
+  private clockSpeed = 1;
+  /** 时钟暂停：内政页开着 / 任一模态暗幕开着 / 场景即将切换 */
+  private clockPaused = false;
   /** 頁頭左側「君主 X」：可點，開君主屬性卡（v16-cocos-monarch） */
   private labelMonarch: Label | null = null;
   private labelStats: Label | null = null;
@@ -2326,7 +2341,7 @@ export class CampaignRoot extends Component {
       // 舊標題「推進一月」是本次要修掉的 bug：原生包按了只走 1 個月，玩家才回報「還是按月推進」。
       const advance: Action = {
         kind: 'advance',
-        title: '內 政 終 了',
+        title: this.clockPaused ? '內 政 終 了' : '時 間 流 動',
         caption: `結束內政 · 稅入 +${this.income()}`,
         primary: false,
         enabled: true,
@@ -2497,6 +2512,7 @@ export class CampaignRoot extends Component {
     // [P0-2] garrison.json 是 DataLoader 的**可選**增強表：載到了才傳（沒有就讓城 Model 回落 110）
     const garrisonRaw = (this.data as unknown as { garrison?: unknown }).garrison;
     const garrison = Array.isArray(garrisonRaw) ? (garrisonRaw as GarrisonScenario[]) : null;
+    this.clockPaused = true;
     this.cityPanel.open({
       cityName,
       data: this.data,
@@ -2513,6 +2529,7 @@ export class CampaignRoot extends Component {
         // 關面板時把兩份名單與 `cities[城].officers` 同步一次，物品頁/名冊頁立刻同口徑。
         this.seedRuntimeOfficers();
         this.cityPanel?.hide();
+        this.clockPaused = false;
         this.hintText = `${cityName}：內政已更新（國庫 ${GameState.nationalGold()} 金）。`;
         this.refresh();
       },
@@ -2542,68 +2559,126 @@ export class CampaignRoot extends Component {
    * 面板內部的閘門見 `CityPanel.runCommand`（正月門 + 逐將年令）。
    * `GameState.advanceSteps()` 在 `sanguo_adv_single='1'` 時只走 1 個月（對照 web `?adv=1`）。
    */
-  private endInterior(): void {
-    if (!this.save) return;
-    const from = this.save.month;
-    const steps = GameState.advanceSteps(from);
-    let income = 0;
-    let stillCount = 0;
-    const incoming = new Set<string>();
-    for (let i = 0; i < steps; i += 1) {
-      income += GameState.advanceMonth(this.cities, { data: this.data });
-      // 順序與單月推進完全一致：先讓在途部隊走完這個月，再讓 AI 出兵（新部隊 progress=0），
-      // 否則本月新出的兵會立刻抵達，跑一年時玩家看不到「行軍中」這一步。
-      const moved = this.advanceArmiesMonth();
-      // [F-06] 遭遇戰已把場景切到 Battle（`GameState.startBattle` 裡 `director.loadScene('Battle')`）：
-      // 本函式必須馬上收手——否則剩下的月份/AI 月結算會在本幀繼續寫存檔，回大地圖時就對不上
-      // 開戰前的 wins/losses 快照（戰後回寫靠 `applyPendingEncounter()` 的增量判定）。
-      if (moved.battle) {
-        this.save = GameState.loadSave();
-        if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
-        this.hintText = this.clampHint('遭 遇 戰：已進入戰場（戰鬥結算後回到大地圖）。', 160);
-        this.refresh();
-        return;
-      }
-      const ai = this.runMapAi();
-      if (!ai) this.spawnRaid();
-      this.save = GameState.loadSave();
-      this.recordAiBattleLog(ai);
-      if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
-      stillCount = moved.still.length;
-      for (const row of ai?.incoming ?? []) incoming.add(row.to);
+  /**
+   * [R225] 原作时钟：每帧 `T -= 1`（`0x41B6C1`），跨过 300 的整数倍就是一个月，`T == 0` 进内政。
+   *
+   * 与旧实现的差别（旧实现在 `endInterior()` 里一次帧内 for 循环跑 12 个月）：
+   *   - 时间由 `update(dt)` 驱动，玩家能看见月份一周一周走、兵团一格一格挪；
+   *   - 月度结算（年税/补兵/行军/AI）只在**月边界**跑一次；
+   *   - 「內 政 終 了」只把 `T` 重设 3600 并恢复时钟（原作 `0x41BBF5`），不做模拟。
+   */
+  update(dt: number): void {
+    if (!this.save || !this.clockRunning()) return;
+    // 60Hz 固定步长：原作逐帧减 1，60fps ≈ 一秒 60 tick（一年 60 秒、一月 5 秒）
+    const step = 1 / 60;
+    this.clockAcc += Math.min(dt, 0.25);
+    let guard = 0;
+    while (this.clockAcc >= step && guard < 240) {
+      this.clockAcc -= step;
+      guard += 1;
+      this.stepClock(this.clockSpeed);
+      // stepClock 可能开内政页 / 切战场，此时立刻收手
+      if (!this.clockRunning()) return;
     }
-    const save = this.save;
-    const arrived = save.owned
+  }
+
+  /** 时钟能不能走：内政页/模态暗幕/无存档都不走（原作内政场景不碰 T） */
+  private clockRunning(): boolean {
+    if (!this.save) return false;
+    if (this.clockPaused) return false;
+    if (this.cityPanel?.isOpen()) return false;
+    if (this.node.children.some((c) => c.name.startsWith('Scrim_'))) return false;
+    return true;
+  }
+
+  /** 推进 n 个 tick：跨月结算 + T==0 进内政（原作 `0x41B6C1` / `0x41B6CF`） */
+  private stepClock(n: number): void {
+    if (!this.save || n <= 0) return;
+    const before = this.clockT;
+    this.clockT = Math.max(0, this.clockT - n);
+    const monthBefore = Math.floor((3600 - before) / 300);
+    const monthAfter = Math.floor((3600 - this.clockT) / 300);
+    for (let m = monthBefore + 1; m <= monthAfter; m += 1) {
+      if (!this.monthTick()) return;
+    }
+    if (this.clockT <= 0) this.enterInterior();
+  }
+
+  /**
+   * 月边界的一次结算（旧 `endInterior()` 循环体逐月搬过来，顺序完全一致）：
+   * 年税/补兵 → 我军行军/抵达 → AI 月结算 → 战报。
+   * 返回 false 表示中途切了战场（本 tick 不再继续）。
+   */
+  private monthTick(): boolean {
+    if (!this.save) return false;
+    const from = this.save.month;
+    const income = GameState.advanceMonth(this.cities, { data: this.data });
+    const moved = this.advanceArmiesMonth();
+    if (moved.battle) {
+      this.save = GameState.loadSave();
+      if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
+      this.clockPaused = true;
+      this.hintText = this.clampHint('遭 遇 戰：已進入戰場（戰鬥結算後回到大地圖）。', 160);
+      this.refresh();
+      return false;
+    }
+    const ai = this.runMapAi();
+    if (!ai) this.spawnRaid();
+    this.save = GameState.loadSave();
+    this.recordAiBattleLog(ai);
+    if (moved.logs.length > 0) this.pushBattleLog(moved.logs);
+    const arriving = this.save.owned
       .map((city) => GameState.arrivedAt(city, 'B').map((army) => ({ army, city })))
       .reduce((acc, list) => acc.concat(list), [] as Array<{ army: Army; city: string }>);
-    const notes: string[] = [];
-    if (arrived.length > 0) {
-      notes.push(`敵軍已到 ${arrived[0].city} 城下：點該城 →「守 城 戰」。`);
-    } else if (stillCount > 0) {
-      notes.push(`行軍中 ${stillCount} 支。`);
+    if (arriving.length > 0 && this.clockT > 300) {
+      this.hintText = this.clampHint(`敵軍已到 ${arriving[0].city} 城下：點該城 →「守 城 戰」。`, 160);
+    } else if (income > 0) {
+      this.hintText = this.clampHint(`${from} 月 → ${this.save.month} 月：稅入 +${income} 金。`, 160);
     }
-    if (incoming.size > 0) {
-      notes.push(`AI 出兵 ${incoming.size} 路，來犯：${Array.from(incoming).slice(0, 3).join('、')}。`);
-    }
-    // web 的兩行 pushLog（2517-2533）在 Cocos 落到戰報：同樣的句子、用出擊月份的戳。
-    this.pushBattleLog([
-      battleLogLine(from, '內 政 終 了：本年內政窗口收束（原作 0x427FE0 → 0x41BBF5）', 'year'),
-      battleLogLine(from, `大 地 圖：結束內政 → 跑完一年（${from} 月 → ${save.month} 月）`, 'year'),
-    ]);
-    this.hintText = this.clampHint(
-      `內 政 終 了：跑完 ${steps} 個月（${from} 月 → ${save.month} 月）· 稅入 +${income} 金。${notes.join('')}`,
-      160,
-    );
     this.refresh();
-    this.checkMonarchDeath();
+    return true;
+  }
+
+  /** 原作 `T == 0`：进内政（年份在进内政时 +1，`0x4238BB`）；这里開城內頁代替「内政场景」 */
+  private enterInterior(): void {
+    if (!this.save || this.clockPaused) return;
+    this.clockPaused = true;
+    this.clockT = 0;
+    const home = this.selected ?? this.save.owned[0] ?? '';
+    this.pushBattleLog([
+      battleLogLine(this.save.month, '時 間：本年走完（原作 T=0 · 0x41B6CF）→ 進內政', 'year'),
+    ]);
+    this.hintText = this.clampHint('內政時間到了（原作一年 = 3600 tick）：處理完點「返回」回大地圖。', 160);
+    this.refresh();
+    if (home) this.openCityPanel(home);
+  }
+
+  /**
+   * [R225] 「內 政 終 了」＝ 原作 `0x41BBF5`：把 `T` 重设 3600、清队伍状态、切回大地图。
+   * **不跑任何月份模拟**（旧实现一次跑 12 个月，用户实测抱怨的点）。
+   */
+  private endInterior(): void {
+    if (!this.save) return;
+    this.clockPaused = false;
+    this.clockT = 3600;
+    this.clockAcc = 0;
+    this.pushBattleLog([
+      battleLogLine(this.save.month, '內 政 終 了：時間開始流動（原作 0x41BBF5 → T=3600）', 'year'),
+    ]);
+    this.hintText = this.clampHint('內 政 終 了：時間開始流動（一年 ≈ 60 秒，一月 ≈ 5 秒）。', 160);
+    this.refresh();
   }
 
   private doAction(kind: ActionKind): void {
     if (!this.save) return;
     if (kind === 'advance') {
-      // [F4] 內政終了 = 推進一年（web `campaign.html:2517-2533 endMonth()` → `advanceMonth(12)`）。
-      // 舊碼這裡只走一個月（`GameState.advanceMonth` 一次），原生包因此「按月推進」，
-      // 用戶實測抱怨的就是這點。全年推進的逐月結算搬到 `endInterior()`。
+      // [R225] 原作這顆按鈕只屬於內政場景（`0x41BBF5`：T 重設 3600 後切回大地圖）。
+      // 時鐘在走（不在內政）時點它 → 忽略，否則會把 T 歸零、白等一年。
+      if (!this.clockPaused) {
+        this.hintText = this.clampHint('時間正在流動：等內政時間到了再處理內政。', 160);
+        this.refresh();
+        return;
+      }
       this.endInterior();
       return;
     }

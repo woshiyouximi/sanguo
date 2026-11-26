@@ -113,31 +113,43 @@ test('[F4] Cocos GameState：正月→次年正月的月數公式 + 單月調試
   assert.match(advSteps, /advSingleMonth\(\) \? 1 : monthsToNextJanuary\(month\)/);
 });
 
-test('[F4] Cocos CampaignRoot：doAction("advance") 走 endInterior()，逐月結算不是月份 +12', () => {
+test('[F4][R225] 時間由 update(dt) 的原作時鐘推進（endInterior 只重設 T）', () => {
   const src = cocos('CampaignRoot.ts');
 
-  // 入口：advance 分支必須轉呼叫 endInterior()，舊的單月代碼不能還在
+  // 入口：advance 仍轉呼叫 endInterior()（原作 0x41BBF5 的那顆按鈕）
   const doAction = fnBody(src, 'doAction');
   assert.match(doAction, /kind === 'advance'[\s\S]{0,400}this\.endInterior\(\);/);
-  assert.doesNotMatch(doAction, /kind === 'advance'[\s\S]{0,400}GameState\.advanceMonth\(this\.cities\)/);
 
-  // 主體：逐月 loop，每月依序 advanceMonth → advanceArmiesMonth → runMapAi
+  // endInterior（原作 0x41BBF5）＝ 只把 T 重設 3600 + 恢復時鐘，**不跑模擬**
   const end = fnBody(src, 'endInterior');
-  assert.ok(end.length > 300, 'CampaignRoot.ts 缺 endInterior()');
-  assert.match(end, /const steps = GameState\.advanceSteps\(from\);/);
-  assert.match(end, /for \(let i = 0; i < steps; i \+= 1\) \{/);
-  const a = end.indexOf('GameState.advanceMonth(this.cities');
-  const b = end.indexOf('this.advanceArmiesMonth()');
-  const c = end.indexOf('this.runMapAi()');
-  assert.ok(a > 0 && b > a && c > b, 'endInterior() 的逐月順序必須是 advanceMonth → advanceArmiesMonth → runMapAi');
-  // 兩行 web 同文案日誌
-  assert.match(end, /內 政 終 了：本年內政窗口收束/);
-  assert.match(end, /大 地 圖：結束內政 → 跑完一年/);
+  assert.ok(end.length > 100, 'CampaignRoot.ts 缺 endInterior()');
+  assert.match(end, /this\.clockT = 3600;/);
+  assert.match(end, /this\.clockPaused = false;/);
+  assert.doesNotMatch(end, /for \(let i = 0; i < steps; i \+= 1\)/, 'endInterior() 不能再一次性跑 12 個月');
 
-  // 五處按鈕文案改成「內 政 終 了」，舊標題清乾淨
+  // 時鐘本體：update(dt) → stepClock → monthTick（每月一次結算）
+  assert.match(src, /update\(dt: number\): void \{/);
+  assert.match(src, /this\.stepClock\(this\.clockSpeed\)/);
+  assert.match(src, /this\.clockT = Math\.max\(0, this\.clockT - n\);/);
+  assert.match(src, /private stepClock\(n: number\): void \{/);
+  assert.match(src, /private monthTick\(\): boolean \{/);
+  const tickStart = src.indexOf('private monthTick(): boolean {');
+  assert.ok(tickStart > 0, '缺 monthTick()');
+  const tick = src.slice(tickStart, src.indexOf('private enterInterior', tickStart));
+  const a = tick.indexOf('GameState.advanceMonth(this.cities');
+  const b = tick.indexOf('this.advanceArmiesMonth()');
+  const c = tick.indexOf('this.runMapAi()');
+  assert.ok(a > 0 && b > a && c > b, 'monthTick() 的順序必須是 advanceMonth → advanceArmiesMonth → runMapAi');
+  // 原作常量：一年 3600 tick（0x41B849）
+  assert.match(src, /private clockT = 3600;/);
+  // T==0 → 進內政（原作 0x41B6CF）
+  assert.match(src, /private enterInterior\(\): void \{/);
+  assert.match(src, /openCityPanel\(home\);/);
+
+  // 按鈕文案仍是「內 政 終 了」
   assert.doesNotMatch(src, /title: '推進一月'/);
-  assert.match(src, /title: '內 政 終 了',\s*\n\s*caption: `結束內政 · 稅入 \+\$\{this\.income\(\)\}`/);
-  assert.match(src, /title: '內 政 終 了', caption: '結束內政 · 跑完一年'/);
+  assert.match(src, /title: '內 政 終 了'/);
+
 });
 
 test('[F4] Cocos 稅入預覽與 web annualTax 同口徑（跳過關城）', () => {
