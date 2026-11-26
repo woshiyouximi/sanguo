@@ -543,7 +543,7 @@ export class BattleRoot extends Component {
     const line = seq[this.tauntI];
     if (!line) return;
     const name = line.side === 'B' ? this.world?.sides.B.general?.name : this.world?.sides.A.general?.name;
-    this.hud?.showTaunt(name || (line.side === 'B' ? '敵將' : '我將'), line.text);
+    this.hud?.showTaunt(name || (line.side === 'B' ? '敵將' : '我將'), line.text, line.side);
   }
 
   /** 每幀推進叫陣；真正在演的期間回 true（update 用它擋掉 step）。 */

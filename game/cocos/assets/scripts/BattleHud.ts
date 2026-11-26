@@ -190,6 +190,8 @@ export type HudTex = 'slot' | 'slot_off' | 'cmd_on' | 'cmd_off' | 'port' | 'msg'
 /** 开场叫阵台词框：几何照 web `battleView.ts`，但全图版把镜头拉远后上移到无人区，
  *  免得盖住我方主将的头像牌（设计坐标，左上角起） */
 export const TAUNT_BANNER = { x: 40, y: 640, w: 670, h: 138 };
+/** 敵將叫陣時框的位置：挪到敵方主將下方（不蓋住他的頭像牌） */
+export const ENEMY_TAUNT_Y = 360;
 
 /**
  * 每张图的九宫内缩（= 原图边框宽度，见 `work\battleui\_make.py`）。
@@ -495,6 +497,8 @@ export class BattleHud {
   private readonly tauntWho: Label;
   private readonly tauntTag: Label;
   private readonly tauntLine: Label;
+  /** 三个叫阵 Label 的基准 y（按说话方上下挪框时用） */
+  private tauntLabelsBase: Array<{ node: Node; y: number }> = [];
   private readonly slotSprites: Sprite[] = [];
   private readonly assaultSprite: Sprite;
   private readonly retreatSprite: Sprite;
@@ -663,6 +667,9 @@ export class BattleHud {
     // 三个 Label 挂在 consoleRoot 上（不在 tauntRoot 里，避免摆位受父节点缩放影响），
     // 所以收起时必须逐个关——R212 首验只关了底板，播完还剩「關羽 / 叫 陣 / 台词」浮在阵上。
     this.setTauntLabels(false);
+    // 谁喊话，框就挪到谁那一侧：我方在 640（默认），敌方挪到战场另一头
+    this.tauntLabelsBase = [this.tauntWho.node, this.tauntTag.node, this.tauntLine.node]
+      .map((node) => ({ node, y: node.position.y }));
 
     // ---- 主将信息块（web drawConsole：名字 116,1036 / 武智 1052 / 在陣右對齊 366,1036）----
     // 坐标对齐说明：web 的 `fillText` 给的是**基线**，Cocos 的 `placeOn` 给的是**盒中心**
@@ -1238,9 +1245,15 @@ export class BattleHud {
    * x40 y790 w670 h138 同几何），左上角说话方名牌 + 右侧「叫陣」小字。
    * 只在叫阵期间显示，播完由 `hideTaunt()` 收掉——战斗控制台不受影响。
    */
-  showTaunt(who: string, line: string): void {
+  showTaunt(who: string, line: string, side: 'A' | 'B' = 'A'): void {
     this.tauntWho.string = who || '';
     this.tauntLine.string = line || '';
+    // 敌方喊话：整块框（底板 + 三个 Label）上移到敌方一侧
+    const dy = side === 'B' ? TAUNT_BANNER.y - ENEMY_TAUNT_Y : 0;
+    this.tauntRoot.setPosition(0, dy, 0);
+    for (const base of this.tauntLabelsBase) {
+      base.node.setPosition(base.node.position.x, base.y + dy, 0);
+    }
     this.tauntRoot.active = true;
     this.setTauntLabels(true);
   }
