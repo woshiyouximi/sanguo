@@ -697,6 +697,9 @@ export function initCampaign(
     //   `armies` —— 行军中的部队（新局不该有）
     // 不清 `wins/losses/streak`：那是玩家战绩，跨局保留（与 web `saves.js` 的 legacy 计分同义）。
     clearRunScoped(save);
+    // [R226b] 新局必須從 1 月起算：`month` 是存檔欄位，不歸 1 的話新局會接上一局的月份
+    // （用戶實測：開新局進來已經是「第 2 年 1 月」）。年份由劇本起始年 + month 現算，不用另清。
+    save.month = 1;
   }
   if (key !== '') save.runKey = key;
   if (!save.seeded) {

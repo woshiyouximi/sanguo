@@ -1755,6 +1755,20 @@ export class CampaignRoot extends Component {
       this.scenIdx = sci;
       // R214c：先取出「这一局是不是刚按的开始新局」，initCampaign 与后面自动开内政都要用
       const freshRun = consumeFreshStart();
+    // [R226b] 新局把「時間 / 戰報 / 對峙記錄」一併歸零，否則會沿用上一局的年份、戰報與時鐘。
+    if (freshRun) {
+      try {
+        sys.localStorage.removeItem(BATTLE_LOG_KEY);
+      } catch {
+        // 原生 localstorage 不可用時忽略：下面 `this.battleLog` 也會清
+      }
+      this.battleLog = [];
+      this.clockT = 3600;
+      this.clockAcc = 0;
+      this.clockPaused = true;
+      this.arrivedNoticed.clear();
+      this.stationNoticed.clear();
+    }
       const scenario = (data.scenarios[sci] ?? data.scenarios[0]) as unknown as CampaignScenario | undefined;
       if (!scenario || !Array.isArray(scenario.cities)) {
         throw new Error('scenarios[0].cities 為空，請確認 bundles/res/data/scenarios.json');
